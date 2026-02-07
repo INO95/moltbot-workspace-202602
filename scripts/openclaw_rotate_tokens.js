@@ -51,8 +51,12 @@ function run() {
     upsertEnv(lines, 'OPENCLAW_GATEWAY_TOKEN', mainToken);
     upsertEnv(lines, 'OPENCLAW_GATEWAY_TOKEN_SUB1', subToken);
 
+    // Backup with redacted secrets to prevent credential exposure
     backup = `${ENV_PATH}.bak.${Date.now()}`;
-    fs.writeFileSync(backup, raw, 'utf8');
+    const redactedRaw = raw
+      .replace(/^OPENCLAW_GATEWAY_TOKEN=.*/gm, 'OPENCLAW_GATEWAY_TOKEN=[REDACTED]')
+      .replace(/^OPENCLAW_GATEWAY_TOKEN_SUB1=.*/gm, 'OPENCLAW_GATEWAY_TOKEN_SUB1=[REDACTED]');
+    fs.writeFileSync(backup, redactedRaw, 'utf8');
     fs.writeFileSync(ENV_PATH, `${lines.join('\n').replace(/\n+$/, '')}\n`, 'utf8');
 
     execSync('node scripts/openclaw_config_secrets.js inject all', { cwd: ROOT, stdio: 'ignore' });

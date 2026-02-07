@@ -56,9 +56,9 @@ function allowNoAuth() {
 function isAuthorized(req, urlObj) {
   const required = requiredToken();
   if (!required) return allowNoAuth();
+  // Only accept token via header to prevent leakage in logs/Referer
   const header = String(req.headers['x-api-token'] || '').trim();
-  const query = String(urlObj.searchParams.get('token') || '').trim();
-  return header === required || query === required;
+  return header === required;
 }
 
 function guardAuth(req, res, urlObj) {
