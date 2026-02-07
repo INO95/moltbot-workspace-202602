@@ -1,0 +1,96 @@
+# Moltbot Docker Environment
+# 다중 OpenClaw 컨테이너 관리용
+
+services:
+  # 메인 Moltbot - 텔레그램 연동
+  moltbot-main:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moltbot-main
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - INSTANCE_NAME=main
+      - TZ=Asia/Tokyo
+    volumes:
+      - ../data:/app/data:rw
+      - ../scripts:/app/scripts:ro
+      - ./config/main:/app/config:ro
+    networks:
+      - moltbot-network
+    security_opt:
+      - no-new-privileges:true
+    # 리소스 제한
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # TOEIC 학습 전용 인스턴스
+  moltbot-toeic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moltbot-toeic
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - INSTANCE_NAME=toeic
+      - TZ=Asia/Tokyo
+    volumes:
+      - ../data:/app/data:rw
+      - ../scripts:/app/scripts:ro
+      - ./config/toeic:/app/config:ro
+    networks:
+      - moltbot-isolated
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # 개발/실험용 인스턴스 (격리됨)
+  moltbot-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moltbot-dev
+    restart: "no"
+    environment:
+      - NODE_ENV=development
+      - INSTANCE_NAME=dev
+      - TZ=Asia/Tokyo
+    volumes:
+      - ../data:/app/data:rw
+      - ../scripts:/app/scripts:rw
+      - ./config/dev:/app/config:ro
+    networks:
+      - moltbot-isolated
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+networks:
+  # 메인 네트워크 - 외부 접근 허용
+  moltbot-network:
+    driver: bridge
+  
+  # 격리된 네트워크 - 내부 전용
+  moltbot-isolated:
+    driver: bridge
+    internal: true
+
+volumes:
+  moltbot-data:
+    driver: local

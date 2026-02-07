@@ -1,0 +1,13 @@
+{
+    "instance": "dev",
+    "description": "개발/실험용 - 새 기능 테스트",
+    "features": {
+        "all": true,
+        "experimental": true
+    },
+    "limits": {
+        "maxDailyApiCalls": 100,
+        "allowShellCommands": true,
+        "allowFileWrite": true
+    }
+}

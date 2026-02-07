@@ -1,0 +1,56 @@
+services:
+  # 메인 OpenClaw - Telegram/Gemini 연동
+  openclaw-main:
+    image: openclaw:local
+    container_name: moltbot-main
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GOOGLE_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID}
+      OPENCLAW_GOOGLE_API_KEY: ${GEMINI_API_KEY}
+      OPENCLAW_GEMINI_API_KEY: ${GEMINI_API_KEY}
+    volumes:
+      - ./configs/main:/home/node/.openclaw:rw
+      - ./:/home/node/.openclaw/workspace:rw
+    ports:
+      - "18789:18789"
+      - "18790:18790"
+    init: true
+    restart: unless-stopped
+    networks:
+      - moltbot-network
+    command: [ "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789" ]
+
+  # 서브 OpenClaw
+  openclaw-sub1:
+    image: openclaw:local
+    container_name: moltbot-sub1
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_SUB1}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GOOGLE_API_KEY: ${GEMINI_API_KEY}
+    volumes:
+      - ./configs/sub1:/home/node/.openclaw:rw
+      - ./:/home/node/.openclaw/workspace:rw
+    ports:
+      - "18889:18789"
+      - "18890:18790"
+    init: true
+    restart: unless-stopped
+    networks:
+      - moltbot-network
+    command: [ "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789" ]
+    profiles:
+      - sub
+
+networks:
+  moltbot-network:
+    driver: bridge

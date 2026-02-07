@@ -1,0 +1,80 @@
+[
+  {
+    "input": "점심 외식 카레 식비 1000엔 현금",
+    "expect": {
+      "transactionType": "expense",
+      "isIncome": false,
+      "paymentMethod": "현금",
+      "category": "식비",
+      "amount": -1000
+    }
+  },
+  {
+    "input": "저녁 내가 총무로 계산 삼겹살집 8630엔 올리브 신용카드",
+    "expect": {
+      "transactionType": "expense_credit",
+      "isIncome": false,
+      "paymentMethod": "올리브 카드 (크레짓)",
+      "amount": -8630
+    }
+  },
+  {
+    "input": "저녁 산거 윤근이한테 현금으로 받음 3000엔",
+    "expect": {
+      "transactionType": "reimbursement_food",
+      "isIncome": true,
+      "category": "식비정산환급",
+      "amount": 3000
+    }
+  },
+  {
+    "input": "신용카드 대금 빠져나감 105200엔",
+    "expect": {
+      "transactionType": "credit_settlement",
+      "isIncome": false,
+      "category": "신용카드정산",
+      "paymentMethod": "스미토모",
+      "amount": -105200
+    }
+  },
+  {
+    "input": "월급 들어옴 295000엔",
+    "expect": {
+      "transactionType": "income_salary",
+      "isIncome": true,
+      "category": "급여",
+      "paymentMethod": "스미토모",
+      "amount": 295000
+    }
+  },
+  {
+    "input": "교통비 충전 3000엔 올리브 데빗",
+    "expect": {
+      "transactionType": "expense",
+      "isIncome": false,
+      "category": "교통",
+      "paymentMethod": "올리브 카드 (데빗)",
+      "amount": -3000
+    }
+  },
+  {
+    "input": "편의점 간식 1200엔 올리브 카드",
+    "expect": {
+      "transactionType": "expense_credit",
+      "isIncome": false,
+      "category": "식비",
+      "paymentMethod": "올리브 카드 (크레짓)",
+      "amount": -1200
+    }
+  },
+  {
+    "input": "교통비 충전 2500엔 올리브 카드 데빗",
+    "expect": {
+      "transactionType": "expense",
+      "isIncome": false,
+      "category": "교통",
+      "paymentMethod": "올리브 카드 (데빗)",
+      "amount": -2500
+    }
+  }
+]

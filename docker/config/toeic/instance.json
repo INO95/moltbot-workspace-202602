@@ -1,0 +1,29 @@
+{
+    "instance": "toeic",
+    "description": "TOEIC 학습 전용 - 문법 퀴즈, 오답 노트, Anki 연동",
+    "features": {
+        "toeicQuiz": true,
+        "ankiConnect": true,
+        "grammarAnalysis": true,
+        "progressTracking": true
+    },
+    "limits": {
+        "maxDailyApiCalls": 500,
+        "allowShellCommands": false,
+        "allowFileWrite": true
+    },
+    "toeic": {
+        "currentLevel": 700,
+        "targetLevel": 900,
+        "focusAreas": [
+            "grammar",
+            "part5",
+            "part6"
+        ],
+        "weeklyGoal": {
+            "grammarExercises": 50,
+            "mockTests": 2,
+            "vocabCards": 30
+        }
+    }
+}

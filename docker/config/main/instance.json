@@ -1,0 +1,15 @@
+{
+    "instance": "main",
+    "description": "메인 Moltbot - 텔레그램 연동, 가계부, 한일 관리",
+    "features": {
+        "finance": true,
+        "checklist": true,
+        "telegram": true,
+        "notifications": true
+    },
+    "limits": {
+        "maxDailyApiCalls": 1000,
+        "allowShellCommands": false,
+        "allowFileWrite": true
+    }
+}
