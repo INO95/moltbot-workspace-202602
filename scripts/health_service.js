@@ -19,7 +19,9 @@ function sqlValue(v) {
   if (v == null) return 'NULL';
   if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
   if (typeof v === 'boolean') return v ? '1' : '0';
-  const s = String(v).replace(/'/g, "''");
+  const s = String(v)
+    .replace(/\x00/g, '')        // Remove null bytes (SQL injection mitigation)
+    .replace(/'/g, "''");        // Escape single quotes
   return `'${s}'`;
 }
 
@@ -54,6 +56,11 @@ function runSqlCommandShim(dbPath, sql, json) {
   return spawnSync('python3', args, { encoding: 'utf8' });
 }
 
+function sleepSync(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* busy wait for sync context */ }
+}
+
 function runSql(dbPath = DEFAULT_DB_PATH, sql, { json = false } = {}) {
   ensureParent(dbPath);
   const maxRetry = 3;
@@ -70,6 +77,7 @@ function runSql(dbPath = DEFAULT_DB_PATH, sql, { json = false } = {}) {
     if (r.error || r.status !== 0) {
       const errText = String(r.stderr || r.error || 'sqlite3 error').trim();
       if (/database is locked/i.test(errText) && attempt < maxRetry) {
+        sleepSync(100 * Math.pow(2, attempt));  // Exponential backoff: 100ms, 200ms, 400ms
         continue;
       }
       throw new Error(errText);
@@ -147,14 +155,30 @@ function resolveUploadRoot() {
 function validateIncomingImagePath(imagePath) {
   const src = String(imagePath || '').trim();
   if (!src) return { ok: true, absPath: null, code: null };
-  const abs = path.resolve(src);
 
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+  // Check existence first before resolving symlinks
+  const resolved = path.resolve(src);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    return { ok: false, absPath: null, code: 'image_path_not_found' };
+  }
+
+  // Resolve symlinks to prevent path traversal attacks
+  let abs;
+  try {
+    abs = fs.realpathSync(resolved);
+  } catch {
     return { ok: false, absPath: null, code: 'image_path_not_found' };
   }
 
   const uploadRoot = resolveUploadRoot();
-  const rel = path.relative(uploadRoot, abs);
+  let resolvedRoot;
+  try {
+    resolvedRoot = fs.realpathSync(uploadRoot);
+  } catch {
+    resolvedRoot = uploadRoot;  // Fallback if root doesn't exist yet
+  }
+
+  const rel = path.relative(resolvedRoot, abs);
   const insideUploadRoot = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
   if (!insideUploadRoot) {
     return { ok: false, absPath: null, code: 'image_path_not_allowed' };
