@@ -4,31 +4,66 @@ const path = require('path');
 
 const repoRoot = path.join(__dirname, '..');
 const owner = 'INO95';
+const policyPath = process.env.MOLTBOT_PUBLISH_POLICY
+    ? path.resolve(process.env.MOLTBOT_PUBLISH_POLICY)
+    : path.join(repoRoot, 'policies/public_publish_policy.json');
 
-const blockedPublishPaths = [
-    /^configs\//,
-    /^data\//,
-    /^data\/secure\//,
-    /^docker\/openclaw-repo(\/|$)/,
-    /^\.env$/,
-    /^logs\//,
-    /^\.DS_Store$/,
-    /^notes\/\.DS_Store$/,
-];
+function compileRegexList(rawList, fallback) {
+    const list = Array.isArray(rawList) ? rawList : fallback;
+    return list.map(x => new RegExp(String(x)));
+}
 
-const allowedPublishPaths = [
-    /^scripts\//,
-    /^package\.json$/,
-    /^package-lock\.json$/,
-    /^docker-compose\.yml$/,
-    /^docker\/Dockerfile$/,
-    /^docker\/docker-compose\.yml$/,
-    /^docker\/config\/.+\.json$/,
-    /^docker\/moltbot\.sh$/,
-    /^\.github\/workflows\/.+\.ya?ml$/,
-    /^notes\/OPERATIONS_PLAYBOOK\.md$/,
-    /^notes\/EXTENSIBLE_ROADMAP\.md$/,
-];
+function loadPublishPolicy() {
+    const defaults = {
+        blockedPublishPaths: [
+            '^configs/',
+            '^data/',
+            '^data/secure/',
+            '^docker/openclaw-repo(/|$)',
+            '^\\.env$',
+            '^logs/',
+            '^\\.DS_Store$',
+            '^notes/\\.DS_Store$',
+        ],
+        allowedPublishPaths: [
+            '^scripts/',
+            '^package\\.json$',
+            '^package-lock\\.json$',
+            '^docker-compose\\.yml$',
+            '^docker/Dockerfile$',
+            '^docker/docker-compose\\.yml$',
+            '^docker/config/.+\\.json$',
+            '^docker/moltbot\\.sh$',
+            '^\\.github/workflows/.+\\.ya?ml$',
+            '^notes/OPERATIONS_PLAYBOOK\\.md$',
+            '^notes/EXTENSIBLE_ROADMAP\\.md$',
+            '^notes/PRIVACY_SPLIT_PLAYBOOK\\.md$',
+            '^policies/public_publish_policy\\.json$',
+        ],
+    };
+    if (!fs.existsSync(policyPath)) {
+        return {
+            blockedPublishPaths: compileRegexList(defaults.blockedPublishPaths, defaults.blockedPublishPaths),
+            allowedPublishPaths: compileRegexList(defaults.allowedPublishPaths, defaults.allowedPublishPaths),
+            source: 'defaults',
+        };
+    }
+
+    try {
+        const raw = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+        return {
+            blockedPublishPaths: compileRegexList(raw.blockedPublishPaths, defaults.blockedPublishPaths),
+            allowedPublishPaths: compileRegexList(raw.allowedPublishPaths, defaults.allowedPublishPaths),
+            source: policyPath,
+        };
+    } catch (error) {
+        throw new Error(`Invalid publish policy at ${policyPath}: ${String(error.message || error)}`);
+    }
+}
+
+const policy = loadPublishPolicy();
+const blockedPublishPaths = policy.blockedPublishPaths;
+const allowedPublishPaths = policy.allowedPublishPaths;
 
 const secretPatterns = [
     { name: 'openai_api_key', re: /\bsk-[A-Za-z0-9]{20,}\b/g },
@@ -240,6 +275,7 @@ function autoCommit(message = '') {
             message: commitMsg,
             skipped,
             skippedByAllowlist,
+            policySource: policy.source,
             allowlist: allowedPublishPaths.map(re => re.toString()),
         };
     } catch (error) {
@@ -250,6 +286,7 @@ function autoCommit(message = '') {
                 message: 'nothing to commit',
                 skipped,
                 skippedByAllowlist,
+                policySource: policy.source,
                 allowlist: allowedPublishPaths.map(re => re.toString()),
             };
         }

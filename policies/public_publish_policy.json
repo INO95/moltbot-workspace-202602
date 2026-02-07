@@ -1,0 +1,27 @@
+{
+  "blockedPublishPaths": [
+    "^configs/",
+    "^data/",
+    "^data/secure/",
+    "^docker/openclaw-repo(/|$)",
+    "^\\.env$",
+    "^logs/",
+    "^\\.DS_Store$",
+    "^notes/\\.DS_Store$"
+  ],
+  "allowedPublishPaths": [
+    "^scripts/",
+    "^package\\.json$",
+    "^package-lock\\.json$",
+    "^docker-compose\\.yml$",
+    "^docker/Dockerfile$",
+    "^docker/docker-compose\\.yml$",
+    "^docker/config/.+\\.json$",
+    "^docker/moltbot\\.sh$",
+    "^\\.github/workflows/.+\\.ya?ml$",
+    "^notes/OPERATIONS_PLAYBOOK\\.md$",
+    "^notes/EXTENSIBLE_ROADMAP\\.md$",
+    "^notes/PRIVACY_SPLIT_PLAYBOOK\\.md$",
+    "^policies/public_publish_policy\\.json$"
+  ]
+}
