@@ -26,6 +26,7 @@
     "private:bootstrap": "node scripts/private_repo_split.js bootstrap",
     "private:sync": "node scripts/private_repo_split.js sync",
     "private:sync-safe": "node scripts/private_sync_retry.js --retries 3 --delay 20 --max-delay 180",
+    "cron:guard-test-fail": "node scripts/cron_guard.js --job \"test-failure\" -- \"node -e \\\"process.exit(1)\\\"\"",
     "blog:publish": "node scripts/blog_publish_from_reports.js",
     "github:plan": "node scripts/github_repo_manager.js plan moltbot-workspace",
     "github:ensure": "node scripts/github_repo_manager.js ensure moltbot-workspace",
