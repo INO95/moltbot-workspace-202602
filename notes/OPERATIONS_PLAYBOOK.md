@@ -48,6 +48,7 @@
 - Prerequisite: GitHub CLI (`gh`) installed and authenticated.
 - Repo planning: `node scripts/github_repo_manager.js plan <project-name>`
 - Safe local commit: `node scripts/github_repo_manager.js commit "<message>"`
+- Public auto-commit policy file: `policies/public_publish_policy.json`
 - Private repo bootstrap: `node scripts/private_repo_split.js bootstrap`
 - Private repo sync: `node scripts/private_repo_split.js sync`
 - Blog draft from reports: `node scripts/blog_publish_from_reports.js`
@@ -55,6 +56,7 @@
 - Blog skip-window test: `node scripts/blog_publish_from_reports.js --hours 1 --no-deploy`
 - Blog translation path uses OpenClaw Codex OAuth (`openai-codex`) with high thinking.
 - Translator acquires a lock and restores the previous default model after each translation run.
+- `main` branch protection is configured to require `gitleaks` and `trufflehog` checks.
 
 ## Budget guard
 - Default paid API budget: 0 JPY.
