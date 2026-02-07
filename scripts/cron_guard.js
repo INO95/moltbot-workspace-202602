@@ -1,10 +1,12 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 const { enqueueBridgePayload } = require('./bridge_queue');
 
 const ROOT = path.join(__dirname, '..');
 const LOG_PATH = path.join(ROOT, 'logs/cron_guard_latest.json');
+const ENV_PATH = path.join(ROOT, '.env');
 
 function parseArgs(argv) {
     const args = { job: 'unknown-job', command: '' };
@@ -32,9 +34,55 @@ function nowIso() {
     return new Date().toISOString();
 }
 
+function loadDotEnv() {
+    if (!fs.existsSync(ENV_PATH)) return;
+    const lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
+    for (const line of lines) {
+        const t = String(line || '').trim();
+        if (!t || t.startsWith('#')) continue;
+        const idx = t.indexOf('=');
+        if (idx <= 0) continue;
+        const key = t.slice(0, idx).trim();
+        const value = t.slice(idx + 1).trim();
+        if (!process.env[key]) process.env[key] = value;
+    }
+}
+
 function truncate(text, limit = 1500) {
     const s = String(text || '');
     return s.length > limit ? `${s.slice(0, limit)}...` : s;
+}
+
+function oneLine(text, limit = 220) {
+    const raw = String(text || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return truncate(raw || '(empty)', limit);
+}
+
+function detectMode() {
+    const mode = String(process.env.CRON_GUARD_ALERT_MODE || 'short').trim().toLowerCase();
+    return mode === 'detailed' ? 'detailed' : 'short';
+}
+
+function formatAlertMessage({ job, command, code, stderr, at, mode }) {
+    const short = [
+        `[CRON FAIL] ${job}`,
+        `code=${code}`,
+        `time=${at}`,
+        `err=${oneLine(stderr)}`,
+    ].join(' | ');
+
+    if (mode !== 'detailed') return short;
+
+    return [
+        '[ALERT] cron job failed',
+        `job: ${job}`,
+        `exitCode: ${code}`,
+        `command: ${command}`,
+        `stderr: ${truncate(stderr || '(empty)')}`,
+        `time: ${at}`,
+    ].join('\n');
 }
 
 function appendLog(entry) {
@@ -42,23 +90,67 @@ function appendLog(entry) {
     fs.writeFileSync(LOG_PATH, JSON.stringify(entry, null, 2), 'utf8');
 }
 
+function appendAlertDeliveryLog(status, detail) {
+    const line = `[${nowIso()}] telegram_${status}: ${detail}\n`;
+    const logPath = path.join(ROOT, 'logs/cron_guard_telegram.log');
+    ensureDir(logPath);
+    fs.appendFileSync(logPath, line, 'utf8');
+}
+
 function sendAlert({ job, command, code, stderr }) {
-    const message = [
-        '[ALERT] cron job failed',
-        `job: ${job}`,
-        `exitCode: ${code}`,
-        `command: ${command}`,
-        `stderr: ${truncate(stderr || '(empty)')}`,
-        `time: ${nowIso()}`,
-    ].join('\n');
-    enqueueBridgePayload({
-        taskId: `cron-fail-${Date.now()}`,
-        command: message,
-        timestamp: nowIso(),
-        status: 'pending',
-        route: 'report',
-        source: 'cron-guard',
+    const at = nowIso();
+    const mode = detectMode();
+    const message = formatAlertMessage({
+        job, command, code, stderr, at, mode,
     });
+    try {
+        enqueueBridgePayload({
+            taskId: `cron-fail-${Date.now()}`,
+            command: message,
+            timestamp: at,
+            status: 'pending',
+            route: 'report',
+            source: 'cron-guard',
+        });
+    } catch {
+        // Alert delivery must not crash cron guard itself.
+    }
+    sendTelegramAlert(message);
+}
+
+function sendTelegramAlert(message) {
+    if (String(process.env.CRON_GUARD_DISABLE_TELEGRAM || '') === '1') return;
+    const token = process.env.TELEGRAM_BOT_TOKEN || '';
+    const chatId = process.env.TELEGRAM_USER_ID || '';
+    if (!token || !chatId) return;
+
+    const body = JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        disable_web_page_preview: true,
+    });
+    const req = https.request({
+        hostname: 'api.telegram.org',
+        path: `/bot${token}/sendMessage`,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: 7000,
+    }, res => {
+        if (!(res.statusCode >= 200 && res.statusCode < 300)) {
+            appendAlertDeliveryLog('failed', `http_${res.statusCode}`);
+        } else {
+            appendAlertDeliveryLog('ok', `http_${res.statusCode}`);
+        }
+        res.resume();
+    });
+    req.on('error', (e) => {
+        appendAlertDeliveryLog('failed', e.message || 'request_error');
+    });
+    req.write(body);
+    req.end();
 }
 
 function runCommand(command) {
@@ -88,6 +180,7 @@ function runCommand(command) {
 }
 
 function main() {
+    loadDotEnv();
     const { job, command } = parseArgs(process.argv);
     if (!command) {
         console.error('Usage: node scripts/cron_guard.js --job "<name>" -- <command>');
@@ -120,4 +213,3 @@ function main() {
 if (require.main === module) {
     main();
 }
-

@@ -4,11 +4,86 @@
  */
 
 // 각 모듈 로드
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const moltEngine = require('./molt_engine');
 const healthDashboard = require('./health_dashboard');
 const healthCapture = require('./health_capture');
 const financeManager = require('./finance_manager');
 const { enqueueBridgePayload } = require('./bridge_queue');
+const NIGHTLY_AUTOPILOT_LOG = path.join(__dirname, '..', 'logs', 'nightly_autopilot_latest.json');
+
+function httpGetJson(url) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, res => {
+            let raw = '';
+            res.on('data', chunk => { raw += chunk; });
+            res.on('end', () => {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`HTTP ${res.statusCode}`));
+                    return;
+                }
+                try {
+                    resolve(JSON.parse(raw));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        req.setTimeout(7000, () => req.destroy(new Error('weather timeout')));
+        req.on('error', reject);
+    });
+}
+
+function weatherCodeToKo(code) {
+    const map = {
+        0: '맑음',
+        1: '대체로 맑음',
+        2: '약간 흐림',
+        3: '흐림',
+        45: '안개',
+        48: '서리 안개',
+        51: '이슬비',
+        53: '약한 비',
+        55: '비',
+        61: '비',
+        63: '비',
+        65: '강한 비',
+        71: '눈',
+        73: '눈',
+        75: '강한 눈',
+        80: '소나기',
+        81: '소나기',
+        82: '강한 소나기',
+        95: '뇌우',
+    };
+    return map[code] || '날씨 정보';
+}
+
+async function fetchWeatherSummary() {
+    const lat = Number(process.env.MORNING_BRIEFING_WEATHER_LAT || 35.6764);
+    const lon = Number(process.env.MORNING_BRIEFING_WEATHER_LON || 139.6500);
+    const tz = process.env.MORNING_BRIEFING_TIMEZONE || 'Asia/Tokyo';
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&timezone=${encodeURIComponent(tz)}&current=temperature_2m,apparent_temperature,weather_code&daily=sunrise,sunset&forecast_days=1`;
+    const data = await httpGetJson(url);
+
+    const cw = data.current || {};
+    const daily = data.daily || {};
+    const sunrise = Array.isArray(daily.sunrise) && daily.sunrise[0] ? String(daily.sunrise[0]).slice(11, 16) : '--:--';
+    const sunset = Array.isArray(daily.sunset) && daily.sunset[0] ? String(daily.sunset[0]).slice(11, 16) : '--:--';
+    const temp = Number.isFinite(cw.temperature_2m) ? Math.round(cw.temperature_2m) : null;
+    const feels = Number.isFinite(cw.apparent_temperature) ? Math.round(cw.apparent_temperature) : null;
+    const desc = weatherCodeToKo(cw.weather_code);
+
+    return {
+        desc,
+        temp,
+        feels,
+        sunrise,
+        sunset,
+    };
+}
 
 async function generateMorningBriefing() {
     const now = new Date();
@@ -18,9 +93,17 @@ async function generateMorningBriefing() {
 
     let briefing = `🌅 **${dateStr} 아침 브리핑**\n\n`;
 
-    // 1. 날씨 (TODO: 실제 API 연동)
-    briefing += `☀️ **날씨**: 맑음, 12°C (체감 10°C)\n`;
-    briefing += `   일출 06:52 / 일몰 18:15\n\n`;
+    // 1. 날씨 (실시간 API, 실패 시 폴백)
+    try {
+        const weather = await fetchWeatherSummary();
+        const t = weather.temp == null ? '-' : `${weather.temp}°C`;
+        const f = weather.feels == null ? '-' : `${weather.feels}°C`;
+        briefing += `☀️ **날씨**: ${weather.desc}, ${t} (체감 ${f})\n`;
+        briefing += `   일출 ${weather.sunrise} / 일몰 ${weather.sunset}\n\n`;
+    } catch {
+        briefing += `☀️ **날씨**: 실시간 정보 조회 실패\n`;
+        briefing += `   일출 --:-- / 일몰 --:--\n\n`;
+    }
 
     // 2. 가계부 요약
     try {
@@ -81,6 +164,26 @@ async function generateMorningBriefing() {
     briefing += `   • Anki 복습 카드\n\n`;
 
     // 6. 마무리
+    // 6. 야간 자동개선 요약
+    try {
+        if (fs.existsSync(NIGHTLY_AUTOPILOT_LOG)) {
+            const raw = fs.readFileSync(NIGHTLY_AUTOPILOT_LOG, 'utf8');
+            const report = JSON.parse(raw);
+            const s = report && report.summary ? report.summary : null;
+            if (s) {
+                briefing += `🌙 **야간 자동개선 요약**\n`;
+                briefing += `   점검 ${s.total || 0}건 / 성공 ${s.ok || 0} / 실패 ${s.failed || 0}\n`;
+                if (Array.isArray(s.failedNames) && s.failedNames.length > 0) {
+                    briefing += `   실패 항목: ${s.failedNames.slice(0, 3).join(', ')}\n`;
+                }
+                briefing += `\n`;
+            }
+        }
+    } catch (_) {
+        // 야간 리포트 파싱 실패는 브리핑 본문을 막지 않는다.
+    }
+
+    // 7. 마무리
     briefing += `━━━━━━━━━━━━━━━━━━━━\n`;
     briefing += `좋은 하루 되세요! 🚀\n`;
     briefing += `_Powered by Moltbot + Antigravity_`;

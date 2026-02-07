@@ -17,9 +17,9 @@ class BlogAutomation {
 
         // 지원 언어
         this.languages = {
-            ko: { name: '한국어', dir: 'ko' },
+            en: { name: 'English', dir: 'en' },
             ja: { name: '日本語', dir: 'ja' },
-            en: { name: 'English', dir: 'en' }
+            ko: { name: '한국어', dir: 'ko' }
         };
     }
 
@@ -65,23 +65,56 @@ defaults:
     }
 
     // AI 활용 기록을 3개 국어로 포스트 생성
-    async createMultilingualPost(title, contentKo, tags = []) {
+    async createMultilingualPost(title, sourceContent, tags = [], options = {}) {
         this.initBlogStructure();
 
         const date = new Date().toISOString().split('T')[0];
         const slug = this.slugify(title);
+        const sourceLang = this.normalizeLanguageCode(options.sourceLang || 'ko');
+        const outputLangs = this.normalizeOutputLangs(options.langs, sourceLang);
+        const categories = Array.isArray(options.categories) && options.categories.length > 0
+            ? options.categories
+            : ['ai', 'automation'];
 
-        // Codex OAuth 번역 우선, 실패 시 안전 폴백.
-        const translations = {
-            ko: { title, content: contentKo },
-            ja: await this.translateOrFallback('Japanese', title, contentKo),
-            en: await this.translateOrFallback('English', title, contentKo),
-        };
+        const sourcePayload = { title, content: sourceContent };
+        const translations = {};
+
+        if (options.skipTranslation) {
+            for (const langCode of outputLangs) {
+                if (langCode === sourceLang) {
+                    translations[langCode] = sourcePayload;
+                } else {
+                    const tag = langCode.toUpperCase();
+                    translations[langCode] = {
+                        title: `[${tag}] ${title}`,
+                        content: sourceContent,
+                    };
+                }
+            }
+        } else {
+            for (const langCode of outputLangs) {
+                if (langCode === sourceLang) {
+                    translations[langCode] = sourcePayload;
+                    continue;
+                }
+                /* eslint-disable no-await-in-loop */
+                translations[langCode] = await this.translateOrFallback(
+                    this.getLanguageName(langCode),
+                    title,
+                    sourceContent,
+                    this.getLanguageName(sourceLang),
+                );
+            }
+        }
 
         const createdPosts = [];
 
-        for (const [langCode, translation] of Object.entries(translations)) {
-            const langDir = this.languages[langCode].dir;
+        for (const langCode of outputLangs) {
+            const translation = translations[langCode];
+            if (!translation) continue;
+            const langMeta = this.languages[langCode];
+            if (!langMeta) continue;
+            const langDir = langMeta.dir;
             const filename = `${date}-${slug}.md`;
             const filepath = path.join(this.postsDir, langDir, filename);
 
@@ -89,7 +122,7 @@ defaults:
 layout: post
 title: "${translation.title}"
 date: ${date}
-categories: [ai, automation]
+categories: [${categories.join(', ')}]
 tags: [${tags.join(', ')}]
 lang: ${langCode}
 ---
@@ -104,11 +137,44 @@ lang: ${langCode}
         return createdPosts;
     }
 
-    async translateOrFallback(targetLang, title, contentKo) {
+    // Basic target-language quality gate to avoid posting untranslated source text.
+    validateTargetLanguage(targetLang, title, content) {
+        const text = `${String(title || '')}\n${String(content || '')}`;
+        if (!text.trim()) {
+            return { ok: false, reason: 'empty_text' };
+        }
+        const totalChars = text.replace(/\s+/g, '').length || 1;
+        const hangulCount = (text.match(/[가-힣]/g) || []).length;
+        const jaCount = (text.match(/[ぁ-んァ-ン一-龯]/g) || []).length;
+        const latinCount = (text.match(/[A-Za-z]/g) || []).length;
+        const hangulRatio = hangulCount / totalChars;
+        const jaRatio = jaCount / totalChars;
+        const latinRatio = latinCount / totalChars;
+
+        if (targetLang === 'Japanese') {
+            if (jaRatio < 0.10) return { ok: false, reason: 'ja_chars_too_low' };
+            if (hangulRatio > 0.25) return { ok: false, reason: 'hangul_ratio_too_high_for_ja' };
+            return { ok: true };
+        }
+        if (targetLang === 'English') {
+            if (latinRatio < 0.25) return { ok: false, reason: 'latin_ratio_too_low_for_en' };
+            if (hangulRatio > 0.15) return { ok: false, reason: 'hangul_ratio_too_high_for_en' };
+            return { ok: true };
+        }
+        if (targetLang === 'Korean') {
+            if (hangulRatio < 0.18) return { ok: false, reason: 'hangul_ratio_too_low_for_ko' };
+            return { ok: true };
+        }
+        return { ok: true };
+    }
+
+    async translateOrFallback(targetLang, title, sourceContent, sourceLang = 'Korean') {
         // 1. Try local Codex Proxy first (port 3000)
         try {
-            const translated = await this.translateWithLocalProxy(targetLang, title, contentKo);
+            const translated = await this.translateWithLocalProxy(targetLang, sourceLang, title, sourceContent);
             if (translated.title && translated.content) {
+                const gate = this.validateTargetLanguage(targetLang, translated.title, translated.content);
+                if (!gate.ok) throw new Error(`language_gate_failed:${gate.reason}`);
                 console.log(`✅ Translated to ${targetLang} via local proxy`);
                 return translated;
             }
@@ -119,34 +185,36 @@ lang: ${langCode}
         // 2. Try Docker-based translation
         try {
             const translated = translateWithCodex({
-                sourceLang: 'Korean',
+                sourceLang,
                 targetLang,
                 title,
-                content: contentKo,
+                content: sourceContent,
                 thinking: 'high',
             });
             if (translated.title && translated.content) {
+                const gate = this.validateTargetLanguage(targetLang, translated.title, translated.content);
+                if (!gate.ok) throw new Error(`language_gate_failed:${gate.reason}`);
                 console.log(`✅ Translated to ${targetLang} via Docker`);
                 return { title: translated.title, content: translated.content };
             }
             throw new Error('empty translation');
         } catch (error) {
             console.log(`❌ Translation failed: ${error.message}`);
-            const langTag = targetLang === 'Japanese' ? 'JA' : 'EN';
+            const langTag = targetLang === 'Japanese' ? 'JA' : (targetLang === 'Korean' ? 'KO' : 'EN');
             const notice = targetLang === 'Japanese'
-                ? '*번역 실패로 한국어 원문을 첨부합니다.*'
-                : '*Translation failed; original Korean text is attached.*';
+                ? `*Translation failed; original ${sourceLang} text is attached.*`
+                : `*Translation failed; original ${sourceLang} text is attached.*`;
             return {
                 title: `[${langTag}] ${title}`,
-                content: `${notice}\n\n${contentKo}\n\n<!-- translation_error: ${String(error.message || '').replace(/-->/g, '')} -->`,
+                content: `${notice}\n\n${sourceContent}\n\n<!-- translation_error: ${String(error.message || '').replace(/-->/g, '')} -->`,
             };
         }
     }
 
     // Local Codex Proxy를 사용한 번역
-    async translateWithLocalProxy(targetLang, title, content) {
+    async translateWithLocalProxy(targetLang, sourceLang, title, content) {
         const http = require('http');
-        const prompt = `Translate the following Korean text to ${targetLang}. Preserve markdown formatting. Return JSON with "title" and "content" keys only.
+        const prompt = `Translate the following ${sourceLang} text to ${targetLang}. Preserve markdown formatting. Return JSON with "title" and "content" keys only.
 
 Input:
 Title: ${title}
@@ -186,6 +254,29 @@ Output (JSON only):`;
             req.write(postData);
             req.end();
         });
+    }
+
+    normalizeLanguageCode(code) {
+        const lang = String(code || '').trim().toLowerCase();
+        if (this.languages[lang]) return lang;
+        return 'ko';
+    }
+
+    normalizeOutputLangs(langs, sourceLang) {
+        const defaults = sourceLang === 'en' ? ['en', 'ja', 'ko'] : ['ko', 'ja', 'en'];
+        if (!Array.isArray(langs) || langs.length === 0) return defaults;
+        const normalized = langs
+            .map(code => this.normalizeLanguageCode(code))
+            .filter((code, idx, arr) => arr.indexOf(code) === idx);
+        if (!normalized.includes(sourceLang)) normalized.unshift(sourceLang);
+        return normalized;
+    }
+
+    getLanguageName(code) {
+        const normalized = this.normalizeLanguageCode(code);
+        if (normalized === 'en') return 'English';
+        if (normalized === 'ja') return 'Japanese';
+        return 'Korean';
     }
 
     // URL-friendly slug 생성
