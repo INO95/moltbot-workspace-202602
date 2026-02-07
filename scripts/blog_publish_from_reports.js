@@ -1,8 +1,38 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const blogAutomation = require('./blog_automation');
+const { buildMemoirPost } = require('./blog_memoir_builder');
+const { syncBlogMemoToNotion } = require('./notion_blog_sync');
 
 const reportsDir = path.join(__dirname, '../logs/reports');
+const publishStatePath = path.join(__dirname, '../data/blog_publish_state.json');
+const allowedModes = ['log', 'briefing', 'project'];
+
+function normalizeMode(input) {
+    const mode = String(input || '').trim().toLowerCase();
+    if (allowedModes.includes(mode)) return mode;
+    return 'briefing';
+}
+
+function parseLangsArg(value) {
+    if (!value) return [];
+    return String(value)
+        .split(',')
+        .map(x => x.trim().toLowerCase())
+        .filter(Boolean)
+        .filter((x, idx, arr) => arr.indexOf(x) === idx)
+        .filter(x => ['en', 'ja', 'ko'].includes(x));
+}
+
+function getDefaultLangsForMode(mode) {
+    if (normalizeMode(mode) === 'log') return ['en'];
+    return ['en', 'ja', 'ko'];
+}
+
+function shouldSyncToNotion({ category, lang }) {
+    return String(category || '') === 'project' && String(lang || '') === 'en';
+}
 
 function parseArgs(argv) {
     const out = {
@@ -10,6 +40,8 @@ function parseArgs(argv) {
         maxReports: 4,
         deploy: true,
         dryRun: false,
+        mode: 'briefing',
+        langs: [],
     };
     for (let i = 2; i < argv.length; i += 1) {
         const a = argv[i];
@@ -23,8 +55,15 @@ function parseArgs(argv) {
         } else if (a === '--max' && argv[i + 1]) {
             out.maxReports = Math.max(1, Number(argv[i + 1]) || 4);
             i += 1;
+        } else if (a === '--mode' && argv[i + 1]) {
+            out.mode = normalizeMode(argv[i + 1]);
+            i += 1;
+        } else if (a === '--langs' && argv[i + 1]) {
+            out.langs = parseLangsArg(argv[i + 1]);
+            i += 1;
         }
     }
+    if (!out.langs.length) out.langs = getDefaultLangsForMode(out.mode);
     return out;
 }
 
@@ -39,45 +78,53 @@ function listRecentReports(hours = 48) {
         .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 }
 
-function summarizeReport(filePath) {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const lines = raw
-        .split('\n')
-        .map(x => x.trim())
-        .filter(Boolean);
-    const title = lines.find(l => l.startsWith('#')) || path.basename(filePath);
-    const bullets = lines.filter(l => l.startsWith('-')).slice(0, 6);
-    return {
-        title: title.replace(/^#+\s*/, ''),
-        bullets,
-        file: path.basename(filePath),
-    };
+function buildSourceKey(files) {
+    const basis = (files || [])
+        .map((p) => {
+            try {
+                const st = fs.statSync(p);
+                return `${path.basename(p)}:${Math.trunc(st.mtimeMs)}:${st.size}`;
+            } catch {
+                return path.basename(p);
+            }
+        })
+        .join('|');
+    return crypto.createHash('sha256').update(basis).digest('hex');
 }
 
-function buildKoreanPost(reports) {
-    const date = new Date().toLocaleDateString('ko-KR');
-    const lines = [
-        `# AI 운영 로그 (${date})`,
-        '',
-        '## 핵심 결과',
-    ];
-    if (reports.length === 0) {
-        lines.push('- 최근 리포트가 없어 자동 발행을 건너뜀');
-        return lines.join('\n');
+function loadPublishState() {
+    try {
+        if (!fs.existsSync(publishStatePath)) return {};
+        return JSON.parse(fs.readFileSync(publishStatePath, 'utf8'));
+    } catch {
+        return {};
     }
-    for (const report of reports) {
-        lines.push(`### ${report.title}`);
-        lines.push(`- Source: ${report.file}`);
-        if (report.bullets.length === 0) {
-            lines.push('- 요약 항목 없음');
-        } else {
-            for (const b of report.bullets) lines.push(b);
-        }
-        lines.push('');
-    }
-    lines.push('---');
-    lines.push('자동 생성된 운영 기록입니다. (언어 순서: 한국어 → 일본어 → 영어)');
-    return lines.join('\n');
+}
+
+function savePublishState(next) {
+    fs.writeFileSync(publishStatePath, JSON.stringify(next, null, 2), 'utf8');
+}
+
+function buildModeTitle(mode, isoDate) {
+    if (mode === 'log') return `Work Log ${isoDate}`;
+    if (mode === 'project') return `Project Update ${isoDate}`;
+    return `Daily Briefing ${isoDate}`;
+}
+
+async function buildEnglishSource(memoir, mode) {
+    const isoDate = new Date().toISOString().slice(0, 10);
+    const translated = await blogAutomation.translateOrFallback(
+        'English',
+        memoir.title,
+        memoir.contentKo,
+        'Korean',
+    );
+    const title = buildModeTitle(mode, isoDate);
+    const markdown = String(translated && translated.content ? translated.content : memoir.contentKo).trim();
+    return {
+        title,
+        markdown,
+    };
 }
 
 async function publishFromReports() {
@@ -91,27 +138,76 @@ async function publishFromReports() {
             deploy: opts.deploy,
         };
     }
+    const sourceKey = buildSourceKey([...files, `mode:${opts.mode}`, `langs:${opts.langs.join(',')}`]);
+    const state = loadPublishState();
+    const stateKey = `h${opts.hours}-m${opts.maxReports}-${opts.mode}-${opts.langs.join('_')}`;
+    if (!opts.dryRun && state[stateKey] && state[stateKey].sourceKey === sourceKey) {
+        return {
+            skipped: true,
+            reason: 'same_source_reports_already_published',
+            lookedBackHours: opts.hours,
+            files,
+            sourceKey,
+            lastPublishedAt: state[stateKey].publishedAt || null,
+            deploy: opts.deploy,
+        };
+    }
 
     // 원격 블로그 리포를 먼저 동기화해서 커밋 히스토리 충돌을 예방한다.
     blogAutomation.syncBlogRepo();
 
-    const summaries = files.map(summarizeReport);
-    const contentKo = buildKoreanPost(summaries);
-    const title = `AI 운영 로그 ${new Date().toISOString().split('T')[0]}`;
-    const posts = await blogAutomation.createMultilingualPost(title, contentKo, [
-        'ai-log',
-        'moltbot',
-        'automation',
-    ]);
+    const memoir = buildMemoirPost({
+        hours: opts.hours,
+        maxReports: opts.maxReports,
+    });
+    const source = await buildEnglishSource(memoir, opts.mode);
+    const posts = await blogAutomation.createMultilingualPost(source.title, source.markdown, [
+        ...(memoir.tags || []),
+    ], {
+        categories: [opts.mode],
+        sourceLang: 'en',
+        langs: opts.langs,
+        skipTranslation: Boolean(opts.dryRun),
+    });
+
+    const enPost = posts.find(p => p.includes(`${path.sep}en${path.sep}`)) || posts[0] || '';
+    const slug = enPost ? path.basename(enPost, '.md').replace(/^\d{4}-\d{2}-\d{2}-/, '') : '';
+    let notion = { synced: false, skipped: true, reason: 'policy_filtered' };
+    if (shouldSyncToNotion({ category: opts.mode, lang: 'en' })) {
+        notion = await syncBlogMemoToNotion({
+            slug,
+            title: source.title,
+            markdown: source.markdown,
+            categories: [opts.mode],
+            lang: 'en',
+            tags: memoir.tags || [],
+            sourceFiles: memoir.files || files,
+        });
+    }
 
     let deploy = null;
     if (opts.deploy) deploy = await blogAutomation.deployToGitHub();
+
+    if (!opts.dryRun) {
+        state[stateKey] = {
+            sourceKey,
+            publishedAt: new Date().toISOString(),
+            files: files.map((f) => path.basename(f)),
+            posts,
+            mode: opts.mode,
+            langs: opts.langs,
+        };
+        savePublishState(state);
+    }
 
     return {
         skipped: false,
         lookedBackHours: opts.hours,
         files,
         posts,
+        mode: opts.mode,
+        langs: opts.langs,
+        notion,
         deploy,
     };
 }
@@ -125,4 +221,9 @@ if (require.main === module) {
         });
 }
 
-module.exports = { publishFromReports };
+module.exports = {
+    parseArgs,
+    getDefaultLangsForMode,
+    shouldSyncToNotion,
+    publishFromReports,
+};
