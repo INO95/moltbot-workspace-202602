@@ -16,6 +16,20 @@ const blockedPublishPaths = [
     /^notes\/\.DS_Store$/,
 ];
 
+const allowedPublishPaths = [
+    /^scripts\//,
+    /^package\.json$/,
+    /^package-lock\.json$/,
+    /^docker-compose\.yml$/,
+    /^docker\/Dockerfile$/,
+    /^docker\/docker-compose\.yml$/,
+    /^docker\/config\/.+\.json$/,
+    /^docker\/moltbot\.sh$/,
+    /^\.github\/workflows\/.+\.ya?ml$/,
+    /^notes\/OPERATIONS_PLAYBOOK\.md$/,
+    /^notes\/EXTENSIBLE_ROADMAP\.md$/,
+];
+
 const secretPatterns = [
     { name: 'openai_api_key', re: /\bsk-[A-Za-z0-9]{20,}\b/g },
     { name: 'github_token', re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g },
@@ -107,6 +121,24 @@ function unstageBlockedFiles() {
     return blocked;
 }
 
+function isAllowedPath(file) {
+    return allowedPublishPaths.some(re => re.test(file));
+}
+
+function unstageNonAllowlistedFiles() {
+    const staged = getStagedFiles();
+    const nonAllowed = staged.filter(file => !isAllowedPath(file));
+    for (const file of nonAllowed) {
+        const escaped = escapeForDoubleQuotes(file);
+        try {
+            run(`git restore --staged -- "${escaped}"`);
+        } catch {
+            run(`git rm -r -f --cached --ignore-unmatch -- "${escaped}"`);
+        }
+    }
+    return nonAllowed;
+}
+
 function assertNoSensitiveFilesInStaging() {
     const staged = getStagedFiles();
     const blocked = staged.filter(isBlockedPath);
@@ -134,6 +166,14 @@ function assertNoSensitiveFilesInStaging() {
 
     if (findings.length > 0) {
         throw new Error(`Potential secret patterns detected in staged files: ${findings.join(', ')}`);
+    }
+}
+
+function assertAllowlistOnlyStaging() {
+    const staged = getStagedFiles();
+    const nonAllowed = staged.filter(file => !isAllowedPath(file));
+    if (nonAllowed.length > 0) {
+        throw new Error(`Non-allowlisted paths staged: ${nonAllowed.join(', ')}`);
     }
 }
 
@@ -182,18 +222,36 @@ function ensureRemote(project) {
 
 function autoCommit(message = '') {
     ensureGitRepo();
-    run('git reset');
+    try {
+        run('git restore --staged :/');
+    } catch {
+        // no-op
+    }
     run('git add .');
     const skipped = unstageBlockedFiles();
+    const skippedByAllowlist = unstageNonAllowlistedFiles();
+    assertAllowlistOnlyStaging();
     assertNoSensitiveFilesInStaging();
     const commitMsg = message || `chore: automated update ${new Date().toISOString()}`;
     try {
         run(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`);
-        return { committed: true, message: commitMsg, skipped };
+        return {
+            committed: true,
+            message: commitMsg,
+            skipped,
+            skippedByAllowlist,
+            allowlist: allowedPublishPaths.map(re => re.toString()),
+        };
     } catch (error) {
         const out = String(error.stderr || error.message || '');
         if (/nothing to commit/i.test(out)) {
-            return { committed: false, message: 'nothing to commit', skipped };
+            return {
+                committed: false,
+                message: 'nothing to commit',
+                skipped,
+                skippedByAllowlist,
+                allowlist: allowedPublishPaths.map(re => re.toString()),
+            };
         }
         throw error;
     }

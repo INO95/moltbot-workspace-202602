@@ -48,6 +48,8 @@
 - Prerequisite: GitHub CLI (`gh`) installed and authenticated.
 - Repo planning: `node scripts/github_repo_manager.js plan <project-name>`
 - Safe local commit: `node scripts/github_repo_manager.js commit "<message>"`
+- Private repo bootstrap: `node scripts/private_repo_split.js bootstrap`
+- Private repo sync: `node scripts/private_repo_split.js sync`
 - Blog draft from reports: `node scripts/blog_publish_from_reports.js`
 - Blog dry-run only (no deploy): `node scripts/blog_publish_from_reports.js --dry-run`
 - Blog skip-window test: `node scripts/blog_publish_from_reports.js --hours 1 --no-deploy`
