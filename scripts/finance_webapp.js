@@ -347,8 +347,14 @@ function computeUsageStats(rows) {
     return { categoryUsage, paymentMethodUsage };
 }
 
+const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': process.env.FINANCE_CORS_ORIGIN || '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Api-Token',
+};
+
 function sendJson(res, status, payload) {
-    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS });
     res.end(JSON.stringify(payload, null, 2));
 }
 
@@ -556,7 +562,7 @@ function serveApp(req, res) {
             const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
             for (const key of Object.keys(cfg.categories || {})) categories.add(String(key));
             for (const key of Object.keys(cfg.paymentMethods || {})) paymentMethods.add(String(key));
-        } catch {}
+        } catch { }
         sendJson(res, 200, {
             currencies: ['JPY', 'KRW', 'USD'],
             categories: [...categories],

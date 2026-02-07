@@ -15,8 +15,14 @@ function readText(filePath) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': process.env.HEALTH_CORS_ORIGIN || '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Api-Token',
+};
+
 function sendJson(res, status, payload) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS });
   res.end(JSON.stringify(payload, null, 2));
 }
 

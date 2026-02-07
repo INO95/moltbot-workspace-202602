@@ -23,7 +23,7 @@ function loadDotEnv() {
             const value = trimmed.slice(idx + 1).trim();
             if (!process.env[key]) process.env[key] = value;
         }
-    } catch (_) {}
+    } catch (_) { }
 }
 
 loadDotEnv();
@@ -802,6 +802,7 @@ function routeByPrefix(text) {
         { route: 'ingest', prefixes: list(prefixes.log || '기록:').concat(list(prefixes.note || '메모:')) },
         { route: 'word', prefixes: list(prefixes.word || '단어:').concat(list(prefixes.learn || '학습:')) },
         { route: 'health', prefixes: list(prefixes.health || '운동:') },
+        { route: 'news', prefixes: list(prefixes.news || '소식:') },
         { route: 'report', prefixes: list(prefixes.report || '리포트:').concat(list(prefixes.summary || '요약:')) },
         { route: 'work', prefixes: list(prefixes.work || '작업:').concat(list(prefixes.do || '실행:')) },
         { route: 'inspect', prefixes: list(prefixes.inspect || '점검:').concat(list(prefixes.check || '검토:')) },
@@ -879,6 +880,57 @@ function handlePromptPayload(payloadText) {
             `프롬프트: 답변 ${session.id} | 제약: ...; 출력형식: ...`,
             `프롬프트: 완성 ${session.id}`,
         ],
+    };
+}
+
+async function processWordTokens(text, toeicDeck, toeicTags) {
+    const tokens = splitWords(text);
+    const results = [];
+    const failures = [];
+
+    for (const token of tokens) {
+        try {
+            const parsed = parseWordToken(token);
+            if (!parsed) {
+                failures.push({ token, reason: 'parse_failed' });
+                continue;
+            }
+            const word = parsed.word;
+            const hint = parsed.hint;
+            const enriched = await enrichToeicWord(word, hint);
+            const answer = buildToeicAnswerRich(
+                word,
+                enriched.meaning,
+                enriched.example,
+                enriched.partOfSpeech || '',
+            );
+            const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
+            results.push({ word, noteId, deck: toeicDeck });
+        } catch (e) {
+            failures.push({ token, reason: e.message });
+        }
+    }
+    if (results.length > 0) {
+        try {
+            await anki.syncWithDelay();
+        } catch (e) {
+            console.log('Anki batch sync failed (non-critical):', e.message);
+            failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
+        }
+    }
+    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
+    const telegramReply = failures.length > 0
+        ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
+        : `${summary}\n실패 목록: 없음`;
+    return {
+        success: failures.length === 0,
+        saved: results.length,
+        failed: failures.length,
+        summary,
+        telegramReply,
+        failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
+        results,
+        failures,
     };
 }
 
@@ -1028,55 +1080,11 @@ async function main() {
 
             case 'word': {
                 // usage: node bridge.js word "Activated 활성화된, Formulate"
-                const tokens = splitWords(fullText);
-                const results = [];
-                const failures = [];
-
-                for (const token of tokens) {
-                    try {
-                        const parsed = parseWordToken(token);
-                        if (!parsed) {
-                            failures.push({ token, reason: 'parse_failed' });
-                            continue;
-                        }
-                        const word = parsed.word;
-                        const hint = parsed.hint;
-                        const enriched = await enrichToeicWord(word, hint);
-                        const answer = buildToeicAnswerRich(
-                            word,
-                            enriched.meaning,
-                            enriched.example,
-                            enriched.partOfSpeech || '',
-                        );
-                        const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
-                        results.push({ word, noteId, deck: toeicDeck });
-                    } catch (e) {
-                        failures.push({ token, reason: e.message });
-                    }
-                }
-                if (results.length > 0) {
-                    try {
-                        await anki.syncWithDelay();
-                    } catch (e) {
-                        console.log('Anki batch sync failed (non-critical):', e.message);
-                        failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
-                    }
-                }
-                const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
-                const telegramReply = failures.length > 0
-                    ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
-                    : `${summary}\n실패 목록: 없음`;
+                const wordResult = await processWordTokens(fullText, toeicDeck, toeicTags);
                 console.log(JSON.stringify({
-                    success: failures.length === 0,
-                    saved: results.length,
-                    failed: failures.length,
-                    summary,
-                    telegramReply,
+                    ...wordResult,
                     preferredModelAlias: 'fast',
                     preferredReasoning: 'low',
-                    failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
-                    results,
-                    failures,
                 }));
                 break;
             }
@@ -1150,6 +1158,20 @@ async function main() {
                 break;
             }
 
+            case 'news': {
+                // usage: node bridge.js news "상태|지금요약|키워드 추가 ..."
+                const newsDigest = require('./news_digest');
+                const payload = [args[0], ...args.slice(1)].join(' ').trim() || fullText;
+                const result = await newsDigest.handleNewsCommand(payload);
+                console.log(JSON.stringify({
+                    route: 'news',
+                    preferredModelAlias: 'fast',
+                    preferredReasoning: 'low',
+                    ...result,
+                }));
+                break;
+            }
+
             case 'prompt': {
                 // usage:
                 // node bridge.js prompt "목적: ..."
@@ -1220,54 +1242,12 @@ async function main() {
                     break;
                 }
                 if (routed.route === 'word') {
-                    const tokens = splitWords(routed.payload);
-                    const results = [];
-                    const failures = [];
-                    for (const token of tokens) {
-                        try {
-                            const parsed = parseWordToken(token);
-                            if (!parsed) {
-                                failures.push({ token, reason: 'parse_failed' });
-                                continue;
-                            }
-                            const word = parsed.word;
-                            const hint = parsed.hint;
-                            const enriched = await enrichToeicWord(word, hint);
-                            const answer = buildToeicAnswerRich(
-                                word,
-                                enriched.meaning,
-                                enriched.example,
-                                enriched.partOfSpeech || '',
-                            );
-                            const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
-                            results.push({ word, noteId, deck: toeicDeck });
-                        } catch (e) {
-                            failures.push({ token, reason: e.message });
-                        }
-                    }
-                    if (results.length > 0) {
-                        try {
-                            await anki.syncWithDelay();
-                        } catch (e) {
-                            console.log('Anki batch sync failed (non-critical):', e.message);
-                            failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
-                        }
-                    }
-                    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
-                    const telegramReply = failures.length > 0
-                        ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
-                        : `${summary}\n실패 목록: 없음`;
+                    const wordResult = await processWordTokens(routed.payload, toeicDeck, toeicTags);
                     console.log(JSON.stringify({
                         route: routed.route,
                         preferredModelAlias: 'fast',
                         preferredReasoning: 'low',
-                        saved: results.length,
-                        failed: failures.length,
-                        summary,
-                        telegramReply,
-                        failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
-                        results,
-                        failures,
+                        ...wordResult,
                     }));
                     break;
                 }
@@ -1286,6 +1266,17 @@ async function main() {
                         preferredModelAlias: 'fast',
                         preferredReasoning: 'low',
                         telegramReply,
+                        ...result,
+                    }));
+                    break;
+                }
+                if (routed.route === 'news') {
+                    const newsDigest = require('./news_digest');
+                    const result = await newsDigest.handleNewsCommand(routed.payload);
+                    console.log(JSON.stringify({
+                        route: routed.route,
+                        preferredModelAlias: 'fast',
+                        preferredReasoning: 'low',
                         ...result,
                     }));
                     break;
