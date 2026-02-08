@@ -510,8 +510,8 @@ if (require.main === module) {
     blog.initBlogStructure();
 
     blog.logDailyAIUsage([
-        { title: '가계부 자동화', time: '09:00', tool: 'Antigravity', result: '성공' },
-        { title: '건강 대시보드 생성', time: '14:00', tool: 'Codex', result: '성공' }
+        { title: '프롬프트 워크플로우 개선', time: '09:00', tool: 'Antigravity', result: '성공' },
+        { title: '야간 자동점검 리포트 생성', time: '14:00', tool: 'Codex', result: '성공' }
     ]).then(posts => {
         console.log('Created posts:', posts);
     });

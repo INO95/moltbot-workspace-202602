@@ -116,27 +116,7 @@ class MoltbotDeployer {
         return cronPath;
     }
 
-    // 3. 건강 대시보드 테스트
-    async testHealthDashboard() {
-        this.log('🏥 Testing Health Dashboard...');
-
-        try {
-            const dashboard = require('./health_dashboard');
-            const result = await dashboard.generateDashboard({
-                sleepData: [{ hours: 7.5, deepPercent: 20 }],
-                exerciseHistory: []
-            });
-
-            this.log('✅ Health Dashboard operational');
-            this.log(result.summary);
-            return true;
-        } catch (e) {
-            this.log(`❌ Health Dashboard error: ${e.message}`);
-            return false;
-        }
-    }
-
-    // 4. 블로그 구조 초기화
+    // 3. 블로그 구조 초기화
     async initBlog() {
         this.log('📝 Initializing Blog structure...');
 
@@ -151,7 +131,7 @@ class MoltbotDeployer {
         }
     }
 
-    // 5. 전체 배포 실행
+    // 4. 전체 배포 실행
     async deploy() {
         this.log('═══════════════════════════════════════');
         this.log('🚀 MOLTBOT FULL DEPLOYMENT STARTING');
@@ -160,7 +140,6 @@ class MoltbotDeployer {
         const results = {
             proxy: await this.startCodexProxy(),
             scheduler: await this.setupSchedulers(),
-            health: await this.testHealthDashboard(),
             blog: await this.initBlog()
         };
 
@@ -169,7 +148,6 @@ class MoltbotDeployer {
         this.log('═══════════════════════════════════════');
         this.log(`  Codex Proxy:     ${results.proxy ? '✅' : '❌'}`);
         this.log(`  Schedulers:      ${results.scheduler ? '✅' : '❌'}`);
-        this.log(`  Health Dashboard: ${results.health ? '✅' : '❌'}`);
         this.log(`  Blog System:     ${results.blog ? '✅' : '❌'}`);
         this.log('═══════════════════════════════════════');
 
@@ -177,7 +155,6 @@ class MoltbotDeployer {
         const summary = `🎉 Moltbot 시스템 가동 완료!\n\n` +
             `✅ Codex Proxy: ${results.proxy ? '정상' : '오류'}\n` +
             `✅ 스케줄러: 설정 완료\n` +
-            `✅ 건강 대시보드: ${results.health ? '정상' : '오류'}\n` +
             `✅ 블로그 시스템: ${results.blog ? '정상' : '오류'}\n\n` +
             `💡 아침 7시 브리핑이 자동으로 시작됩니다.`;
 

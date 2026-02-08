@@ -1,8 +1,9 @@
 {
     "instance": "main",
-    "description": "메인 Moltbot - 텔레그램 연동, 가계부, 한일 관리",
+    "description": "메인 Moltbot - 텔레그램 연동, 프롬프트/리포트/자동화 관리",
     "features": {
-        "finance": true,
+        "finance": false,
+        "health": false,
         "checklist": true,
         "telegram": true,
         "notifications": true
