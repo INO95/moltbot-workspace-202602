@@ -1,9 +1,7 @@
 const engine = require('./molt_engine');
 const anki = require('./anki_connect');
 const config = require('../data/config.json');
-const financeManager = require('./finance_manager');
 const promptBuilder = require('./prompt_builder');
-const { parseHealthBridgePayload } = require('./health_bridge_payload');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +21,7 @@ function loadDotEnv() {
             const value = trimmed.slice(idx + 1).trim();
             if (!process.env[key]) process.env[key] = value;
         }
-    } catch (_) {}
+    } catch (_) { }
 }
 
 loadDotEnv();
@@ -255,11 +253,9 @@ const OPS_ALLOWED_TARGETS = {
     proxy: 'moltbot-proxy',
     webproxy: 'moltbot-web-proxy',
     tunnel: 'moltbot-dev-tunnel',
-    finance: 'moltbot-finance-web',
     prompt: 'moltbot-prompt-web',
-    health: 'moltbot-health-web',
-    web: ['moltbot-finance-web', 'moltbot-prompt-web', 'moltbot-health-web', 'moltbot-web-proxy'],
-    all: ['moltbot-main', 'moltbot-sub1', 'moltbot-finance-web', 'moltbot-prompt-web', 'moltbot-health-web', 'moltbot-proxy', 'moltbot-web-proxy', 'moltbot-dev-tunnel'],
+    web: ['moltbot-prompt-web', 'moltbot-web-proxy'],
+    all: ['moltbot-main', 'moltbot-sub1', 'moltbot-prompt-web', 'moltbot-proxy', 'moltbot-web-proxy', 'moltbot-dev-tunnel'],
 };
 
 function normalizeOpsAction(value) {
@@ -283,12 +279,8 @@ function normalizeOpsTarget(value) {
         '웹프록시': 'webproxy',
         'tunnel': 'tunnel',
         '터널': 'tunnel',
-        'finance': 'finance',
-        '가계부': 'finance',
         'prompt': 'prompt',
         '프롬프트': 'prompt',
-        'health': 'health',
-        '건강': 'health',
         'web': 'web',
         '웹': 'web',
         'all': 'all',
@@ -363,7 +355,7 @@ function runOpsCommand(payloadText) {
             route: 'ops',
             templateValid: false,
             error: '지원하지 않는 대상입니다.',
-            telegramReply: '운영 대상은 main/sub1/proxy/webproxy/tunnel/finance/prompt/health/web/all 만 지원합니다.',
+            telegramReply: '운영 대상은 main/sub1/proxy/webproxy/tunnel/prompt/web/all 만 지원합니다.',
         };
     }
 
@@ -464,20 +456,16 @@ function normalizeHttpsBase(v) {
 function getTunnelPublicBaseUrl() {
     // Backward-compat helper for legacy callers.
     const bases = getPublicBases();
-    return bases.financeBase || bases.promptBase || bases.healthBase || bases.genericBase || null;
+    return bases.promptBase || bases.genericBase || null;
 }
 
 function getPublicBases() {
-    const financeEnv = normalizeHttpsBase(process.env.FINANCE_PUBLIC_BASE_URL || '');
     const promptEnv = normalizeHttpsBase(process.env.PROMPT_PUBLIC_BASE_URL || '');
-    const healthEnv = normalizeHttpsBase(process.env.HEALTH_PUBLIC_BASE_URL || '');
     const genericEnv = normalizeHttpsBase(process.env.DEV_TUNNEL_PUBLIC_BASE_URL || '');
 
-    if (financeEnv || promptEnv || healthEnv || genericEnv) {
+    if (promptEnv || genericEnv) {
         return {
-            financeBase: financeEnv || genericEnv || null,
             promptBase: promptEnv || genericEnv || null,
-            healthBase: healthEnv || genericEnv || null,
             genericBase: genericEnv || null,
         };
     }
@@ -490,9 +478,7 @@ function getPublicBases() {
         const candidate = normalizeHttpsBase(json && json.publicUrl ? json.publicUrl : '');
         if (candidate) {
             return {
-                financeBase: candidate,
                 promptBase: candidate,
-                healthBase: candidate,
                 genericBase: candidate,
             };
         }
@@ -502,56 +488,36 @@ function getPublicBases() {
 
     // Fallback: probe tunnel container logs (works on host bridge execution path).
     const logs = execDocker(['logs', '--tail', '200', 'moltbot-dev-tunnel']);
-    if (!logs.ok) return { financeBase: null, promptBase: null, healthBase: null, genericBase: null };
+    if (!logs.ok) return { promptBase: null, genericBase: null };
     const m = String(`${logs.stdout}\n${logs.stderr}`).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi);
-    if (!m || !m.length) return { financeBase: null, promptBase: null, healthBase: null, genericBase: null };
+    if (!m || !m.length) return { promptBase: null, genericBase: null };
     const base = m[m.length - 1];
     return {
-        financeBase: base,
         promptBase: base,
-        healthBase: base,
         genericBase: base,
     };
 }
 
 function buildExternalLinksText() {
-    const { financeBase, promptBase, healthBase } = getPublicBases();
-    if (!financeBase && !promptBase && !healthBase) return null;
+    const { promptBase } = getPublicBases();
+    if (!promptBase) return null;
     const lines = ['외부 확인 링크'];
-    if (financeBase) lines.push(`- 가계부: ${financeBase}/finance/`);
     if (promptBase) lines.push(`- 프롬프트: ${promptBase}/prompt/`);
-    if (healthBase) lines.push(`- 건강: ${healthBase}/health/`);
     return lines.join('\n');
 }
 
 function rewriteLocalLinks(text, bases) {
     const raw = String(text || '');
-    const financeBase = String((bases && bases.financeBase) || '').trim().replace(/\/+$/, '');
     const promptBase = String((bases && bases.promptBase) || '').trim().replace(/\/+$/, '');
-    const healthBase = String((bases && bases.healthBase) || '').trim().replace(/\/+$/, '');
-    if (!financeBase && !promptBase && !healthBase) return raw;
+    if (!promptBase) return raw;
 
     let out = raw;
-    if (financeBase) {
-        out = out
-            .replace(/https?:\/\/127\.0\.0\.1:18788\/finance\/?/gi, `${financeBase}/finance/`)
-            .replace(/https?:\/\/localhost:18788\/finance\/?/gi, `${financeBase}/finance/`)
-            .replace(/https?:\/\/127\.0\.0\.1:18787\/finance\/?/gi, `${financeBase}/finance/`)
-            .replace(/https?:\/\/localhost:18787\/finance\/?/gi, `${financeBase}/finance/`);
-    }
     if (promptBase) {
         out = out
             .replace(/https?:\/\/127\.0\.0\.1:18788\/prompt\/?/gi, `${promptBase}/prompt/`)
             .replace(/https?:\/\/localhost:18788\/prompt\/?/gi, `${promptBase}/prompt/`)
             .replace(/https?:\/\/127\.0\.0\.1:18787\/prompt\/?/gi, `${promptBase}/prompt/`)
             .replace(/https?:\/\/localhost:18787\/prompt\/?/gi, `${promptBase}/prompt/`);
-    }
-    if (healthBase) {
-        out = out
-            .replace(/https?:\/\/127\.0\.0\.1:18788\/health\/?/gi, `${healthBase}/health/`)
-            .replace(/https?:\/\/localhost:18788\/health\/?/gi, `${healthBase}/health/`)
-            .replace(/https?:\/\/127\.0\.0\.1:18787\/health\/?/gi, `${healthBase}/health/`)
-            .replace(/https?:\/\/localhost:18787\/health\/?/gi, `${healthBase}/health/`);
     }
     return out;
 }
@@ -567,41 +533,25 @@ function appendExternalLinks(reply) {
 function isExternalLinkRequest(text) {
     const t = String(text || '').toLowerCase();
     const hasLink = /(링크|url|주소|접속)/i.test(t);
-    const hasTarget = /(가계부|finance|프롬프트|prompt|건강|health|웹앱|webapp|web)/i.test(t);
+    const hasTarget = /(프롬프트|prompt|웹앱|webapp|web)/i.test(t);
     return hasLink && hasTarget;
 }
 
 function buildLinkOnlyReply(text) {
     const t = String(text || '').toLowerCase();
-    const { financeBase, promptBase, healthBase } = getPublicBases();
-    if (!financeBase && !promptBase && !healthBase) {
+    const { promptBase } = getPublicBases();
+    if (!promptBase) {
         return '외부 링크를 찾을 수 없습니다. 터널 상태를 먼저 점검해주세요.';
     }
-    if (/(프롬프트|prompt)/i.test(t) && !/(가계부|finance)/i.test(t)) {
+    if (/(프롬프트|prompt)/i.test(t)) {
         const baseReply = promptBase
             ? `외부 확인 링크\n- 프롬프트: ${promptBase}/prompt/`
             : '프롬프트 외부 링크를 찾을 수 없습니다.';
         const diag = /(점검|체크|status|확인)/i.test(t) ? buildLinkDiagnosticsText() : '';
         return diag ? `${baseReply}\n\n${diag}` : baseReply;
     }
-    if (/(건강|health)/i.test(t) && !/(가계부|finance|프롬프트|prompt)/i.test(t)) {
-        const baseReply = healthBase
-            ? `외부 확인 링크\n- 건강: ${healthBase}/health/`
-            : '건강 외부 링크를 찾을 수 없습니다.';
-        const diag = /(점검|체크|status|확인)/i.test(t) ? buildLinkDiagnosticsText() : '';
-        return diag ? `${baseReply}\n\n${diag}` : baseReply;
-    }
-    if (/(가계부|finance)/i.test(t) && !/(프롬프트|prompt)/i.test(t)) {
-        const baseReply = financeBase
-            ? `외부 확인 링크\n- 가계부: ${financeBase}/finance/`
-            : '가계부 외부 링크를 찾을 수 없습니다.';
-        const diag = /(점검|체크|status|확인)/i.test(t) ? buildLinkDiagnosticsText() : '';
-        return diag ? `${baseReply}\n\n${diag}` : baseReply;
-    }
     const lines = ['외부 확인 링크'];
-    if (financeBase) lines.push(`- 가계부: ${financeBase}/finance/`);
     if (promptBase) lines.push(`- 프롬프트: ${promptBase}/prompt/`);
-    if (healthBase) lines.push(`- 건강: ${healthBase}/health/`);
     const out = lines.join('\n');
     const diag = /(점검|체크|status|확인)/i.test(t) ? buildLinkDiagnosticsText() : '';
     return diag ? `${out}\n\n${diag}` : out;
@@ -643,11 +593,9 @@ function buildLinkDiagnosticsText() {
         }
     }
 
-    const { financeBase, promptBase, healthBase } = getPublicBases();
+    const { promptBase } = getPublicBases();
     const checks = [];
-    if (financeBase) checks.push({ label: '가계부', url: `${financeBase}/finance/` });
     if (promptBase) checks.push({ label: '프롬프트', url: `${promptBase}/prompt/` });
-    if (healthBase) checks.push({ label: '건강', url: `${healthBase}/health/` });
     if (!checks.length) return '';
     const lines = ['외부 링크 점검'];
     for (const c of checks) {
@@ -726,10 +674,9 @@ function buildNoPrefixGuide() {
         '명령 프리픽스를 붙여주세요.',
         '',
         '자주 쓰는 형식:',
-        '- 링크: 가계부 | 건강 | 프롬프트',
+        '- 링크: 프롬프트',
         '- 상태: [옵션]',
         '- 단어: 단어1',
-        '- 운동: OCR 텍스트',
         '- 작업: 요청: ...; 대상: ...; 완료기준: ...',
         '- 점검: 대상: ...; 체크항목: ...',
         '- 배포: 대상: ...; 환경: ...; 검증: ...',
@@ -799,9 +746,8 @@ function routeByPrefix(text) {
     };
 
     const routingRules = [
-        { route: 'ingest', prefixes: list(prefixes.log || '기록:').concat(list(prefixes.note || '메모:')) },
         { route: 'word', prefixes: list(prefixes.word || '단어:').concat(list(prefixes.learn || '학습:')) },
-        { route: 'health', prefixes: list(prefixes.health || '운동:') },
+        { route: 'news', prefixes: list(prefixes.news || '소식:') },
         { route: 'report', prefixes: list(prefixes.report || '리포트:').concat(list(prefixes.summary || '요약:')) },
         { route: 'work', prefixes: list(prefixes.work || '작업:').concat(list(prefixes.do || '실행:')) },
         { route: 'inspect', prefixes: list(prefixes.inspect || '점검:').concat(list(prefixes.check || '검토:')) },
@@ -882,6 +828,57 @@ function handlePromptPayload(payloadText) {
     };
 }
 
+async function processWordTokens(text, toeicDeck, toeicTags) {
+    const tokens = splitWords(text);
+    const results = [];
+    const failures = [];
+
+    for (const token of tokens) {
+        try {
+            const parsed = parseWordToken(token);
+            if (!parsed) {
+                failures.push({ token, reason: 'parse_failed' });
+                continue;
+            }
+            const word = parsed.word;
+            const hint = parsed.hint;
+            const enriched = await enrichToeicWord(word, hint);
+            const answer = buildToeicAnswerRich(
+                word,
+                enriched.meaning,
+                enriched.example,
+                enriched.partOfSpeech || '',
+            );
+            const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
+            results.push({ word, noteId, deck: toeicDeck });
+        } catch (e) {
+            failures.push({ token, reason: e.message });
+        }
+    }
+    if (results.length > 0) {
+        try {
+            await anki.syncWithDelay();
+        } catch (e) {
+            console.log('Anki batch sync failed (non-critical):', e.message);
+            failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
+        }
+    }
+    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
+    const telegramReply = failures.length > 0
+        ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
+        : `${summary}\n실패 목록: 없음`;
+    return {
+        success: failures.length === 0,
+        saved: results.length,
+        failed: failures.length,
+        summary,
+        telegramReply,
+        failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
+        results,
+        failures,
+    };
+}
+
 async function main() {
     const [, , command, ...args] = process.argv;
     const fullText = args.join(' ');
@@ -890,29 +887,6 @@ async function main() {
 
     try {
         switch (command) {
-            case 'spend': {
-                const spendResult = await engine.parseAndRecordExpense(fullText);
-                if (!spendResult.success) {
-                    console.error(spendResult.error);
-                    process.exit(1);
-                }
-                console.log(JSON.stringify(spendResult.data));
-                break;
-            }
-
-            case 'preview': {
-                // usage: node bridge.js preview "신용카드 대금 빠져나감 105200엔"
-                const preview = engine.previewFinanceParse(fullText);
-                console.log(JSON.stringify(preview));
-                break;
-            }
-
-            case 'balance': {
-                const balance = await engine.getBalance(args[0]);
-                console.log(JSON.stringify(balance));
-                break;
-            }
-
             case 'checklist': {
                 const checkResult = await engine.recordActivity(fullText);
                 console.log(JSON.stringify(checkResult));
@@ -922,30 +896,6 @@ async function main() {
             case 'summary': {
                 const summary = await engine.getTodaySummary();
                 console.log(JSON.stringify(summary));
-                break;
-            }
-
-            case 'ingest': {
-                if (isExternalLinkRequest(fullText)) {
-                    console.log(JSON.stringify({
-                        route: 'ingest',
-                        linkShortcut: true,
-                        telegramReply: buildLinkOnlyReply(fullText),
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                    }));
-                    break;
-                }
-                const ingest = await engine.ingestNaturalText(fullText);
-                if (ingest && ingest.telegramReply) {
-                    ingest.telegramReply = appendExternalLinks(ingest.telegramReply);
-                }
-                console.log(JSON.stringify({
-                    route: 'ingest',
-                    preferredModelAlias: 'fast',
-                    preferredReasoning: 'low',
-                    ...ingest,
-                }));
                 break;
             }
 
@@ -1006,147 +956,28 @@ async function main() {
                 break;
             }
 
-            case 'finance-status': {
-                let monthly = null;
-                try {
-                    monthly = await engine.getMonthlyStats();
-                } catch {
-                    const now = new Date();
-                    const local = financeManager.getStats(now.getFullYear(), now.getMonth() + 1);
-                    monthly = {
-                        ...local,
-                        year: now.getFullYear(),
-                        month: now.getMonth() + 1,
-                        effectiveExpense: Math.abs(local.expense || 0),
-                        source: 'local-db',
-                    };
-                }
-                const liabilities = engine.getCreditLiabilityStatus();
-                console.log(JSON.stringify({ monthly, liabilities }));
-                break;
-            }
-
             case 'word': {
                 // usage: node bridge.js word "Activated 활성화된, Formulate"
-                const tokens = splitWords(fullText);
-                const results = [];
-                const failures = [];
-
-                for (const token of tokens) {
-                    try {
-                        const parsed = parseWordToken(token);
-                        if (!parsed) {
-                            failures.push({ token, reason: 'parse_failed' });
-                            continue;
-                        }
-                        const word = parsed.word;
-                        const hint = parsed.hint;
-                        const enriched = await enrichToeicWord(word, hint);
-                        const answer = buildToeicAnswerRich(
-                            word,
-                            enriched.meaning,
-                            enriched.example,
-                            enriched.partOfSpeech || '',
-                        );
-                        const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
-                        results.push({ word, noteId, deck: toeicDeck });
-                    } catch (e) {
-                        failures.push({ token, reason: e.message });
-                    }
-                }
-                if (results.length > 0) {
-                    try {
-                        await anki.syncWithDelay();
-                    } catch (e) {
-                        console.log('Anki batch sync failed (non-critical):', e.message);
-                        failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
-                    }
-                }
-                const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
-                const telegramReply = failures.length > 0
-                    ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
-                    : `${summary}\n실패 목록: 없음`;
+                const wordResult = await processWordTokens(fullText, toeicDeck, toeicTags);
                 console.log(JSON.stringify({
-                    success: failures.length === 0,
-                    saved: results.length,
-                    failed: failures.length,
-                    summary,
-                    telegramReply,
+                    ...wordResult,
                     preferredModelAlias: 'fast',
                     preferredReasoning: 'low',
-                    failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
-                    results,
-                    failures,
                 }));
                 break;
             }
 
-            case 'health': {
-                // usage: node bridge.js health ingest-text "<OCR text>"
-                // usage: node bridge.js health ingest-structured '<json>'
-                // usage: node bridge.js health summary [week|month|year] [refDate]
-                const subCmd = args[0];
-                const healthService = require('./health_service');
-                if (subCmd === 'ingest' || subCmd === 'ingest-text') {
-                    const payloadRaw = args.slice(1).join(' ');
-                    const parsedPayload = parseHealthBridgePayload(payloadRaw);
-                    const ingestInput = parsedPayload.mode === 'structured'
-                        ? { source: 'bridge-cli-structured', structured: parsedPayload.structured, imagePath: parsedPayload.imagePath }
-                        : { source: 'bridge-cli', text: parsedPayload.text, imagePath: parsedPayload.imagePath };
-                    const result = healthService.ingest(undefined, ingestInput);
-                    const telegramReply = result.ok
-                        ? `운동 기록 저장 완료: ${result.saved || 0}건${result.duplicate ? ' (중복 건너뜀)' : ''}`
-                        : `운동 기록 저장 실패: ${result.message || 'parse_failed'}`;
-                    console.log(JSON.stringify({
-                        route: 'health',
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        telegramReply,
-                        ...result,
-                    }));
-                } else if (subCmd === 'ingest-structured') {
-                    const payloadRaw = args.slice(1).join(' ');
-                    let structured = {};
-                    try {
-                        structured = JSON.parse(payloadRaw);
-                    } catch (error) {
-                        console.log(JSON.stringify({
-                            route: 'health',
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                            ok: false,
-                            telegramReply: `운동 구조화 입력 파싱 실패: ${String(error.message || error)}`,
-                            error: String(error.message || error),
-                        }));
-                        break;
-                    }
-                    const result = healthService.ingest(undefined, { source: 'bridge-cli-structured', structured });
-                    const telegramReply = result.ok
-                        ? `운동 기록 저장 완료: ${result.saved || 0}건${result.duplicate ? ' (중복 건너뜀)' : ''}`
-                        : `운동 기록 저장 실패: ${result.message || 'parse_failed'}`;
-                    console.log(JSON.stringify({
-                        route: 'health',
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        telegramReply,
-                        ...result,
-                    }));
-                } else if (subCmd === 'summary') {
-                    const periodRaw = String(args[1] || 'month').toLowerCase();
-                    const refDateRaw = args[2] || new Date().toISOString().slice(0, 10);
-                    const period = ['week', 'month', 'year'].includes(periodRaw) ? periodRaw : 'month';
-                    const summary = healthService.getSummary(undefined, { period, refDate: refDateRaw });
-                    console.log(JSON.stringify({
-                        route: 'health',
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        telegramReply: `운동 요약(${summary.from}~${summary.to}): 웨이트 ${summary.workout.sessions}회, 러닝 ${summary.running.sessions}회`,
-                        ...summary,
-                    }));
-                } else {
-                    console.error('Usage: health ingest-text "<text>" | health ingest-structured \'<json>\' | health summary [week|month|year] [YYYY-MM-DD]');
-                    process.exit(1);
-                }
+            case 'news': {
+                // usage: node bridge.js news "상태|지금요약|키워드 추가 ..."
+                const newsDigest = require('./news_digest');
+                const payload = [args[0], ...args.slice(1)].join(' ').trim() || fullText;
+                const result = await newsDigest.handleNewsCommand(payload);
+                console.log(JSON.stringify({
+                    route: 'news',
+                    preferredModelAlias: 'fast',
+                    preferredReasoning: 'low',
+                    ...result,
+                }));
                 break;
             }
 
@@ -1194,98 +1025,25 @@ async function main() {
             }
 
             case 'auto': {
-                // usage: node bridge.js auto "기록: 점심 1000엔 현금"
+                // usage: node bridge.js auto "단어: activate 활성화하다"
                 const routed = routeByPrefix(fullText);
-                if (routed.route === 'ingest') {
-                    if (isExternalLinkRequest(routed.payload)) {
-                        console.log(JSON.stringify({
-                            route: routed.route,
-                            linkShortcut: true,
-                            telegramReply: buildLinkOnlyReply(routed.payload),
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                        }));
-                        break;
-                    }
-                    const ingest = await engine.ingestNaturalText(routed.payload);
-                    if (ingest && ingest.telegramReply) {
-                        ingest.telegramReply = appendExternalLinks(ingest.telegramReply);
-                    }
-                    console.log(JSON.stringify({
-                        route: routed.route,
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        ...ingest,
-                    }));
-                    break;
-                }
                 if (routed.route === 'word') {
-                    const tokens = splitWords(routed.payload);
-                    const results = [];
-                    const failures = [];
-                    for (const token of tokens) {
-                        try {
-                            const parsed = parseWordToken(token);
-                            if (!parsed) {
-                                failures.push({ token, reason: 'parse_failed' });
-                                continue;
-                            }
-                            const word = parsed.word;
-                            const hint = parsed.hint;
-                            const enriched = await enrichToeicWord(word, hint);
-                            const answer = buildToeicAnswerRich(
-                                word,
-                                enriched.meaning,
-                                enriched.example,
-                                enriched.partOfSpeech || '',
-                            );
-                            const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
-                            results.push({ word, noteId, deck: toeicDeck });
-                        } catch (e) {
-                            failures.push({ token, reason: e.message });
-                        }
-                    }
-                    if (results.length > 0) {
-                        try {
-                            await anki.syncWithDelay();
-                        } catch (e) {
-                            console.log('Anki batch sync failed (non-critical):', e.message);
-                            failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
-                        }
-                    }
-                    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
-                    const telegramReply = failures.length > 0
-                        ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
-                        : `${summary}\n실패 목록: 없음`;
+                    const wordResult = await processWordTokens(routed.payload, toeicDeck, toeicTags);
                     console.log(JSON.stringify({
                         route: routed.route,
                         preferredModelAlias: 'fast',
                         preferredReasoning: 'low',
-                        saved: results.length,
-                        failed: failures.length,
-                        summary,
-                        telegramReply,
-                        failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
-                        results,
-                        failures,
+                        ...wordResult,
                     }));
                     break;
                 }
-                if (routed.route === 'health') {
-                    const healthService = require('./health_service');
-                    const parsedPayload = parseHealthBridgePayload(routed.payload);
-                    const ingestInput = parsedPayload.mode === 'structured'
-                        ? { source: 'bridge-auto-structured', structured: parsedPayload.structured, imagePath: parsedPayload.imagePath }
-                        : { source: 'bridge-auto', text: parsedPayload.text, imagePath: parsedPayload.imagePath };
-                    const result = healthService.ingest(undefined, ingestInput);
-                    const telegramReply = result.ok
-                        ? `운동 기록 저장 완료: 성공 ${result.saved || 0}건${result.duplicate ? ' / 중복 1건' : ''}`
-                        : `운동 기록 저장 실패: ${result.message || 'parse_failed'}`;
+                if (routed.route === 'news') {
+                    const newsDigest = require('./news_digest');
+                    const result = await newsDigest.handleNewsCommand(routed.payload);
                     console.log(JSON.stringify({
                         route: routed.route,
                         preferredModelAlias: 'fast',
                         preferredReasoning: 'low',
-                        telegramReply,
                         ...result,
                     }));
                     break;

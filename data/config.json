@@ -1,0 +1,61 @@
+{
+    "activityShortcuts": {
+        "안키": {
+            "column": "anki",
+            "value": "O"
+        },
+        "anki": {
+            "column": "anki",
+            "value": "O"
+        },
+        "알고": {
+            "column": "알고리즘",
+            "value": null
+        },
+        "알고리즘": {
+            "column": "알고리즘",
+            "value": null
+        },
+        "다이어리": {
+            "column": "다이어리",
+            "value": "O"
+        },
+        "cbt": {
+            "column": "다이어리",
+            "value": "O"
+        }
+    },
+    "ankiPolicy": {
+        "toeicDeck": "TOEIC_AI",
+        "autoTags": [
+            "moltbot",
+            "toeic_ai"
+        ]
+    },
+    "commandPrefixes": {
+        "word": "단어:",
+        "learn": "학습:",
+        "news": "소식:",
+        "report": "리포트:",
+        "summary": "요약:",
+        "work": "작업:",
+        "do": "실행:",
+        "inspect": "점검:",
+        "check": "검토:",
+        "deploy": "배포:",
+        "ship": "출시:",
+        "prompt": "프롬프트:",
+        "ask": "질문:",
+        "link": "링크:",
+        "status": "상태:",
+        "ops": "운영:"
+    },
+    "budgetPolicy": {
+        "monthlyApiBudgetYen": 0,
+        "paidApiRequiresApproval": true
+    },
+    "sheets": {
+        "checklist": "체크리스트_V2"
+    },
+    "spreadsheetId": "113henz01mG2pyGB8XsgoHMhVRTLscEdzcfcmzlCcC-M"
+}

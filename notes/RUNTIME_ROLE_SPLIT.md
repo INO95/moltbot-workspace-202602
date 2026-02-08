@@ -2,8 +2,8 @@
 
 ## Antigravity / OpenClaw (always-on)
 - Telegram channel receiving
-- Prefix routing (`기록:`, `단어:`, `운동:`, `리포트:`)
-- Scheduled jobs (briefing/digest/report/audit/blog draft)
+- Prefix routing (`단어:`, `작업:`, `점검:`, `배포:`, `리포트:`, `프롬프트:`)
+- Scheduled jobs (briefing/digest/report/blog draft)
 - Low-cost routine logging and notifications
 
 ## Codex (deep work / coding)
