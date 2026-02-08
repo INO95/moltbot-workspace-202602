@@ -49,7 +49,7 @@ function buildPortfolioContent() {
         '- Single term: `학습: be willing to`',
         '- Batch terms: send one term per line.',
         '- Status checks: `상태:` or `운영: 액션: 상태; 대상: all`.',
-        '- Public links: `링크: 가계부` / `링크: 프롬프트`.',
+        '- Public links: `링크: 프롬프트`.',
         '',
         '## 6) Security & Data Policy',
         '- Sensitive tokens are managed in `.env` and private repositories only.',

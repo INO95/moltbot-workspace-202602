@@ -40,11 +40,6 @@ const domainQuestionBank = {
         { label: '학습형식', question: '암기형/이해형/실전형 중 어떤 비중이 큰가요?' },
         { label: '복습주기', question: '복습 주기 또는 체크 방식이 있나요?' },
     ],
-    finance: [
-        { label: '통화/계정', question: '통화/결제수단/계정 규칙을 명시할까요?' },
-        { label: '분류기준', question: '카테고리 분류 기준(예: 식비/교통/정산환급)은 무엇인가요?' },
-        { label: '요약기준', question: '월요약에서 가장 중요한 지표(실질 식비/예산 대비 등)는 무엇인가요?' },
-    ],
     general: [
         { label: '대상독자', question: '결과물을 누가 읽거나 사용할 예정인가요?' },
         { label: '시간제한', question: '언제까지 필요한 결과인가요?' },
@@ -64,7 +59,6 @@ function detectDomain(fields) {
     if (/(코드|개발|버그|디버그|api|db|repo|리포|테스트|리팩터)/i.test(source)) return 'coding';
     if (/(분석|리뷰|요약|리포트|대시보드|지표|원인)/i.test(source)) return 'analysis';
     if (/(toeic|토익|학습|암기|anki|공부|문제풀이)/i.test(source)) return 'study';
-    if (/(가계부|식비|예산|지출|수입|거래|정산|통장|현금)/i.test(source)) return 'finance';
     return 'general';
 }
 

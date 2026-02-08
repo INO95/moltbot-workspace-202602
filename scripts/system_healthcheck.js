@@ -32,7 +32,7 @@ function run() {
             checkFile(path.join(root, 'data/config.json')),
             checkFile(path.join(root, 'data/secure/google_creds.json')),
             checkFile(path.join(root, 'scripts/molt_engine.js')),
-            checkFile(path.join(root, 'scripts/sheet_finalizer.js')),
+            checkFile(path.join(root, 'scripts/prompt_form_webapp.js')),
         ],
     };
 

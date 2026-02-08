@@ -1,0 +1,43 @@
+SHELL=/bin/zsh
+PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# Morning Briefing
+0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "morning-briefing" -- "node scripts/morning_briefing.js" >> logs/cron.log 2>&1
+
+# Daily Telegram Digest
+30 8 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-telegram-digest" -- "node scripts/daily_telegram_digest.js" >> logs/cron.log 2>&1
+
+# News Digest fixed slots (07:00 overnight, 12:00 midday, 18:00 evening)
+0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-07" -- "NEWS_WINDOW_MINUTES=540 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+0 12 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-12" -- "NEWS_WINDOW_MINUTES=300 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+0 18 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-18" -- "NEWS_WINDOW_MINUTES=360 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+
+# News event-only checks (hourly in daytime; send only when threshold is exceeded)
+0 8-21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-event-hourly" -- "node scripts/news_digest.js event" >> logs/cron.log 2>&1
+
+# Daily Summary
+55 23 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-summary" -- "node scripts/daily_summary.js" >> logs/cron.log 2>&1
+
+# Nightly Autopilot (low-cost self-check/improvement batch)
+30 3 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "nightly-autopilot" -- "npm run -s nightly:autopilot" >> logs/cron.log 2>&1
+
+# Daily GitHub Status Report
+50 23 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-github-status" -- "node scripts/github_status_report.js" >> logs/cron.log 2>&1
+
+# Blog Draft from Reports (KO -> JA -> EN)
+20 0 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-blog-publish" -- "node scripts/blog_publish_from_reports.js" >> logs/cron.log 2>&1
+
+# Prompt Web Health Check (every 10 minutes, +5m offset)
+5-59/10 * * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "prompt-web-health" -- "node scripts/prompt_web_healthcheck.js" >> logs/cron.log 2>&1
+
+# Weekly Report
+0 12 * * 0 cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "weekly-report" -- "node scripts/weekly_report.js" >> logs/cron.log 2>&1
+
+# Private Repo Sync (every 30 minutes)
+*/30 * * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "private-sync-30m" -- "npm run -s private:sync-safe" >> logs/cron.log 2>&1
+
+# Private Repo Sync (hourly safety pass)
+5 * * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "private-sync-hourly" -- "npm run -s private:sync-safe" >> logs/cron.log 2>&1
+
+# Ops host worker (every minute): process queued restart requests + status snapshot refresh
+* * * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "ops-host-worker" -- "npm run -s ops:worker" >> logs/cron.log 2>&1
