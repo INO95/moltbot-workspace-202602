@@ -58,7 +58,8 @@
     "github:ensure": "node scripts/github_repo_manager.js ensure moltbot-workspace",
     "github:commit": "node scripts/github_repo_manager.js commit",
     "github:push": "node scripts/github_repo_manager.js push",
-    "docker:safe": "node scripts/docker_safe_exec.js"
+    "docker:safe": "node scripts/docker_safe_exec.js",
+    "test:word-enrichment": "node scripts/test_word_enrichment.js"
   },
   "keywords": [],
   "author": "",
