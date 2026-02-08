@@ -1,14 +1,11 @@
 /**
  * Weekly Report
- * - 월간 가계부 누계
- * - 건강 대시보드(데이터 없는 경우 기본 메시지)
+ * - 체크리스트 주간 리포트
  */
 
 const fs = require('fs');
 const path = require('path');
 const moltEngine = require('./molt_engine');
-const healthCapture = require('./health_capture');
-const financeManager = require('./finance_manager');
 
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) {
@@ -20,80 +17,23 @@ async function buildWeeklyReport() {
     const now = new Date();
     const date = now.toISOString().split('T')[0];
 
-    let monthly = { income: 0, expense: 0, balance: 0, byCategory: {}, effectiveExpense: 0 };
-    let health = null;
-    let liabilities = {};
+    let checklist = {};
 
     try {
-        monthly = await moltEngine.getMonthlyStats();
+        checklist = await moltEngine.getTodaySummary();
     } catch (e) {
-        const now = new Date();
-        const local = financeManager.getStats(now.getFullYear(), now.getMonth() + 1);
-        monthly = {
-            ...local,
-            effectiveExpense: Math.abs(local.expense || 0),
-            source: 'local-db',
-            error: `원격 조회 실패, 로컬 폴백 사용: ${e.message}`,
-        };
+        checklist = { error: `체크리스트 조회 실패: ${e.message}` };
     }
-
-    try {
-        health = healthCapture.getMonthlySummary();
-    } catch (e) {
-        health = { error: `건강 대시보드 조회 실패: ${e.message}` };
-    }
-
-    try {
-        liabilities = moltEngine.getCreditLiabilityStatus();
-    } catch {
-        liabilities = {};
-    }
-
-    const categoryText =
-        monthly.error || !monthly.byCategory
-            ? '- 없음'
-            : Object.entries(monthly.byCategory)
-                  .sort((a, b) => a[1] - b[1])
-                  .map(([k, v]) => `- ${k}: ${v}`)
-                  .join('\n');
 
     const lines = [
         `# Weekly Report (${date})`,
         '',
-        '## Monthly Finance Snapshot',
-        monthly.error
-            ? [
-                  `- ${monthly.error}`,
-                  `- Income: ${monthly.income || 0}`,
-                  `- Expense: ${monthly.expense || 0}`,
-                  `- Effective Expense: ${monthly.effectiveExpense || 0}`,
-                  `- Balance: ${monthly.balance || 0}`,
-              ].join('\n')
-            : [
-                  `- Income: ${monthly.income}`,
-                  `- Expense: ${monthly.expense}`,
-                  `- Effective Expense: ${monthly.effectiveExpense}`,
-                  `- Balance: ${monthly.balance}`,
-              ].join('\n'),
-        '',
-        '## Credit Pending',
-        Object.keys(liabilities).length === 0
-            ? '- 없음'
-            : Object.entries(liabilities)
-                  .map(([k, v]) => `- ${k}: ${v}`)
-                  .join('\n'),
-        '',
-        '## Category Breakdown',
-        categoryText,
-        '',
-        '## Health',
-        health.error
-            ? `- ${health.error}`
-            : [
-                  `- Running: ${health.running.sessions} sessions / ${health.running.distanceKm} km`,
-                  `- Workout: ${health.workouts.sessions} sessions / ${health.workouts.totalVolumeKg} kg volume`,
-                  `- Missing Areas: ${(health.workouts.missingAreas || []).join(', ') || '없음'}`,
-              ].join('\n'),
+        '## Checklist Snapshot',
+        checklist.error
+            ? `- ${checklist.error}`
+            : Object.keys(checklist).length === 0
+                ? '- 데이터 없음'
+                : Object.entries(checklist).map(([k, v]) => `- ${k}: ${v || '-'}`).join('\n'),
         '',
     ];
 

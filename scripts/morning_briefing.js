@@ -8,9 +8,6 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const moltEngine = require('./molt_engine');
-const healthDashboard = require('./health_dashboard');
-const healthCapture = require('./health_capture');
-const financeManager = require('./finance_manager');
 const { enqueueBridgePayload } = require('./bridge_queue');
 const NIGHTLY_AUTOPILOT_LOG = path.join(__dirname, '..', 'logs', 'nightly_autopilot_latest.json');
 
@@ -105,46 +102,7 @@ async function generateMorningBriefing() {
         briefing += `   일출 --:-- / 일몰 --:--\n\n`;
     }
 
-    // 2. 가계부 요약
-    try {
-        const stats = await moltEngine.getMonthlyStats();
-        const balance = await moltEngine.getBalance();
-
-        briefing += `💰 **이번 달 가계부**\n`;
-        briefing += `   수입: +${stats.income?.toLocaleString() || 0}엔\n`;
-        briefing += `   지출: ${stats.expense?.toLocaleString() || 0}엔\n`;
-        briefing += `   실질 지출: ${stats.effectiveExpense?.toLocaleString() || 0}엔\n`;
-        briefing += `   잔액: ${Object.values(balance).reduce((a, b) => a + b, 0).toLocaleString()}엔\n\n`;
-    } catch (e) {
-        const now = new Date();
-        const local = financeManager.getStats(now.getFullYear(), now.getMonth() + 1);
-        briefing += `💰 **이번 달 가계부(로컬 폴백)**\n`;
-        briefing += `   수입: +${(local.income || 0).toLocaleString()}엔\n`;
-        briefing += `   지출: ${(local.expense || 0).toLocaleString()}엔\n`;
-        briefing += `   실질 지출: ${Math.abs(local.expense || 0).toLocaleString()}엔\n\n`;
-    }
-
-    // 3. 건강 대시보드
-    try {
-        const health = await healthDashboard.generateDashboard({
-            sleepData: [],
-            exerciseHistory: healthCapture.getRecentExerciseHistory(21),
-        });
-        const monthly = healthCapture.getMonthlySummary();
-
-        briefing += `🏥 **건강 상태**\n`;
-        briefing += `   ${health.nutrition.message}\n`;
-        briefing += `   🏃 이번달 러닝: ${monthly.running.sessions}회 / ${monthly.running.distanceKm}km\n`;
-        briefing += `   🏋️ 이번달 웨이트: ${monthly.workouts.sessions}회\n`;
-        if (health.workout.recommendations.length > 0) {
-            briefing += `   🏋️ 오늘 추천 운동: ${health.workout.recommendations[0][1].name}\n`;
-        }
-        briefing += `\n`;
-    } catch (e) {
-        briefing += `🏥 **건강**: 대시보드 준비 중\n\n`;
-    }
-
-    // 4. 오늘 할 일 (체크리스트에서)
+    // 2. 오늘 할 일 (체크리스트에서)
     try {
         const today = await moltEngine.getTodaySummary();
         const todoItems = Object.entries(today).filter(([k, v]) => !v || v === '');
@@ -158,13 +116,12 @@ async function generateMorningBriefing() {
         // 체크리스트 없으면 생략
     }
 
-    // 5. TOEIC 학습 리마인더
+    // 3. TOEIC 학습 리마인더
     briefing += `📚 **학습 리마인더**\n`;
     briefing += `   • TOEIC 문법 일일 퀴즈\n`;
     briefing += `   • Anki 복습 카드\n\n`;
 
-    // 6. 마무리
-    // 6. 야간 자동개선 요약
+    // 4. 야간 자동개선 요약
     try {
         if (fs.existsSync(NIGHTLY_AUTOPILOT_LOG)) {
             const raw = fs.readFileSync(NIGHTLY_AUTOPILOT_LOG, 'utf8');
@@ -183,7 +140,7 @@ async function generateMorningBriefing() {
         // 야간 리포트 파싱 실패는 브리핑 본문을 막지 않는다.
     }
 
-    // 7. 마무리
+    // 5. 마무리
     briefing += `━━━━━━━━━━━━━━━━━━━━\n`;
     briefing += `좋은 하루 되세요! 🚀\n`;
     briefing += `_Powered by Moltbot + Antigravity_`;

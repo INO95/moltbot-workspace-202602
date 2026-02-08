@@ -40,16 +40,12 @@ function loadStateBase() {
 }
 
 function getBases() {
-  const financeEnv = normalizeHttpsBase(process.env.FINANCE_PUBLIC_BASE_URL || '');
   const promptEnv = normalizeHttpsBase(process.env.PROMPT_PUBLIC_BASE_URL || '');
-  const healthEnv = normalizeHttpsBase(process.env.HEALTH_PUBLIC_BASE_URL || '');
   const genericEnv = normalizeHttpsBase(process.env.DEV_TUNNEL_PUBLIC_BASE_URL || '');
   const stateBase = loadStateBase();
   const generic = genericEnv || stateBase || null;
   return {
-    finance: financeEnv || generic,
     prompt: promptEnv || generic,
-    health: healthEnv || generic,
   };
 }
 
@@ -82,9 +78,7 @@ async function run() {
   loadDotEnv();
   const bases = getBases();
   const targets = [
-    { key: 'finance', label: '가계부', path: '/finance/' },
     { key: 'prompt', label: '프롬프트', path: '/prompt/' },
-    { key: 'health', label: '건강', path: '/health/' },
   ];
 
   const rows = [];

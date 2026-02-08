@@ -17,9 +17,7 @@ const MAIN_SESSION_KEY = 'agent:main:main';
 const KNOWN_CONTAINERS = [
   'moltbot-main',
   'moltbot-sub1',
-  'moltbot-finance-web',
   'moltbot-prompt-web',
-  'moltbot-health-web',
   'moltbot-proxy',
   'moltbot-web-proxy',
   'moltbot-dev-tunnel',

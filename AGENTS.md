@@ -117,6 +117,22 @@ Reactions are lightweight social signals. Humans use them constantly — they sa
 
 Skills provide your tools. When you need one, check its `SKILL.md`. Keep local notes (camera names, SSH details, voice preferences) in `TOOLS.md`.
 
+### Telegram Command Router (Critical)
+
+- If a user message starts with any command prefix (`메모/기록/학습/단어/실행/작업/검토/점검/출시/배포/요약/리포트/프롬프트/질문/운영/상태/링크`) including spaced variants like `링크 :`, always process it through:
+  - `node scripts/bridge.js auto "<original message>"`
+- Do not answer command-prefixed messages from model memory alone.
+- For `링크:` requests, return only externally reachable URLs. Never return guessed/local-only URLs.
+- If bridge output includes `telegramReply`, prioritize that text verbatim as the user-facing response.
+
+### External Link Rule (Critical)
+
+- When sharing web links to the human, never output `127.0.0.1` or `localhost`.
+- Always return externally reachable URLs (tunnel/deployed domain).
+- If a local URL is generated during work, rewrite it before replying.
+- Preferred external paths:
+  - Prompt app: `<public-base>/prompt/`
+
 **🎭 Voice Storytelling:** If you have `sag` (ElevenLabs TTS), use voice for stories, movie summaries, and "storytime" moments! Way more engaging than walls of text. Surprise people with funny voices.
 
 **📝 Platform Formatting:**

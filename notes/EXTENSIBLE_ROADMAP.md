@@ -1,17 +1,14 @@
 # Extensible Roadmap
 
-Last updated: 2026-02-07
+Last updated: 2026-02-08
 
 ## Phase 1 (done)
-- Prefix-based intake (`기록:`, `단어:`, `운동:`)
-- Credit card settlement-aware finance recording
-- Reimbursement-aware effective expense tracking
-- Health capture ingestion from screenshot-style text
+- Prefix-based intake (`단어:`, `작업:`, `점검:`, `배포:`, `리포트:`)
+- Prompt/session workflow and codex-first complex task routing
 
 ## Phase 2 (next)
 - Add append-only bridge queue (`jsonl`) to avoid race conditions on `inbox.json` ✅
-- Add OCR parser plugin path (Apple Health XML + Mi Fitness export parsing) ✅
-- Add test fixtures for finance intent classification ✅
+- Add command template guardrails and ops queue handling ✅
 
 ## Phase 3
 - GitHub repo bootstrap + safe autopush with secret scanning gate ✅
@@ -23,4 +20,3 @@ Last updated: 2026-02-07
   - quality-sensitive tasks -> codex/deep
   - routine logs -> fast/rule-based
 - Cost/latency dashboard and alerting ✅
-- Health drop-folder auto import pipeline ✅
