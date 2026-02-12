@@ -29,9 +29,11 @@ const API_KEY =
     (ALLOW_FILE_TOKEN ? (proxyCfg.auth && proxyCfg.auth.accessToken) : '') ||
     '';
 const ALLOW_LOCAL_ONLY = !!(proxyCfg.security && proxyCfg.security.allowLocalOnly);
+const RATE_LIMIT_SAFE = String(process.env.RATE_LIMIT_SAFE_MODE || '').toLowerCase() === 'true';
 const ALLOW_PAID_API =
-    String(process.env.MOLTBOT_ALLOW_PAID_API || '').toLowerCase() === 'true' ||
-    !(budgetPolicy.monthlyApiBudgetYen === 0 && budgetPolicy.paidApiRequiresApproval === true);
+    !RATE_LIMIT_SAFE &&
+    (String(process.env.MOLTBOT_ALLOW_PAID_API || '').toLowerCase() === 'true' ||
+        !(budgetPolicy.monthlyApiBudgetYen === 0 && budgetPolicy.paidApiRequiresApproval === true));
 
 function isLocalAddress(address) {
     if (!address) return false;

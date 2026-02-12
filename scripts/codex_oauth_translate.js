@@ -45,10 +45,10 @@ function acquireLock(timeoutMs = 120000) {
 function releaseLock(fd) {
     try {
         if (typeof fd === 'number') fs.closeSync(fd);
-    } catch {}
+    } catch { }
     try {
         if (fs.existsSync(LOCK_PATH)) fs.unlinkSync(LOCK_PATH);
-    } catch {}
+    } catch { }
 }
 
 function runDocker(args, options = {}) {
@@ -112,13 +112,13 @@ function extractJsonObject(rawText) {
     const t = String(rawText || '').trim();
     try {
         return JSON.parse(t);
-    } catch {}
+    } catch { }
 
     const fenced = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fenced) {
         try {
             return JSON.parse(fenced[1]);
-        } catch {}
+        } catch { }
     }
 
     const firstBrace = t.indexOf('{');
@@ -147,6 +147,9 @@ function buildTranslatePrompt(sourceLang, targetLang, title, content) {
 }
 
 function translateWithCodex({ sourceLang, targetLang, title, content, thinking = 'high' }) {
+    if (String(process.env.RATE_LIMIT_SAFE_MODE || '').toLowerCase() === 'true') {
+        throw new Error('Codex OAuth blocked: RATE_LIMIT_SAFE_MODE is enabled');
+    }
     const lockFd = acquireLock();
     let originalModel = '';
     let codexModel = '';

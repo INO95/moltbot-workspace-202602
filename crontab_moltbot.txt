@@ -7,13 +7,13 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # Daily Telegram Digest
 30 8 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-telegram-digest" -- "node scripts/daily_telegram_digest.js" >> logs/cron.log 2>&1
 
-# News Digest fixed slots (07:00 overnight, 12:00 midday, 18:00 evening)
-0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-07" -- "NEWS_WINDOW_MINUTES=540 node scripts/news_digest.js send" >> logs/cron.log 2>&1
-0 12 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-12" -- "NEWS_WINDOW_MINUTES=300 node scripts/news_digest.js send" >> logs/cron.log 2>&1
-0 18 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-18" -- "NEWS_WINDOW_MINUTES=360 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+# News Digest fixed slots (07:00 overnight, 12:00 midday, 18:00 evening) [DISABLED – rate-limit safe mode]
+# 0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-07" -- "NEWS_WINDOW_MINUTES=540 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+# 0 12 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-12" -- "NEWS_WINDOW_MINUTES=300 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+# 0 18 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-18" -- "NEWS_WINDOW_MINUTES=360 node scripts/news_digest.js send" >> logs/cron.log 2>&1
 
-# News event-only checks (hourly in daytime; send only when threshold is exceeded)
-0 8-21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-event-hourly" -- "node scripts/news_digest.js event" >> logs/cron.log 2>&1
+# News event-only checks (hourly in daytime; send only when threshold is exceeded) [DISABLED – rate-limit safe mode]
+# 0 8-21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-event-hourly" -- "node scripts/news_digest.js event" >> logs/cron.log 2>&1
 
 # Daily Summary
 55 23 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-summary" -- "node scripts/daily_summary.js" >> logs/cron.log 2>&1
