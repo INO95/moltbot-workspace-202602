@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:anki": "node scripts/test_anki_connect.js && node scripts/test_anki_pipeline.js",
     "test:bridge-default-route": "node scripts/test_bridge_default_route.js",
     "model:sync-codex": "node scripts/openclaw_codex_sync.js",
     "health:system": "node scripts/system_healthcheck.js",
@@ -27,6 +28,7 @@
     "news:send": "node scripts/news_digest.js send",
     "news:event": "node scripts/news_digest.js event",
     "news:status": "node scripts/news_digest.js status",
+    "ops:standby-check": "node scripts/standby_cutover_check.js",
     "test:news": "node scripts/test_news_trend_engine.js && node scripts/test_news_digest.js && node scripts/test_bridge_news_route.js",
     "translate:codex": "node scripts/codex_oauth_translate.js",
     "notion:blog-sync": "node scripts/notion_blog_sync.js",
@@ -68,7 +70,6 @@
     "ai": "^6.0.69",
     "axios": "^1.13.4",
     "date-fns": "^4.1.0",
-    "google-auth-library": "^10.5.0",
     "google-spreadsheet": "^5.0.2",
     "moment": "^2.30.1",
     "playwright": "^1.58.1",
