@@ -159,6 +159,33 @@ function fallbackExample(word) {
     return `Our team is willing to use ${w} in business communication when appropriate.`;
 }
 
+function buildWordCandidates(word) {
+    const raw = String(word || '').trim().toLowerCase();
+    if (!raw) return [];
+    const out = [raw];
+    if (!/^[a-z][a-z-']{1,60}$/.test(raw)) {
+        return [...new Set(out)];
+    }
+    if (raw.endsWith('ies') && raw.length > 4) out.push(`${raw.slice(0, -3)}y`);
+    if (raw.endsWith('ied') && raw.length > 4) out.push(`${raw.slice(0, -3)}y`);
+    if (raw.endsWith('es') && raw.length > 3) out.push(raw.slice(0, -2));
+    if (raw.endsWith('s') && raw.length > 3) out.push(raw.slice(0, -1));
+    if (raw.endsWith('ing') && raw.length > 5) {
+        const stem = raw.slice(0, -3);
+        out.push(stem);
+        out.push(`${stem}e`);
+    }
+    if (raw.endsWith('ed') && raw.length > 4) {
+        const stem = raw.slice(0, -2);
+        out.push(stem);
+        out.push(`${stem}e`);
+        if (stem.length > 2 && stem[stem.length - 1] === stem[stem.length - 2]) {
+            out.push(stem.slice(0, -1));
+        }
+    }
+    return [...new Set(out)];
+}
+
 async function enrichToeicWord(word, hint) {
     const fallback = {
         meaning: fallbackMeaning(word) || hint || '(의미 보강 필요)',
@@ -167,21 +194,26 @@ async function enrichToeicWord(word, hint) {
     if (hint && String(hint).trim()) {
         return { ...fallback, meaning: String(hint).trim() };
     }
-    try {
-        const query = encodeURIComponent(String(word || '').trim());
-        const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${query}`;
-        const data = await httpGetJson(url);
-        const first = Array.isArray(data) ? data[0] : null;
-        const chosen = first ? chooseBestDefinition(first) : null;
-        if (!chosen) return fallback;
-        return {
-            meaning: simplifyMeaningForToeic(chosen.meaning, word),
-            example: String(chosen.example || '').trim() || fallbackExample(word),
-            partOfSpeech: chosen.partOfSpeech || '',
-        };
-    } catch {
-        return fallback;
+    const candidates = buildWordCandidates(word);
+    for (const candidate of candidates) {
+        try {
+            const query = encodeURIComponent(candidate);
+            const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${query}`;
+            const data = await httpGetJson(url);
+            const first = Array.isArray(data) ? data[0] : null;
+            const chosen = first ? chooseBestDefinition(first) : null;
+            if (!chosen) continue;
+            return {
+                meaning: simplifyMeaningForToeic(chosen.meaning, candidate),
+                example: String(chosen.example || '').trim() || fallbackExample(candidate),
+                partOfSpeech: chosen.partOfSpeech || '',
+                lemma: candidate,
+            };
+        } catch (_) {
+            // try next candidate
+        }
     }
+    return fallback;
 }
 
 function buildToeicAnswerRich(word, meaningText, exampleText, partOfSpeech = '') {
@@ -828,7 +860,18 @@ function handlePromptPayload(payloadText) {
     };
 }
 
-async function processWordTokens(text, toeicDeck, toeicTags) {
+function isWeakEnrichment(word, hint, enriched) {
+    const hasHint = Boolean(String(hint || '').trim());
+    if (hasHint) return false;
+    const meaning = String((enriched && enriched.meaning) || '').trim();
+    const example = String((enriched && enriched.example) || '').trim();
+    return meaning === '(의미 보강 필요)' && example === fallbackExample(word);
+}
+
+async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
+    const enrichFn = options.enrichFn || enrichToeicWord;
+    const addCardFn = options.addCardFn || ((deck, front, back, tags, addOpts) => anki.addCard(deck, front, back, tags, addOpts));
+    const syncFn = options.syncFn || (() => anki.syncWithDelay());
     const tokens = splitWords(text);
     const results = [];
     const failures = [];
@@ -842,14 +885,18 @@ async function processWordTokens(text, toeicDeck, toeicTags) {
             }
             const word = parsed.word;
             const hint = parsed.hint;
-            const enriched = await enrichToeicWord(word, hint);
+            const enriched = await enrichFn(word, hint);
+            if (isWeakEnrichment(word, hint, enriched)) {
+                failures.push({ token, reason: 'no_definition_found' });
+                continue;
+            }
             const answer = buildToeicAnswerRich(
                 word,
                 enriched.meaning,
                 enriched.example,
                 enriched.partOfSpeech || '',
             );
-            const noteId = await anki.addCard(toeicDeck, word, answer, toeicTags, { sync: false });
+            const noteId = await addCardFn(toeicDeck, word, answer, toeicTags, { sync: false });
             results.push({ word, noteId, deck: toeicDeck });
         } catch (e) {
             failures.push({ token, reason: e.message });
@@ -857,7 +904,7 @@ async function processWordTokens(text, toeicDeck, toeicTags) {
     }
     if (results.length > 0) {
         try {
-            await anki.syncWithDelay();
+            await syncFn();
         } catch (e) {
             console.log('Anki batch sync failed (non-critical):', e.message);
             failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
@@ -1191,4 +1238,16 @@ async function main() {
     }
 }
 
-main();
+if (require.main === module) {
+    main();
+}
+
+module.exports = {
+    parseWordToken,
+    enrichToeicWord,
+    processWordTokens,
+    buildToeicAnswerRich,
+    fallbackExample,
+    buildWordCandidates,
+    isWeakEnrichment,
+};
