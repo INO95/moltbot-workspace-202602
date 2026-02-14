@@ -1,52 +1,85 @@
 const http = require('http');
-const { spawnSync } = require('child_process');
-const path = require('path');
+const { URL } = require('url');
 
-const target = process.env.PROMPT_WEB_HEALTH_URL || 'http://127.0.0.1:18788/prompt/';
+const target = process.env.PROMPT_WEB_HEALTH_URL || 'http://127.0.0.1:18788/prompt';
 
-function check(urlText) {
+function requestOnce(urlText) {
     return new Promise((resolve, reject) => {
-        const req = http.get(urlText, res => {
-            const ok = res.statusCode >= 200 && res.statusCode < 300;
-            if (!ok) {
-                reject(new Error(`HTTP ${res.statusCode}`));
-                res.resume();
-                return;
-            }
+        const req = http.get(urlText, (res) => {
             res.resume();
-            resolve({ ok: true, statusCode: res.statusCode });
+            resolve({
+                statusCode: Number(res.statusCode || 0),
+                headers: res.headers || {},
+            });
         });
         req.setTimeout(6000, () => req.destroy(new Error('timeout')));
         req.on('error', reject);
     });
 }
 
-function runOpsWorkerBestEffort() {
-    const worker = path.join(__dirname, 'ops_host_worker.js');
-    const r = spawnSync('node', [worker], { encoding: 'utf8' });
-    if (!r.error && r.status === 0) return;
-    const msg = String(r.stderr || r.error || '').trim();
-    if (msg) console.warn(`[ops-worker] ${msg}`);
+function normalizeRedirectUrl(currentUrl, locationValue) {
+    const current = new URL(currentUrl);
+    const next = new URL(String(locationValue || '').trim(), current);
+    if (!next.port && next.hostname === current.hostname) {
+        next.port = current.port;
+    }
+    return next.toString();
 }
 
-function runNightlyAutopilotTriggerBestEffort() {
-    if (String(process.env.SKIP_AUTOPILOT_TRIGGER || '') === '1') return;
-    const trigger = path.join(__dirname, 'nightly_autopilot_trigger.js');
-    const r = spawnSync('node', [trigger], { encoding: 'utf8' });
-    if (!r.error && r.status === 0) return;
-    const msg = String(r.stderr || r.error || '').trim();
-    if (msg) console.warn(`[nightly-trigger] ${msg}`);
+function validateRedirectTarget(currentUrl, nextUrl) {
+    const current = new URL(currentUrl);
+    const next = new URL(nextUrl);
+    const sameHost = next.hostname === current.hostname;
+    const localHost = ['127.0.0.1', 'localhost'].includes(next.hostname);
+    if (!sameHost && !localHost) {
+        throw new Error(`redirect host mismatch: ${next.hostname}`);
+    }
+    if (!['http:', 'https:'].includes(next.protocol)) {
+        throw new Error(`invalid redirect protocol: ${next.protocol}`);
+    }
+    const okPath = next.pathname === '/' || next.pathname === '/prompt' || next.pathname === '/prompt/';
+    if (!okPath) {
+        throw new Error(`unexpected redirect path: ${next.pathname}`);
+    }
+}
+
+async function check(urlText) {
+    const first = await requestOnce(urlText);
+    if (first.statusCode >= 200 && first.statusCode < 500) {
+        return { ok: true, statusCode: first.statusCode, finalUrl: urlText, redirected: false };
+    }
+    if (first.statusCode >= 300 && first.statusCode < 400) {
+        const location = String(first.headers.location || '').trim();
+        if (!location) throw new Error(`HTTP ${first.statusCode} missing Location`);
+        const redirectedUrl = normalizeRedirectUrl(urlText, location);
+        validateRedirectTarget(urlText, redirectedUrl);
+        const second = await requestOnce(redirectedUrl);
+        if (second.statusCode >= 200 && second.statusCode < 300) {
+            return {
+                ok: true,
+                statusCode: second.statusCode,
+                finalUrl: redirectedUrl,
+                redirected: true,
+            };
+        }
+        if (second.statusCode >= 300 && second.statusCode < 500) {
+            return {
+                ok: true,
+                statusCode: second.statusCode,
+                finalUrl: redirectedUrl,
+                redirected: true,
+            };
+        }
+        throw new Error(`redirected HTTP ${second.statusCode}`);
+    }
+    throw new Error(`HTTP ${first.statusCode}`);
 }
 
 async function main() {
-    if (String(process.env.SKIP_OPS_WORKER || '') !== '1') {
-        runOpsWorkerBestEffort();
-    }
     const started = Date.now();
     const result = await check(target);
     const elapsedMs = Date.now() - started;
     console.log(JSON.stringify({ target, elapsedMs, ...result }));
-    runNightlyAutopilotTriggerBestEffort();
 }
 
 if (require.main === module) {

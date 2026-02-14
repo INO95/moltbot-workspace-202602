@@ -14,7 +14,13 @@ function run() {
   assert.deepStrictEqual(publish.getDefaultLangsForMode('briefing'), ['en', 'ja', 'ko']);
   assert.deepStrictEqual(publish.getDefaultLangsForMode('project'), ['en', 'ja', 'ko']);
 
+  assert.strictEqual(typeof publish.loadNotionSyncPolicy, 'function', 'loadNotionSyncPolicy must be exported');
+  const policy = publish.loadNotionSyncPolicy();
+  assert.ok(Array.isArray(policy.categories), 'sync policy categories must be array');
+  assert.ok(Array.isArray(policy.langs), 'sync policy langs must be array');
+
   assert.strictEqual(typeof publish.shouldSyncToNotion, 'function', 'shouldSyncToNotion must be exported');
+  assert.strictEqual(publish.shouldSyncToNotion({ category: 'briefing', lang: 'en' }), true);
   assert.strictEqual(publish.shouldSyncToNotion({ category: 'project', lang: 'en' }), true);
   assert.strictEqual(publish.shouldSyncToNotion({ category: 'project', lang: 'ja' }), false);
   assert.strictEqual(publish.shouldSyncToNotion({ category: 'log', lang: 'en' }), false);

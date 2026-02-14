@@ -69,6 +69,8 @@
     "cron:guard-test-fail": "node scripts/cron_guard.js --job \"test-failure\" -- \"node -e \\\"process.exit(1)\\\"\"",
     "blog:publish": "node scripts/blog_publish_from_reports.js",
     "test:blog-taxonomy": "node scripts/test_blog_taxonomy_policy.js",
+    "test:blog-dry-run": "node scripts/test_blog_publish_dry_run_no_mutation.js",
+    "test:blog-gh-fallback": "node scripts/test_blog_sync_repo_without_gh.js",
     "github:plan": "node scripts/github_repo_manager.js plan moltbot-workspace",
     "github:ensure": "node scripts/github_repo_manager.js ensure moltbot-workspace",
     "github:commit": "node scripts/github_repo_manager.js commit",
