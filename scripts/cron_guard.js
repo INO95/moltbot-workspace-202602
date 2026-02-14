@@ -1,12 +1,14 @@
 const { execSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const { enqueueBridgePayload } = require('./bridge_queue');
+const { loadRuntimeEnv } = require('./env_runtime');
 
 const ROOT = path.join(__dirname, '..');
 const LOG_PATH = path.join(ROOT, 'logs/cron_guard_latest.json');
-const ENV_PATH = path.join(ROOT, '.env');
+const ALERT_STATE_PATH = path.join(ROOT, 'logs/cron_guard_alert_state.json');
 
 function parseArgs(argv) {
     const args = { job: 'unknown-job', command: '' };
@@ -32,20 +34,6 @@ function ensureDir(filePath) {
 
 function nowIso() {
     return new Date().toISOString();
-}
-
-function loadDotEnv() {
-    if (!fs.existsSync(ENV_PATH)) return;
-    const lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
-    for (const line of lines) {
-        const t = String(line || '').trim();
-        if (!t || t.startsWith('#')) continue;
-        const idx = t.indexOf('=');
-        if (idx <= 0) continue;
-        const key = t.slice(0, idx).trim();
-        const value = t.slice(idx + 1).trim();
-        if (!process.env[key]) process.env[key] = value;
-    }
 }
 
 function truncate(text, limit = 1500) {
@@ -97,12 +85,96 @@ function appendAlertDeliveryLog(status, detail) {
     fs.appendFileSync(logPath, line, 'utf8');
 }
 
+function loadAlertState() {
+    try {
+        const raw = fs.readFileSync(ALERT_STATE_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.signatures && typeof parsed.signatures === 'object') {
+            return parsed;
+        }
+    } catch (_) {
+        // ignore
+    }
+    return { signatures: {} };
+}
+
+function saveAlertState(state) {
+    ensureDir(ALERT_STATE_PATH);
+    fs.writeFileSync(ALERT_STATE_PATH, JSON.stringify(state, null, 2), 'utf8');
+}
+
+function buildErrorSignature({ job, code, stderr }) {
+    const normalized = oneLine(stderr, 500).toLowerCase();
+    const digest = crypto.createHash('sha1').update(normalized).digest('hex').slice(0, 12);
+    return `${job}|${code}|${digest}`;
+}
+
+function pruneAlertState(state, nowMs) {
+    const keepMs = Number(process.env.CRON_GUARD_ALERT_KEEP_MS || 7 * 24 * 60 * 60 * 1000);
+    for (const [sig, value] of Object.entries(state.signatures || {})) {
+        const lastAtMs = Date.parse(value.lastAt || 0);
+        if (!Number.isFinite(lastAtMs) || (nowMs - lastAtMs) > keepMs) {
+            delete state.signatures[sig];
+        }
+    }
+}
+
+function shouldSendAlert({ job, code, stderr, atIso }) {
+    const nowMs = Date.parse(atIso);
+    const cooldownMs = Number(process.env.CRON_GUARD_ALERT_COOLDOWN_MS || 60 * 60 * 1000);
+    const signature = buildErrorSignature({ job, code, stderr });
+    const state = loadAlertState();
+    pruneAlertState(state, nowMs);
+
+    const row = state.signatures[signature] || {
+        count: 0,
+        firstAt: atIso,
+        lastAt: atIso,
+        lastSentAt: null,
+        job,
+        code,
+    };
+    row.count += 1;
+    row.lastAt = atIso;
+    row.job = job;
+    row.code = code;
+
+    const lastSentMs = row.lastSentAt ? Date.parse(row.lastSentAt) : 0;
+    const elapsed = Number.isFinite(lastSentMs) && lastSentMs > 0 ? (nowMs - lastSentMs) : Number.POSITIVE_INFINITY;
+    const send = elapsed >= cooldownMs;
+    if (send) row.lastSentAt = atIso;
+
+    state.signatures[signature] = row;
+    saveAlertState(state);
+    return {
+        send,
+        signature,
+        count: row.count,
+        firstAt: row.firstAt,
+        lastAt: row.lastAt,
+        cooldownMs,
+    };
+}
+
 function sendAlert({ job, command, code, stderr }) {
     const at = nowIso();
+    const dedupe = shouldSendAlert({ job, code, stderr, atIso: at });
+    if (!dedupe.send) {
+        appendAlertDeliveryLog('suppressed', `${job} sig=${dedupe.signature} count=${dedupe.count}`);
+        return {
+            sent: false,
+            suppressed: true,
+            ...dedupe,
+        };
+    }
     const mode = detectMode();
-    const message = formatAlertMessage({
+    const messageCore = formatAlertMessage({
         job, command, code, stderr, at, mode,
     });
+    const summary = dedupe.count > 1
+        ? `\nrepeat=${dedupe.count}, first=${dedupe.firstAt}, last=${dedupe.lastAt}`
+        : '';
+    const message = `${messageCore}${summary}`.trim();
     try {
         enqueueBridgePayload({
             taskId: `cron-fail-${Date.now()}`,
@@ -116,6 +188,11 @@ function sendAlert({ job, command, code, stderr }) {
         // Alert delivery must not crash cron guard itself.
     }
     sendTelegramAlert(message);
+    return {
+        sent: true,
+        suppressed: false,
+        ...dedupe,
+    };
 }
 
 function sendTelegramAlert(message) {
@@ -180,7 +257,7 @@ function runCommand(command) {
 }
 
 function main() {
-    loadDotEnv();
+    loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
     const { job, command } = parseArgs(process.argv);
     if (!command) {
         console.error('Usage: node scripts/cron_guard.js --job "<name>" -- <command>');

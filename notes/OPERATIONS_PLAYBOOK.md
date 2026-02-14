@@ -11,15 +11,42 @@
 ## Local bridge commands
 - `node scripts/bridge.js auto "<message>"`
 - `node scripts/openclaw_codex_sync.js [--restart]`
+- `node scripts/ag_bridge_client.js --duel "<work command>"`
+- `node scripts/ag_bridge_client.js --duel --allow-unstructured-critique "<work command>"` (legacy fallback)
 - `node scripts/codex_oauth_translate.js --target "Japanese|English" --title "<title>" --content "<markdown>"`
 - `node scripts/model_routing_report.js`
 - `node scripts/model_cost_latency_dashboard.js`
+- `node scripts/model_duel_report.js`
+- `node scripts/test_ag_bridge_duel_live_harness.js` (E2E dry-run harness)
+
+## OpenClaw container isolation (strict)
+- Invariants:
+  - OpenClaw runs only in containers (`moltbot-main`, `moltbot-sub1`).
+  - Only workspace bind mount is allowed for OpenClaw services.
+  - `.env` inside workspace is forbidden (container startup guard blocks it).
+  - OpenClaw ports are bound to `127.0.0.1` only.
+- Runtime env file:
+  - Preferred: `$HOME/.config/moltbot/runtime.env`
+  - Override: `MOLTBOT_ENV_FILE=/abs/path/to/runtime.env`
+  - Legacy root `.env` is temporary fallback only and logs a warning.
+- One-time migration:
+  - `npm run -s env:migrate-runtime`
+- Container lifecycle:
+  - `npm run -s openclaw:up`
+  - `npm run -s openclaw:down`
 
 ## Bridge queue
 - Primary queue log: `data/bridge/inbox.jsonl` (append-only)
 - Compatibility snapshot: `data/bridge/inbox.json` (latest task only)
 - Every enqueued payload includes compact `ackId` for traceability.
 - `ag_bridge_client`, `daily_telegram_digest`, and `morning_briefing` now enqueue to both.
+
+## Model duel log
+- Protocol doc: `notes/MODEL_DUEL_PROTOCOL.md`
+- Primary log: `data/bridge/model_duel.jsonl` (append-only JSONL)
+- Writer lock: `data/locks/model_duel.lock`
+- Default mode: 2-pass (`draft -> critique -> revision -> final`, maxRounds=1, timeout=120s)
+- Critique exchange: Antigravity is requested with `[DUEL_CRITIQUE_REQUEST:v1]` and should return strict JSON (`content/rubric/issues`)
 
 ## GitHub and blog
 - Prerequisite: GitHub CLI (`gh`) installed and authenticated.

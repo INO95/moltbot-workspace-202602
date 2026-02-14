@@ -23,10 +23,10 @@
 - 우선 경로: `/prompt/`
 
 ## 모델 라우팅 규칙
-- 기본 경로: `google/gemini-3-flash-preview`
-- 작업 경로: `openai-codex/gpt-5.2`
+- 기본 경로: `openai-codex/gpt-5.1-codex-mini`
+- 작업 경로: `openai-codex/gpt-5.2-codex`
 - `작업:` 요청은 Codex + 높은 추론 강도를 우선 사용
-- Codex OAuth 미인증 시 Gemini로 폴백하고 신뢰도 저하를 명시
+- Codex OAuth 인증 이슈가 발생하면 OpenAI 경로에서 복구를 우선하고 Gemini 폴백은 사용하지 않음
 
 ---
 
@@ -71,3 +71,6 @@ cd ~/Documents/Moltbot_Workspace/docker
 ## 보안 원칙
 - Root 권한 차단
 - 민감 정보 저장/전송 금지
+- OpenClaw는 컨테이너 내부에서만 실행
+- OpenClaw는 workspace 단일 마운트만 허용 (`.env` 마운트 금지)
+- OpenClaw 포트는 `127.0.0.1` 바인딩만 허용

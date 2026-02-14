@@ -2,12 +2,12 @@
 
 ## Current strategy
 
-- Default: `google/gemini-3-flash-preview` (`fast`)
-- Fallback (failover): `google/gemini-3-pro-preview` (`deep`) -> `openai-codex/gpt-5.2` (`codex`)
-- Additional models enabled: `openai/gpt-5-mini` (`gptmini`), `openai/gpt-5.2` (`gpt`), `openai-codex/gpt-5.2` (`codex`)
-- Budget policy default: monthly paid API budget is `0 JPY`, so OpenAI API fallback is disabled by default.
+- Default: `openai-codex/gpt-5.1-codex-mini` (`fast`)
+- Deep/complex route: `openai-codex/gpt-5.2-codex` (`deep`, `codex`)
+- Fallback (failover): `openai-codex/gpt-5.2` -> `openai-codex/gpt-5.1`
+- Budget policy default: monthly paid API budget is `0 JPY`; direct API-key spend stays disabled by default.
 - Fallback runs only on provider/auth/rate-limit/timeout failures.
-- Setting a ChatGPT web session token alone does not switch default routing unless the OpenClaw model/auth path is explicitly configured.
+- Routing policy is OpenAI-only; Gemini fallback is disabled.
 
 ## Manual model switch (recommended for task complexity)
 
@@ -21,15 +21,25 @@
 
 ## Why this setup
 
-- Flash keeps routine interactions cheap and responsive.
-- Pro is reserved for complex reasoning or when fallback is needed.
-- This avoids running expensive models for every short message.
+- `gpt-5.1-codex-mini` keeps routine interactions responsive.
+- `gpt-5.2-codex` is reserved for complex reasoning/code accuracy.
+- A single-provider policy removes cross-provider drift and simplifies ops.
 
 ## Security checklist
 
+- Container isolation invariants:
+  - OpenClaw services mount workspace only (`/home/node/.openclaw/workspace`).
+  - OpenClaw runtime state is stored in named volumes (`openclaw_main_state`, `openclaw_sub1_state`).
+  - `.env` in workspace is forbidden; use external runtime env file.
+  - OpenClaw gateway ports bind to `127.0.0.1` only.
+- Runtime env standard:
+  - default path: `$HOME/.config/moltbot/runtime.env`
+  - override: `MOLTBOT_ENV_FILE=/absolute/path/runtime.env`
+  - root `.env` fallback is temporary compatibility mode only.
 - Keep provider API keys in `auth-profiles.json` (ignored by git) or env vars.
-- Prefer env vars for secrets: `GEMINI_API_KEY`, `OPENAI_API_KEY`.
+- Prefer env vars for secrets: `OPENAI_API_KEY` (if direct API is enabled).
+- Block Gemini/Google env injection in runtime compose config (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OPENCLAW_GEMINI_API_KEY`, `OPENCLAW_GOOGLE_API_KEY` = empty).
 - For OpenAI/Codex subscription routing, login/paste token only if required by provider and avoid storing plain tokens in repo files.
-- `openclaw.json` env substitution is strict; verify required vars are injected before switching to `${VAR}`.
+- `openclaw.json` edits must be applied inside container (`docker exec`) rather than host `configs/...` direct edits.
 - Keep `allowFrom` restricted to owner ID on Telegram.
 - Do not commit session/auth files or `data/secure/*`.

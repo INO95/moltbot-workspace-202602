@@ -1,4 +1,27 @@
 services:
+  openclaw-init:
+    image: node:20-alpine
+    container_name: moltbot-openclaw-init
+    user: "0:0"
+    volumes:
+      - openclaw_main_state:/state-main:rw
+      - openclaw_sub1_state:/state-sub1:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace/configs/main:/seed-main:ro
+      - /Users/moltbot/Projects/Moltbot_Workspace/configs/sub1:/seed-sub1:ro
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        set -eu
+        if [ ! -f /state-main/openclaw.json ] && [ -f /seed-main/openclaw.json ]; then
+          cp -r /seed-main/. /state-main/
+        fi
+        if [ ! -f /state-sub1/openclaw.json ] && [ -f /seed-sub1/openclaw.json ]; then
+          cp -r /seed-sub1/. /state-sub1/
+        fi
+        chown -R 1000:1000 /state-main /state-sub1
+    restart: "no"
+
   prompt-web:
     image: node:20-alpine
     container_name: moltbot-prompt-web
@@ -44,52 +67,86 @@ services:
   openclaw-main:
     image: openclaw:local
     container_name: moltbot-main
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
     environment:
       HOME: /home/node
       TERM: xterm-256color
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_USER_ID: ${TELEGRAM_USER_ID}
     volumes:
-      - ./configs/main:/home/node/.openclaw:rw
-      - ./:/home/node/.openclaw/workspace:rw
+      - openclaw_main_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
     ports:
-      - "18789:18789"
-      - "18790:18790"
+      - "127.0.0.1:18789:18789"
+      - "127.0.0.1:18790:18790"
     init: true
     restart: unless-stopped
     networks:
       - moltbot-network
-    command: [ "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789" ]
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-main] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        exec node dist/index.js gateway --bind loopback --port 18789
 
   # 서브 OpenClaw
   openclaw-sub1:
     image: openclaw:local
     container_name: moltbot-sub1
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
     environment:
       HOME: /home/node
       TERM: xterm-256color
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_SUB1}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_SUB1:-}
       TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_SUB1:-}
     volumes:
-      - ./configs/sub1:/home/node/.openclaw:rw
-      - ./:/home/node/.openclaw/workspace:rw
+      - openclaw_sub1_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
     ports:
-      - "18889:18789"
-      - "18890:18790"
+      - "127.0.0.1:18889:18789"
+      - "127.0.0.1:18890:18790"
     init: true
     restart: unless-stopped
     networks:
       - moltbot-network
-    command: [ "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789" ]
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-sub1] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        exec node dist/index.js gateway --bind loopback --port 18789
     profiles:
       - sub
 
 networks:
   moltbot-network:
     driver: bridge
+
+volumes:
+  openclaw_main_state:
+  openclaw_sub1_state:
