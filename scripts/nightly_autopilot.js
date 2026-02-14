@@ -32,7 +32,7 @@ function step(name, cmd, args, envAdd = {}) {
   const startedAt = nowIso();
   const r = run(cmd, args, envAdd);
   const endedAt = nowIso();
-  return {
+  const out = {
     name,
     command: [cmd, ...args].join(' '),
     startedAt,
@@ -43,6 +43,41 @@ function step(name, cmd, args, envAdd = {}) {
     stderr: r.stderr.slice(0, 4000),
     error: r.error,
   };
+  if (name === 'blog-publish-dry-run') {
+    return normalizeBlogDryRunStep(out);
+  }
+  return out;
+}
+
+function extractJsonPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const first = raw.indexOf('{');
+  const last = raw.lastIndexOf('}');
+  if (first < 0 || last <= first) return null;
+  const candidate = raw.slice(first, last + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBlogDryRunStep(stepResult) {
+  const parsed = extractJsonPayload(stepResult.stdout) || extractJsonPayload(stepResult.stderr);
+  if (!parsed || typeof parsed !== 'object') return stepResult;
+  const reason = String(parsed.reason || '').trim().toLowerCase();
+  const skipReasonsAsOk = new Set(['no_recent_reports', 'policy_filtered']);
+  if (parsed.skipped === true && skipReasonsAsOk.has(reason)) {
+    return {
+      ...stepResult,
+      ok: true,
+      code: 0,
+      normalized: true,
+      normalizedReason: reason,
+    };
+  }
+  return stepResult;
 }
 
 function summarize(report) {

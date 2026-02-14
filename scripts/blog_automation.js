@@ -66,7 +66,10 @@ defaults:
 
     // AI 활용 기록을 3개 국어로 포스트 생성
     async createMultilingualPost(title, sourceContent, tags = [], options = {}) {
-        this.initBlogStructure();
+        const shouldWrite = options.write !== false;
+        if (shouldWrite) {
+            this.initBlogStructure();
+        }
 
         const date = new Date().toISOString().split('T')[0];
         const slug = this.slugify(title);
@@ -129,9 +132,15 @@ lang: ${langCode}
 
 `;
             const fullContent = frontMatter + translation.content;
-            fs.writeFileSync(filepath, fullContent);
+            if (shouldWrite) {
+                fs.writeFileSync(filepath, fullContent);
+            }
             createdPosts.push(filepath);
-            console.log(`📝 Created: ${filepath}`);
+            if (shouldWrite) {
+                console.log(`📝 Created: ${filepath}`);
+            } else {
+                console.log(`🧪 Planned: ${filepath}`);
+            }
         }
 
         return createdPosts;
@@ -325,18 +334,36 @@ Output (JSON only):`;
 
     syncBlogRepo() {
         const cwd = this.blogDir;
-        const owner = this.resolveGitHubOwner();
-        const repoName = `${owner.toLowerCase()}.github.io`;
-        const fullName = `${owner}/${repoName}`;
-        const repoUrl = `https://github.com/${fullName}.git`;
-        const defaultBranch = this.ensureBlogRemote(fullName, repoUrl);
-
         if (!fs.existsSync(path.join(cwd, '.git'))) {
             execSync('git init', { cwd });
             console.log('📦 Git repository initialized');
         }
-        this.prepareBranchForRemote(cwd, defaultBranch);
-        return { owner, fullName, repoUrl, branch: defaultBranch };
+
+        const existingRemote = this.getOriginRemote(cwd);
+        if (existingRemote) {
+            const branch = this.resolvePreferredBranch(cwd, 'main');
+            this.prepareBranchForRemote(cwd, branch);
+            return {
+                owner: null,
+                fullName: null,
+                repoUrl: existingRemote,
+                branch,
+            };
+        }
+
+        const owner = this.resolveGitHubOwner();
+        const repoName = `${owner.toLowerCase()}.github.io`;
+        const fullName = `${owner}/${repoName}`;
+        const repoUrl = `https://github.com/${fullName}.git`;
+        const ensured = this.ensureBlogRemote(fullName, repoUrl);
+        const branch = this.resolvePreferredBranch(cwd, ensured.branch || 'main');
+        this.prepareBranchForRemote(cwd, branch);
+        return {
+            owner,
+            fullName,
+            repoUrl: ensured.repoUrl || repoUrl,
+            branch,
+        };
     }
 
     // 일일 AI 활용 기록 자동 생성
@@ -366,6 +393,51 @@ Output (JSON only):`;
 
     runGit(cwd, command) {
         return execSync(command, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf8').trim();
+    }
+
+    getOriginRemote(cwd) {
+        try {
+            return this.runGit(cwd, 'git remote get-url origin');
+        } catch {
+            return '';
+        }
+    }
+
+    getCurrentBranch(cwd) {
+        try {
+            return this.runGit(cwd, 'git branch --show-current');
+        } catch {
+            return '';
+        }
+    }
+
+    getTrackingBranch(cwd) {
+        try {
+            const upstream = this.runGit(cwd, 'git rev-parse --abbrev-ref --symbolic-full-name @{u}');
+            const match = String(upstream || '').match(/^origin\/(.+)$/);
+            return match ? match[1] : '';
+        } catch {
+            return '';
+        }
+    }
+
+    getRemoteHeadBranch(cwd) {
+        try {
+            const out = this.runGit(cwd, 'git ls-remote --symref origin HEAD');
+            const match = String(out || '').match(/ref:\s+refs\/heads\/([^\s]+)\s+HEAD/);
+            return match ? match[1] : '';
+        } catch {
+            return '';
+        }
+    }
+
+    resolvePreferredBranch(cwd, fallback = 'main') {
+        return (
+            this.getTrackingBranch(cwd)
+            || this.getRemoteHeadBranch(cwd)
+            || this.getCurrentBranch(cwd)
+            || fallback
+        );
     }
 
     hasGitCommit(cwd) {
@@ -417,6 +489,7 @@ Output (JSON only):`;
 
     prepareBranchForRemote(cwd, branch) {
         const remoteBranch = `origin/${branch}`;
+        const currentBranch = this.getCurrentBranch(cwd);
         const hasRemoteBranch = this.remoteBranchExists(cwd, branch);
         if (hasRemoteBranch) {
             this.runGit(cwd, `git fetch origin ${branch}`);
@@ -432,12 +505,12 @@ Output (JSON only):`;
         }
 
         if (!hasRemoteBranch) {
-            this.runGit(cwd, `git checkout -B ${branch}`);
+            if (currentBranch !== branch) this.runGit(cwd, `git checkout -B ${branch}`);
             return;
         }
 
         if (this.hasMergeBase(cwd, 'HEAD', remoteBranch)) {
-            this.runGit(cwd, `git checkout -B ${branch}`);
+            if (currentBranch !== branch) this.runGit(cwd, `git checkout -B ${branch}`);
             return;
         }
 
@@ -470,6 +543,18 @@ Output (JSON only):`;
 
     ensureBlogRemote(fullName, repoUrl) {
         const cwd = this.blogDir;
+        if (!fs.existsSync(path.join(cwd, '.git'))) {
+            execSync('git init', { cwd });
+        }
+
+        const existingRemote = this.getOriginRemote(cwd);
+        if (existingRemote) {
+            return {
+                branch: this.resolvePreferredBranch(cwd, 'main'),
+                repoUrl: existingRemote,
+            };
+        }
+
         let branch = 'main';
         try {
             const infoRaw = this.runGit(
@@ -479,30 +564,20 @@ Output (JSON only):`;
             const info = JSON.parse(infoRaw);
             branch = (info.defaultBranchRef && info.defaultBranchRef.name) || 'main';
         } catch {
-            this.runGit(process.cwd(), `gh repo create ${fullName} --public --disable-wiki --description "Moltbot AI logs blog"`);
+            try {
+                this.runGit(process.cwd(), `gh repo create ${fullName} --public --disable-wiki --description "Moltbot AI logs blog"`);
+            } catch {
+                // If gh is unavailable in cron context, keep local remote wiring only.
+            }
             branch = 'main';
         }
-
-        if (!fs.existsSync(path.join(cwd, '.git'))) {
-            execSync('git init', { cwd });
-        }
-
-        let remote = '';
-        try {
-            remote = this.runGit(cwd, 'git remote get-url origin');
-        } catch {
-            // no-op
-        }
-        if (!remote) {
-            this.runGit(cwd, `git remote add origin ${repoUrl}`);
-        } else if (remote !== repoUrl) {
-            this.runGit(cwd, `git remote set-url origin ${repoUrl}`);
-        }
-        return branch;
+        this.runGit(cwd, `git remote add origin ${repoUrl}`);
+        return { branch, repoUrl };
     }
 }
 
 module.exports = new BlogAutomation();
+module.exports.BlogAutomation = BlogAutomation;
 
 // 테스트
 if (require.main === module) {

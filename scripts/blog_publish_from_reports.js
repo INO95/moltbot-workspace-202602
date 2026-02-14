@@ -4,10 +4,16 @@ const crypto = require('crypto');
 const blogAutomation = require('./blog_automation');
 const { buildMemoirPost } = require('./blog_memoir_builder');
 const { syncBlogMemoToNotion } = require('./notion_blog_sync');
+const { loadRuntimeEnv } = require('./env_runtime');
 
 const reportsDir = path.join(__dirname, '../logs/reports');
 const publishStatePath = path.join(__dirname, '../data/blog_publish_state.json');
 const allowedModes = ['log', 'briefing', 'project'];
+const allowedLangs = ['en', 'ja', 'ko'];
+const defaultNotionSyncPolicy = Object.freeze({
+    categories: ['briefing', 'project'],
+    langs: ['en'],
+});
 
 function normalizeMode(input) {
     const mode = String(input || '').trim().toLowerCase();
@@ -30,8 +36,55 @@ function getDefaultLangsForMode(mode) {
     return ['en', 'ja', 'ko'];
 }
 
-function shouldSyncToNotion({ category, lang }) {
-    return String(category || '') === 'project' && String(lang || '') === 'en';
+function parsePolicyList(input, fallback, allowed) {
+    const raw = String(input || '').trim();
+    if (!raw) return [...fallback];
+    const picked = raw
+        .split(',')
+        .map((x) => x.trim().toLowerCase())
+        .filter(Boolean)
+        .filter((x, idx, arr) => arr.indexOf(x) === idx)
+        .filter((x) => !Array.isArray(allowed) || allowed.includes(x));
+    return picked.length ? picked : [...fallback];
+}
+
+function normalizeNotionSyncPolicy(policy) {
+    const src = policy && typeof policy === 'object' ? policy : {};
+    const categoriesRaw = Array.isArray(src.categories) ? src.categories.join(',') : src.categories;
+    const langsRaw = Array.isArray(src.langs) ? src.langs.join(',') : src.langs;
+    return {
+        categories: parsePolicyList(
+            categoriesRaw,
+            defaultNotionSyncPolicy.categories,
+            allowedModes,
+        ),
+        langs: parsePolicyList(
+            langsRaw,
+            defaultNotionSyncPolicy.langs,
+            allowedLangs,
+        ),
+    };
+}
+
+function loadNotionSyncPolicy() {
+    const categories = parsePolicyList(
+        process.env.MOLTBOT_NOTION_SYNC_CATEGORIES || process.env.NOTION_SYNC_CATEGORIES,
+        defaultNotionSyncPolicy.categories,
+        allowedModes,
+    );
+    const langs = parsePolicyList(
+        process.env.MOLTBOT_NOTION_SYNC_LANGS || process.env.NOTION_SYNC_LANGS,
+        defaultNotionSyncPolicy.langs,
+        allowedLangs,
+    );
+    return { categories, langs };
+}
+
+function shouldSyncToNotion({ category, lang }, policy = defaultNotionSyncPolicy) {
+    const normalized = normalizeNotionSyncPolicy(policy);
+    const c = String(category || '').trim().toLowerCase();
+    const l = String(lang || '').trim().toLowerCase();
+    return normalized.categories.includes(c) && normalized.langs.includes(l);
 }
 
 function parseArgs(argv) {
@@ -111,15 +164,21 @@ function buildModeTitle(mode, isoDate) {
     return `Daily Briefing ${isoDate}`;
 }
 
-async function buildEnglishSource(memoir, mode) {
+async function buildEnglishSource(memoir, mode, options = {}) {
     const isoDate = new Date().toISOString().slice(0, 10);
+    const title = buildModeTitle(mode, isoDate);
+    if (options.skipTranslation) {
+        return {
+            title,
+            markdown: String(memoir.contentKo || '').trim(),
+        };
+    }
     const translated = await blogAutomation.translateOrFallback(
         'English',
         memoir.title,
         memoir.contentKo,
         'Korean',
     );
-    const title = buildModeTitle(mode, isoDate);
     const markdown = String(translated && translated.content ? translated.content : memoir.contentKo).trim();
     return {
         title,
@@ -128,7 +187,9 @@ async function buildEnglishSource(memoir, mode) {
 }
 
 async function publishFromReports() {
+    loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
     const opts = parseArgs(process.argv);
+    const syncPolicy = loadNotionSyncPolicy();
     const files = listRecentReports(opts.hours).slice(0, opts.maxReports);
     if (files.length === 0) {
         return {
@@ -136,6 +197,10 @@ async function publishFromReports() {
             reason: 'no_recent_reports',
             lookedBackHours: opts.hours,
             deploy: opts.deploy,
+            dryRun: opts.dryRun,
+            mutated: false,
+            plannedPosts: [],
+            syncPolicy,
         };
     }
     const sourceKey = buildSourceKey([...files, `mode:${opts.mode}`, `langs:${opts.langs.join(',')}`]);
@@ -150,17 +215,25 @@ async function publishFromReports() {
             sourceKey,
             lastPublishedAt: state[stateKey].publishedAt || null,
             deploy: opts.deploy,
+            dryRun: opts.dryRun,
+            mutated: false,
+            plannedPosts: [],
+            syncPolicy,
         };
     }
 
     // 원격 블로그 리포를 먼저 동기화해서 커밋 히스토리 충돌을 예방한다.
-    blogAutomation.syncBlogRepo();
+    if (!opts.dryRun && opts.deploy) {
+        blogAutomation.syncBlogRepo();
+    }
 
     const memoir = buildMemoirPost({
         hours: opts.hours,
         maxReports: opts.maxReports,
     });
-    const source = await buildEnglishSource(memoir, opts.mode);
+    const source = await buildEnglishSource(memoir, opts.mode, {
+        skipTranslation: Boolean(opts.dryRun),
+    });
     const posts = await blogAutomation.createMultilingualPost(source.title, source.markdown, [
         ...(memoir.tags || []),
     ], {
@@ -168,12 +241,16 @@ async function publishFromReports() {
         sourceLang: 'en',
         langs: opts.langs,
         skipTranslation: Boolean(opts.dryRun),
+        write: !opts.dryRun,
     });
+    const plannedPosts = [...posts];
 
     const enPost = posts.find(p => p.includes(`${path.sep}en${path.sep}`)) || posts[0] || '';
     const slug = enPost ? path.basename(enPost, '.md').replace(/^\d{4}-\d{2}-\d{2}-/, '') : '';
-    let notion = { synced: false, skipped: true, reason: 'policy_filtered' };
-    if (shouldSyncToNotion({ category: opts.mode, lang: 'en' })) {
+    let notion = { synced: false, skipped: true, reason: 'policy_filtered', policy: syncPolicy };
+    if (opts.dryRun) {
+        notion = { synced: false, skipped: true, reason: 'dry_run_no_sync', policy: syncPolicy };
+    } else if (shouldSyncToNotion({ category: opts.mode, lang: 'en' }, syncPolicy)) {
         notion = await syncBlogMemoToNotion({
             slug,
             title: source.title,
@@ -182,11 +259,12 @@ async function publishFromReports() {
             lang: 'en',
             tags: memoir.tags || [],
             sourceFiles: memoir.files || files,
+            syncPolicy,
         });
     }
 
     let deploy = null;
-    if (opts.deploy) deploy = await blogAutomation.deployToGitHub();
+    if (!opts.dryRun && opts.deploy) deploy = await blogAutomation.deployToGitHub();
 
     if (!opts.dryRun) {
         state[stateKey] = {
@@ -205,8 +283,12 @@ async function publishFromReports() {
         lookedBackHours: opts.hours,
         files,
         posts,
+        dryRun: opts.dryRun,
+        mutated: !opts.dryRun,
+        plannedPosts,
         mode: opts.mode,
         langs: opts.langs,
+        syncPolicy,
         notion,
         deploy,
     };
@@ -224,6 +306,7 @@ if (require.main === module) {
 module.exports = {
     parseArgs,
     getDefaultLangsForMode,
+    loadNotionSyncPolicy,
     shouldSyncToNotion,
     publishFromReports,
 };

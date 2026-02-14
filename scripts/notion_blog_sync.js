@@ -9,6 +9,10 @@ const notionVersion = '2022-06-28';
 const indexPath = path.join(__dirname, '../data/notion_blog_index.json');
 const logLatestPath = path.join(__dirname, '../logs/notion_sync_latest.json');
 const logHistoryPath = path.join(__dirname, '../logs/notion_sync_history.jsonl');
+const defaultSyncPolicy = Object.freeze({
+    categories: ['project'],
+    langs: ['en'],
+});
 
 function ensureIndexFile() {
     if (fs.existsSync(indexPath)) return;
@@ -41,6 +45,32 @@ function pickPrimaryCategory(categories) {
         return categories.trim().toLowerCase();
     }
     return '';
+}
+
+function normalizePolicyList(input, fallback, allowed) {
+    const base = Array.isArray(input)
+        ? input
+        : String(input || '').split(',');
+    const picked = base
+        .map((x) => String(x || '').trim().toLowerCase())
+        .filter(Boolean)
+        .filter((x, idx, arr) => arr.indexOf(x) === idx)
+        .filter((x) => !Array.isArray(allowed) || allowed.includes(x));
+    return picked.length ? picked : [...fallback];
+}
+
+function normalizeSyncPolicy(input) {
+    const src = input && typeof input === 'object' ? input : {};
+    return {
+        categories: normalizePolicyList(src.categories, defaultSyncPolicy.categories, ['log', 'briefing', 'project']),
+        langs: normalizePolicyList(src.langs, defaultSyncPolicy.langs, ['en', 'ja', 'ko']),
+    };
+}
+
+function isPolicyAllowed(policy, category, lang) {
+    const c = String(category || '').trim().toLowerCase();
+    const l = String(lang || '').trim().toLowerCase();
+    return policy.categories.includes(c) && policy.langs.includes(l);
 }
 
 function appendSyncLog(entry) {
@@ -193,13 +223,23 @@ async function syncBlogMemoToNotion(input) {
     loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
     const token = process.env.NOTION_API_KEY || '';
     const parentPageId = process.env.NOTION_PARENT_PAGE_ID || '';
+    const policy = normalizeSyncPolicy(input && input.syncPolicy);
     if (!token || !parentPageId) {
-        return {
+        const result = {
             synced: false,
             skipped: true,
             reason: 'missing_notion_env',
             required: ['NOTION_API_KEY', 'NOTION_PARENT_PAGE_ID'],
+            policy,
         };
+        appendSyncLog({
+            ok: true,
+            action: 'skip',
+            slug: String(input && input.slug ? input.slug : ''),
+            title: String(input && input.title ? input.title : ''),
+            reason: result.reason,
+        });
+        return result;
     }
 
     const slug = String(input.slug || '').trim();
@@ -207,21 +247,38 @@ async function syncBlogMemoToNotion(input) {
     const category = pickPrimaryCategory(input.categories);
     const lang = String(input.lang || '').trim().toLowerCase();
     if (!slug || !title) {
-        return {
+        const result = {
             synced: false,
             skipped: true,
             reason: 'missing_slug_or_title',
+            policy,
         };
+        appendSyncLog({
+            ok: true,
+            action: 'skip',
+            slug,
+            title,
+            reason: result.reason,
+        });
+        return result;
     }
-    if (input.enforcePolicy !== false && (category !== 'project' || lang !== 'en')) {
-        return {
+    if (input.enforcePolicy !== false && !isPolicyAllowed(policy, category, lang)) {
+        const result = {
             synced: false,
             skipped: true,
             reason: 'policy_filtered',
-            policy: 'project_en_only',
+            policy,
             category,
             lang,
         };
+        appendSyncLog({
+            ok: true,
+            action: 'skip',
+            slug,
+            title,
+            reason: result.reason,
+        });
+        return result;
     }
 
     const markdown = String(input.markdown || '').trim();
