@@ -2,27 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const crypto = require('crypto');
+const { loadRuntimeEnv } = require('./env_runtime');
 
 const notionBase = 'https://api.notion.com/v1';
 const notionVersion = '2022-06-28';
 const indexPath = path.join(__dirname, '../data/notion_blog_index.json');
-const envPath = path.join(__dirname, '../.env');
 const logLatestPath = path.join(__dirname, '../logs/notion_sync_latest.json');
 const logHistoryPath = path.join(__dirname, '../logs/notion_sync_history.jsonl');
-
-function loadDotEnv() {
-    if (!fs.existsSync(envPath)) return;
-    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const idx = trimmed.indexOf('=');
-        if (idx <= 0) continue;
-        const key = trimmed.slice(0, idx).trim();
-        const value = trimmed.slice(idx + 1).trim();
-        if (!process.env[key]) process.env[key] = value;
-    }
-}
 
 function ensureIndexFile() {
     if (fs.existsSync(indexPath)) return;
@@ -204,7 +190,7 @@ async function createPage(client, parentPageId, title, blocks) {
 }
 
 async function syncBlogMemoToNotion(input) {
-    loadDotEnv();
+    loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
     const token = process.env.NOTION_API_KEY || '';
     const parentPageId = process.env.NOTION_PARENT_PAGE_ID || '';
     if (!token || !parentPageId) {

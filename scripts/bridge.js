@@ -2,29 +2,22 @@ const engine = require('./molt_engine');
 const anki = require('./anki_connect');
 const config = require('../data/config.json');
 const promptBuilder = require('./prompt_builder');
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const ENV_PATH = path.join(__dirname, '..', '.env');
-
-function loadDotEnv() {
-    try {
-        if (!fs.existsSync(ENV_PATH)) return;
-        const lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
-        for (const line of lines) {
-            const trimmed = String(line || '').trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
-            const idx = trimmed.indexOf('=');
-            if (idx <= 0) continue;
-            const key = trimmed.slice(0, idx).trim();
-            const value = trimmed.slice(idx + 1).trim();
-            if (!process.env[key]) process.env[key] = value;
-        }
-    } catch (_) { }
-}
-
-loadDotEnv();
+const { loadRuntimeEnv } = require('./env_runtime');
+const {
+    STYLE_VERSION: QUALITY_STYLE_VERSION,
+    DEFAULT_POLICY: DEFAULT_QUALITY_POLICY,
+    normalizeWordToken,
+    fallbackMeaning,
+    fallbackExample,
+    buildWordCandidates,
+    createWordQuality,
+    normalizeQualityPolicy,
+} = require('./anki_word_quality');
+const MODEL_DUEL_LOG_PATH = path.join(__dirname, '../data/bridge/model_duel.jsonl');
+loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
 
 function splitWords(text) {
     const raw = String(text || '')
@@ -38,13 +31,23 @@ function splitWords(text) {
         .map(s => s.trim())
         .filter(Boolean);
 
-    if (byLines.length > 1) return byLines;
+    const primaryTokens = byLines.length > 1
+        ? byLines
+        : raw
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
 
-    // 개행이 없는 단일 메시지일 때만 comma fallback 사용
-    return raw
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
+    const expanded = [];
+    for (const token of primaryTokens) {
+        const parts = String(token).split(/\s+\/\s+/).map((s) => s.trim()).filter(Boolean);
+        if (parts.length <= 1) {
+            expanded.push(token);
+            continue;
+        }
+        expanded.push(...parts);
+    }
+    return expanded;
 }
 
 function stripListPrefix(token) {
@@ -79,154 +82,43 @@ function parseWordToken(token) {
 }
 
 function buildToeicAnswer(word, hint) {
-    const meaning = hint || '(의미 보강 필요)';
-    return [
-        `뜻: <b>${meaning}</b>`,
-        '<hr>',
-        `예문: <i>${word} is frequently used in TOEIC contexts.</i>`,
-        `해석: ${word}는 토익 문맥에서 자주 쓰입니다.`,
-        '<hr>',
-        '💡 <b>TOEIC TIP:</b> 품사/문맥(비즈니스, 이메일, 공지문)까지 함께 암기하세요.',
-    ].join('<br>');
+    const meaning = hint || fallbackMeaning(word) || '(의미 보강 필요)';
+    return buildToeicAnswerRich(
+        word,
+        meaning,
+        fallbackExample(word),
+        '',
+        `${word} 관련 예문입니다.`,
+        'Part 5/6에서 자주 등장하는 문맥과 함께 암기하세요.',
+    );
 }
 
-function httpGetJson(url) {
-    return new Promise((resolve, reject) => {
-        const req = https.get(url, res => {
-            let raw = '';
-            res.on('data', chunk => { raw += chunk; });
-            res.on('end', () => {
-                if (!(res.statusCode >= 200 && res.statusCode < 300)) {
-                    reject(new Error(`HTTP ${res.statusCode}`));
-                    return;
-                }
-                try {
-                    resolve(JSON.parse(raw));
-                } catch (e) {
-                    reject(e);
-                }
-            });
-        });
-        req.setTimeout(7000, () => req.destroy(new Error('timeout')));
-        req.on('error', reject);
-    });
-}
-
-function normalizeWordToken(rawWord) {
-    return String(rawWord || '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-function fallbackMeaning(word) {
-    const key = normalizeWordToken(word);
-    const map = {
-        'be willing to': '기꺼이 ~하다, ~할 의향이 있다',
+async function enrichToeicWord(word, hint, options = {}) {
+    const quality = await createWordQuality(word, hint, options);
+    return {
+        meaning: quality.meaningKo,
+        example: quality.exampleEn,
+        exampleKo: quality.exampleKo,
+        toeicTip: quality.toeicTip,
+        partOfSpeech: quality.partOfSpeech || '',
+        lemma: quality.lemma || normalizeWordToken(word),
+        quality,
     };
-    return map[key] || null;
 }
 
-function chooseBestDefinition(entry) {
-    const preferred = ['verb', 'noun', 'adjective', 'adverb'];
-    const meanings = Array.isArray(entry.meanings) ? entry.meanings : [];
-    const sorted = [...meanings].sort((a, b) => {
-        const ia = preferred.indexOf(String(a.partOfSpeech || '').toLowerCase());
-        const ib = preferred.indexOf(String(b.partOfSpeech || '').toLowerCase());
-        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    });
-    for (const m of sorted) {
-        const defs = Array.isArray(m.definitions) ? m.definitions : [];
-        if (defs.length) {
-            const d = defs[0];
-            return {
-                partOfSpeech: m.partOfSpeech || '',
-                meaning: d.definition || '',
-                example: d.example || '',
-            };
-        }
-    }
-    return null;
-}
-
-function simplifyMeaningForToeic(defText, word) {
-    const fallback = fallbackMeaning(word);
-    if (fallback) return fallback;
-    const raw = String(defText || '').trim();
-    if (!raw) return '(의미 보강 필요)';
-    return raw.length > 120 ? `${raw.slice(0, 117)}...` : raw;
-}
-
-function fallbackExample(word) {
-    const w = String(word || '').trim();
-    return `Our team is willing to use ${w} in business communication when appropriate.`;
-}
-
-function buildWordCandidates(word) {
-    const raw = String(word || '').trim().toLowerCase();
-    if (!raw) return [];
-    const out = [raw];
-    if (!/^[a-z][a-z-']{1,60}$/.test(raw)) {
-        return [...new Set(out)];
-    }
-    if (raw.endsWith('ies') && raw.length > 4) out.push(`${raw.slice(0, -3)}y`);
-    if (raw.endsWith('ied') && raw.length > 4) out.push(`${raw.slice(0, -3)}y`);
-    if (raw.endsWith('es') && raw.length > 3) out.push(raw.slice(0, -2));
-    if (raw.endsWith('s') && raw.length > 3) out.push(raw.slice(0, -1));
-    if (raw.endsWith('ing') && raw.length > 5) {
-        const stem = raw.slice(0, -3);
-        out.push(stem);
-        out.push(`${stem}e`);
-    }
-    if (raw.endsWith('ed') && raw.length > 4) {
-        const stem = raw.slice(0, -2);
-        out.push(stem);
-        out.push(`${stem}e`);
-        if (stem.length > 2 && stem[stem.length - 1] === stem[stem.length - 2]) {
-            out.push(stem.slice(0, -1));
-        }
-    }
-    return [...new Set(out)];
-}
-
-async function enrichToeicWord(word, hint) {
-    const fallback = {
-        meaning: fallbackMeaning(word) || hint || '(의미 보강 필요)',
-        example: fallbackExample(word),
-    };
-    if (hint && String(hint).trim()) {
-        return { ...fallback, meaning: String(hint).trim() };
-    }
-    const candidates = buildWordCandidates(word);
-    for (const candidate of candidates) {
-        try {
-            const query = encodeURIComponent(candidate);
-            const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${query}`;
-            const data = await httpGetJson(url);
-            const first = Array.isArray(data) ? data[0] : null;
-            const chosen = first ? chooseBestDefinition(first) : null;
-            if (!chosen) continue;
-            return {
-                meaning: simplifyMeaningForToeic(chosen.meaning, candidate),
-                example: String(chosen.example || '').trim() || fallbackExample(candidate),
-                partOfSpeech: chosen.partOfSpeech || '',
-                lemma: candidate,
-            };
-        } catch (_) {
-            // try next candidate
-        }
-    }
-    return fallback;
-}
-
-function buildToeicAnswerRich(word, meaningText, exampleText, partOfSpeech = '') {
+function buildToeicAnswerRich(word, meaningText, exampleText, partOfSpeech = '', exampleKo = '', toeicTip = '') {
     const meaning = String(meaningText || '(의미 보강 필요)').trim();
     const ex = String(exampleText || fallbackExample(word)).trim();
     const pos = partOfSpeech ? `품사: ${partOfSpeech}<br>` : '';
+    const ko = String(exampleKo || `${word} 관련 예문입니다.`).trim();
+    const tip = String(toeicTip || 'Part 5/6 문맥에서 함께 출제되는 표현까지 암기하세요.').trim();
     return [
         `뜻: <b>${meaning}</b>`,
         '<hr>',
         `${pos}예문: <i>${ex}</i>`,
-        `해석: ${word}의 의미를 문맥에 맞게 사용하세요.`,
+        `예문 해석: ${ko}`,
         '<hr>',
-        '💡 <b>TOEIC TIP:</b> 비즈니스 문맥 예문과 함께 암기하세요.',
+        `💡 <b>TOEIC TIP:</b> ${tip}`,
     ].join('<br>');
 }
 
@@ -715,6 +607,26 @@ function buildNoPrefixGuide() {
     ].join('\n');
 }
 
+function buildDuelModeMeta() {
+    return {
+        enabled: true,
+        mode: 'two-pass',
+        maxRounds: 1,
+        timeoutMs: 120000,
+        logPath: MODEL_DUEL_LOG_PATH,
+    };
+}
+
+function buildCodexDegradedMeta() {
+    const safeMode = String(process.env.RATE_LIMIT_SAFE_MODE || '').trim().toLowerCase() === 'true';
+    if (!safeMode) return { enabled: false };
+    return {
+        enabled: true,
+        reason: 'rate_limit_safe_mode',
+        notice: 'Codex unavailable or intentionally throttled. Falling back to non-codex route.',
+    };
+}
+
 function parseStructuredCommand(route, payloadText) {
     const schema = COMMAND_TEMPLATE_SCHEMA[route];
     if (!schema) return { ok: false, error: 'unknown template route' };
@@ -860,7 +772,11 @@ function handlePromptPayload(payloadText) {
     };
 }
 
-function isWeakEnrichment(word, hint, enriched) {
+function isWeakEnrichment(word, hint, enriched, threshold = DEFAULT_QUALITY_POLICY.qualityThreshold) {
+    const quality = enriched && enriched.quality ? enriched.quality : null;
+    if (quality) {
+        return Boolean(quality.hardFail);
+    }
     const hasHint = Boolean(String(hint || '').trim());
     if (hasHint) return false;
     const meaning = String((enriched && enriched.meaning) || '').trim();
@@ -869,37 +785,119 @@ function isWeakEnrichment(word, hint, enriched) {
 }
 
 async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
-    const enrichFn = options.enrichFn || enrichToeicWord;
+    const configuredPolicy = normalizeQualityPolicy(config.ankiQualityPolicy || {});
+    const runtimePolicy = normalizeQualityPolicy(options.qualityPolicy || configuredPolicy);
+    const dedupeMode = String(options.dedupeMode || config.ankiQualityPolicy?.dedupeMode || 'allow').toLowerCase();
+    const qualityFn = options.qualityFn || (async (word, hint) => createWordQuality(word, hint, {
+        policy: runtimePolicy,
+        llmFallbackFn: options.llmFallbackFn,
+    }));
+    const enrichFn = options.enrichFn || (async (word, hint) => {
+        const quality = await qualityFn(word, hint);
+        return {
+            meaning: quality.meaningKo,
+            example: quality.exampleEn,
+            exampleKo: quality.exampleKo,
+            toeicTip: quality.toeicTip,
+            partOfSpeech: quality.partOfSpeech || '',
+            lemma: quality.lemma || normalizeWordToken(word),
+            quality,
+        };
+    });
     const addCardFn = options.addCardFn || ((deck, front, back, tags, addOpts) => anki.addCard(deck, front, back, tags, addOpts));
     const syncFn = options.syncFn || (() => anki.syncWithDelay());
     const tokens = splitWords(text);
     const results = [];
     const failures = [];
+    const warningSet = new Set();
+    let syncWarning = null;
+    let failedParseCount = 0;
+    let failedQualityCount = 0;
+    let failedAddCount = 0;
 
     for (const token of tokens) {
         try {
             const parsed = parseWordToken(token);
             if (!parsed) {
                 failures.push({ token, reason: 'parse_failed' });
+                failedParseCount += 1;
                 continue;
             }
             const word = parsed.word;
             const hint = parsed.hint;
             const enriched = await enrichFn(word, hint);
-            if (isWeakEnrichment(word, hint, enriched)) {
-                failures.push({ token, reason: 'no_definition_found' });
+            const quality = enriched && enriched.quality ? enriched.quality : {
+                lemma: normalizeWordToken(word),
+                partOfSpeech: String((enriched && enriched.partOfSpeech) || '').trim().toLowerCase(),
+                meaningKo: String((enriched && enriched.meaning) || '').trim(),
+                exampleEn: String((enriched && enriched.example) || '').trim(),
+                exampleKo: String((enriched && enriched.exampleKo) || '').trim(),
+                toeicTip: String((enriched && enriched.toeicTip) || '').trim(),
+                sourceMode: 'local',
+                confidence: 0.6,
+                degraded: false,
+                warnings: [],
+                hardFail: false,
+                styleVersion: QUALITY_STYLE_VERSION,
+            };
+            if (!(enriched && enriched.quality)) {
+                const placeholderMeaning = quality.meaningKo === '(의미 보강 필요)';
+                quality.hardFail = !quality.meaningKo
+                    || !quality.exampleEn
+                    || !quality.exampleKo
+                    || !quality.toeicTip
+                    || placeholderMeaning;
+                if (placeholderMeaning) quality.warnings.push('placeholder_meaning');
+                if (!quality.exampleKo) quality.warnings.push('missing_example_ko');
+                if (!quality.toeicTip) quality.warnings.push('missing_toeic_tip');
+            }
+            if (isWeakEnrichment(word, hint, { ...enriched, quality }, runtimePolicy.qualityThreshold)) {
+                const reason = Array.isArray(quality.warnings) && quality.warnings.length > 0
+                    ? `low_quality:${quality.warnings.slice(0, 3).join(',')}`
+                    : 'no_definition_found';
+                failures.push({ token, reason });
+                failedQualityCount += 1;
                 continue;
             }
             const answer = buildToeicAnswerRich(
                 word,
-                enriched.meaning,
-                enriched.example,
-                enriched.partOfSpeech || '',
+                enriched.meaning || quality.meaningKo,
+                enriched.example || quality.exampleEn,
+                enriched.partOfSpeech || quality.partOfSpeech || '',
+                enriched.exampleKo || quality.exampleKo || '',
+                enriched.toeicTip || quality.toeicTip || '',
             );
-            const noteId = await addCardFn(toeicDeck, word, answer, toeicTags, { sync: false });
-            results.push({ word, noteId, deck: toeicDeck });
+            const tags = [...new Set([
+                ...toeicTags,
+                `style:${quality.styleVersion || QUALITY_STYLE_VERSION}`,
+                `source:${quality.sourceMode || 'local'}`,
+                ...(quality.degraded ? ['degraded'] : []),
+            ])];
+            const noteResult = await addCardFn(toeicDeck, word, answer, tags, {
+                sync: false,
+                dedupeMode,
+            });
+            const noteMeta = typeof noteResult === 'object'
+                ? noteResult
+                : { noteId: noteResult };
+            results.push({
+                word,
+                deck: toeicDeck,
+                ...noteMeta,
+                quality: {
+                    styleVersion: quality.styleVersion || QUALITY_STYLE_VERSION,
+                    sourceMode: quality.sourceMode || 'local',
+                    confidence: Number(quality.confidence || 0),
+                    degraded: Boolean(quality.degraded),
+                },
+                warnings: Array.isArray(quality.warnings) ? quality.warnings : [],
+            });
+            for (const warning of (Array.isArray(quality.warnings) ? quality.warnings : [])) {
+                warningSet.add(String(warning));
+            }
         } catch (e) {
             failures.push({ token, reason: e.message });
+            failedAddCount += 1;
         }
     }
     if (results.length > 0) {
@@ -907,22 +905,54 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
             await syncFn();
         } catch (e) {
             console.log('Anki batch sync failed (non-critical):', e.message);
-            failures.push({ token: '__sync__', reason: `sync_failed: ${e.message}` });
+            syncWarning = `sync_failed: ${e.message}`;
+            warningSet.add(syncWarning);
         }
     }
-    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failures.length}건`;
-    const telegramReply = failures.length > 0
-        ? `${summary}\n실패 목록:\n- ${failures.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
+    const failedTotal = failedParseCount + failedQualityCount + failedAddCount;
+    const sourceModeCounts = {};
+    let degradedCount = 0;
+    for (const row of results) {
+        const mode = String(row.quality?.sourceMode || 'local');
+        sourceModeCounts[mode] = (sourceModeCounts[mode] || 0) + 1;
+        if (row.quality?.degraded) degradedCount += 1;
+    }
+    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failedTotal}건`;
+    const failedRows = failures.filter((f) => !String(f.token || '').startsWith('__sync__'));
+    const telegramReplyCore = failedRows.length > 0
+        ? `${summary}\n실패 목록:\n- ${failedRows.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
         : `${summary}\n실패 목록: 없음`;
+    const telegramReply = syncWarning
+        ? `${telegramReplyCore}\n동기화 경고: ${syncWarning}`
+        : telegramReplyCore;
     return {
-        success: failures.length === 0,
+        success: failedTotal === 0,
         saved: results.length,
-        failed: failures.length,
+        failed: failedTotal,
+        failedParseCount,
+        failedQualityCount,
+        failedAddCount,
+        syncWarning,
         summary,
         telegramReply,
-        failedTokens: failures.map(f => `${f.token}: ${f.reason}`),
+        failedTokens: failedRows.map(f => `${f.token}: ${f.reason}`),
         results,
-        failures,
+        failures: failedRows,
+        warnings: [...warningSet],
+        quality: {
+            styleVersion: QUALITY_STYLE_VERSION,
+            sourceMode: Object.keys(sourceModeCounts).length === 1
+                ? Object.keys(sourceModeCounts)[0]
+                : Object.keys(sourceModeCounts).length > 1
+                    ? 'hybrid'
+                    : 'local',
+            confidence: results.length > 0
+                ? Number((results.reduce((acc, cur) => acc + Number(cur.quality?.confidence || 0), 0) / results.length).toFixed(2))
+                : 0,
+            degraded: degradedCount > 0,
+            degradedCount,
+            sourceModeCounts,
+        },
     };
 }
 
@@ -950,12 +980,15 @@ async function main() {
                 // usage: node bridge.js work "요청: ...; 대상: ...; 완료기준: ..."
                 const parsed = parseStructuredCommand('work', fullText);
                 const telegramReply = appendExternalLinks(parsed.telegramReply || '');
+                const degradedMode = buildCodexDegradedMeta();
                 console.log(JSON.stringify({
                     route: 'work',
                     templateValid: parsed.ok,
                     ...parsed,
                     telegramReply,
-                    preferredModelAlias: 'codex',
+                    duelMode: buildDuelModeMeta(),
+                    degradedMode,
+                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
                     preferredReasoning: 'high',
                     routeHint: 'complex-workload',
                 }));
@@ -966,12 +999,14 @@ async function main() {
                 // usage: node bridge.js inspect "대상: ...; 체크항목: ..."
                 const parsed = parseStructuredCommand('inspect', fullText);
                 const telegramReply = appendExternalLinks(parsed.telegramReply || '');
+                const degradedMode = buildCodexDegradedMeta();
                 console.log(JSON.stringify({
                     route: 'inspect',
                     templateValid: parsed.ok,
                     ...parsed,
                     telegramReply,
-                    preferredModelAlias: 'codex',
+                    degradedMode,
+                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
                     preferredReasoning: 'medium',
                     routeHint: 'inspection',
                 }));
@@ -982,12 +1017,14 @@ async function main() {
                 // usage: node bridge.js deploy "대상: ...; 환경: ...; 검증: ..."
                 const parsed = parseStructuredCommand('deploy', fullText);
                 const telegramReply = appendExternalLinks(parsed.telegramReply || '');
+                const degradedMode = buildCodexDegradedMeta();
                 console.log(JSON.stringify({
                     route: 'deploy',
                     templateValid: parsed.ok,
                     ...parsed,
                     telegramReply,
-                    preferredModelAlias: 'codex',
+                    degradedMode,
+                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
                     preferredReasoning: 'high',
                     routeHint: 'deployment',
                 }));
@@ -1016,15 +1053,27 @@ async function main() {
 
             case 'news': {
                 // usage: node bridge.js news "상태|지금요약|키워드 추가 ..."
-                const newsDigest = require('./news_digest');
-                const payload = [args[0], ...args.slice(1)].join(' ').trim() || fullText;
-                const result = await newsDigest.handleNewsCommand(payload);
-                console.log(JSON.stringify({
-                    route: 'news',
-                    preferredModelAlias: 'fast',
-                    preferredReasoning: 'low',
-                    ...result,
-                }));
+                try {
+                    const newsDigest = require('./news_digest');
+                    const payload = [args[0], ...args.slice(1)].join(' ').trim() || fullText;
+                    const result = await newsDigest.handleNewsCommand(payload);
+                    console.log(JSON.stringify({
+                        route: 'news',
+                        preferredModelAlias: 'fast',
+                        preferredReasoning: 'low',
+                        ...result,
+                    }));
+                } catch (error) {
+                    console.log(JSON.stringify({
+                        route: 'news',
+                        success: false,
+                        errorCode: error && error.code ? error.code : 'NEWS_ROUTE_LOAD_FAILED',
+                        error: String(error && error.message ? error.message : error),
+                        telegramReply: `소식 모듈 로드 실패: ${error && error.message ? error.message : error}`,
+                        preferredModelAlias: 'fast',
+                        preferredReasoning: 'low',
+                    }));
+                }
                 break;
             }
 
@@ -1049,18 +1098,21 @@ async function main() {
                     const deck = args[1];
                     const front = args[2];
                     let back = args[3];
-                    const tags = args[4] ? args[4].split(',') : toeicTags;
+                    const tags = args[4]
+                        ? args[4].split(',').map((v) => v.trim()).filter(Boolean)
+                        : toeicTags;
 
-                    if (!deck || !front || !back) {
+                    if (!front || !back) {
                         throw new Error('Usage: anki add <deck> <front> <back> [tags]');
                     }
 
-                    const looksEnglishWord = /^[A-Za-z][A-Za-z\-'\s]{0,80}$/.test(front.trim());
-                    const finalDeck = looksEnglishWord ? toeicDeck : deck;
+                    const finalDeck = deck || toeicDeck;
                     back = back.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
 
-                    const result = await anki.addCard(finalDeck, front, back, tags);
-                    console.log(JSON.stringify({ success: true, noteId: result, deck: finalDeck }));
+                    const dedupeMode = String(config.ankiQualityPolicy?.dedupeMode || 'allow').toLowerCase();
+                    const result = await anki.addCard(finalDeck, front, back, tags, { dedupeMode });
+                    const noteMeta = typeof result === 'object' ? result : { noteId: result };
+                    console.log(JSON.stringify({ success: true, deck: finalDeck, ...noteMeta }));
                 } else if (subCmd === 'decks') {
                     const decks = await anki.getDeckNames();
                     console.log(JSON.stringify({ decks }));
@@ -1085,14 +1137,26 @@ async function main() {
                     break;
                 }
                 if (routed.route === 'news') {
-                    const newsDigest = require('./news_digest');
-                    const result = await newsDigest.handleNewsCommand(routed.payload);
-                    console.log(JSON.stringify({
-                        route: routed.route,
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        ...result,
-                    }));
+                    try {
+                        const newsDigest = require('./news_digest');
+                        const result = await newsDigest.handleNewsCommand(routed.payload);
+                        console.log(JSON.stringify({
+                            route: routed.route,
+                            preferredModelAlias: 'fast',
+                            preferredReasoning: 'low',
+                            ...result,
+                        }));
+                    } catch (error) {
+                        console.log(JSON.stringify({
+                            route: routed.route,
+                            success: false,
+                            errorCode: error && error.code ? error.code : 'NEWS_ROUTE_LOAD_FAILED',
+                            error: String(error && error.message ? error.message : error),
+                            telegramReply: `소식 모듈 로드 실패: ${error && error.message ? error.message : error}`,
+                            preferredModelAlias: 'fast',
+                            preferredReasoning: 'low',
+                        }));
+                    }
                     break;
                 }
                 if (routed.route === 'report') {
@@ -1138,12 +1202,15 @@ async function main() {
                 if (routed.route === 'work') {
                     const parsed = parseStructuredCommand('work', routed.payload);
                     const telegramReply = appendExternalLinks(parsed.telegramReply || '');
+                    const degradedMode = buildCodexDegradedMeta();
                     console.log(JSON.stringify({
                         route: routed.route,
                         templateValid: parsed.ok,
                         ...parsed,
                         telegramReply,
-                        preferredModelAlias: 'codex',
+                        duelMode: buildDuelModeMeta(),
+                        degradedMode,
+                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
                         preferredReasoning: 'high',
                         routeHint: 'complex-workload',
                     }));
@@ -1152,12 +1219,14 @@ async function main() {
                 if (routed.route === 'inspect') {
                     const parsed = parseStructuredCommand('inspect', routed.payload);
                     const telegramReply = appendExternalLinks(parsed.telegramReply || '');
+                    const degradedMode = buildCodexDegradedMeta();
                     console.log(JSON.stringify({
                         route: routed.route,
                         templateValid: parsed.ok,
                         ...parsed,
                         telegramReply,
-                        preferredModelAlias: 'codex',
+                        degradedMode,
+                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
                         preferredReasoning: 'medium',
                         routeHint: 'inspection',
                     }));
@@ -1166,12 +1235,14 @@ async function main() {
                 if (routed.route === 'deploy') {
                     const parsed = parseStructuredCommand('deploy', routed.payload);
                     const telegramReply = appendExternalLinks(parsed.telegramReply || '');
+                    const degradedMode = buildCodexDegradedMeta();
                     console.log(JSON.stringify({
                         route: routed.route,
                         templateValid: parsed.ok,
                         ...parsed,
                         telegramReply,
-                        preferredModelAlias: 'codex',
+                        degradedMode,
+                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
                         preferredReasoning: 'high',
                         routeHint: 'deployment',
                     }));
@@ -1247,7 +1318,10 @@ module.exports = {
     enrichToeicWord,
     processWordTokens,
     buildToeicAnswerRich,
+    buildToeicAnswer,
     fallbackExample,
     buildWordCandidates,
     isWeakEnrichment,
+    normalizeQualityPolicy,
+    QUALITY_STYLE_VERSION,
 };

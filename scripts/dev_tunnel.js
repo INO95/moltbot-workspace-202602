@@ -2,25 +2,11 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { loadRuntimeEnv } = require('./env_runtime');
 
 const CONTAINER = 'moltbot-dev-tunnel';
 const IMAGE = 'cloudflare/cloudflared:latest';
 const STATE_PATH = path.join(__dirname, '..', 'data', 'runtime', 'tunnel_state.json');
-const ENV_PATH = path.join(__dirname, '..', '.env');
-
-function loadDotEnv() {
-  if (!fs.existsSync(ENV_PATH)) return;
-  const lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
-  for (const line of lines) {
-    const trimmed = String(line || '').trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx <= 0) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const value = trimmed.slice(idx + 1).trim();
-    if (!process.env[key]) process.env[key] = value;
-  }
-}
 
 function getTargetUrl() {
   return String(process.env.DEV_TUNNEL_TARGET || 'http://host.docker.internal:18787').trim();
@@ -34,7 +20,7 @@ function getNamedPublicBase() {
   return String(process.env.DEV_TUNNEL_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
 }
 
-loadDotEnv();
+loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
 
 function resolveMode() {
   return getNamedToken() ? 'named' : 'quick';

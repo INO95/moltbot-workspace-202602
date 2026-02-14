@@ -1,0 +1,24 @@
+name: Container Isolation Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex-clean-main
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check host config references
+        run: node scripts/check_container_isolation_refs.js

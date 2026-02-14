@@ -4,25 +4,9 @@ const path = require('path');
 const dns = require('dns').promises;
 const https = require('https');
 const { URL } = require('url');
+const { loadRuntimeEnv } = require('./env_runtime');
 
-const ENV_PATH = path.join(__dirname, '..', '.env');
 const STATE_PATH = path.join(__dirname, '..', 'data', 'runtime', 'tunnel_state.json');
-
-function loadDotEnv() {
-  try {
-    if (!fs.existsSync(ENV_PATH)) return;
-    const lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
-    for (const line of lines) {
-      const trimmed = String(line || '').trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const idx = trimmed.indexOf('=');
-      if (idx <= 0) continue;
-      const key = trimmed.slice(0, idx).trim();
-      const value = trimmed.slice(idx + 1).trim();
-      if (!process.env[key]) process.env[key] = value;
-    }
-  } catch (_) {}
-}
 
 function normalizeHttpsBase(v) {
   const out = String(v || '').trim().replace(/\/+$/, '');
@@ -75,7 +59,7 @@ async function checkHost(hostname) {
 }
 
 async function run() {
-  loadDotEnv();
+  loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
   const bases = getBases();
   const targets = [
     { key: 'prompt', label: '프롬프트', path: '/prompt/' },
