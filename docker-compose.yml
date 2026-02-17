@@ -4,23 +4,72 @@ services:
     container_name: moltbot-openclaw-init
     user: "0:0"
     volumes:
-      - openclaw_main_state:/state-main:rw
-      - openclaw_sub1_state:/state-sub1:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace/configs/main:/seed-main:ro
-      - /Users/moltbot/Projects/Moltbot_Workspace/configs/sub1:/seed-sub1:ro
+      - openclaw_dev_state:/state-dev:rw
+      - openclaw_anki_state:/state-anki:rw
+      - openclaw_research_state:/state-research:rw
+      - openclaw_daily_state:/state-daily:rw
+      - openclaw_dev_bak_state:/state-dev-bak:rw
+      - openclaw_anki_bak_state:/state-anki-bak:rw
+      - openclaw_research_bak_state:/state-research-bak:rw
+      - openclaw_daily_bak_state:/state-daily-bak:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace/configs/dev:/seed-dev:ro
+      - /Users/moltbot/Projects/Moltbot_Workspace/configs/anki:/seed-anki:ro
+      - /Users/moltbot/Projects/Moltbot_Workspace/configs/research:/seed-research:ro
+      - /Users/moltbot/Projects/Moltbot_Workspace/configs/daily:/seed-daily:ro
     command:
       - /bin/sh
       - -lc
       - |
         set -eu
-        if [ ! -f /state-main/openclaw.json ] && [ -f /seed-main/openclaw.json ]; then
-          cp -r /seed-main/. /state-main/
+        if [ ! -f /state-dev/openclaw.json ] && [ -f /seed-dev/openclaw.json ]; then
+          cp -r /seed-dev/. /state-dev/
         fi
-        if [ ! -f /state-sub1/openclaw.json ] && [ -f /seed-sub1/openclaw.json ]; then
-          cp -r /seed-sub1/. /state-sub1/
+        if [ ! -f /state-anki/openclaw.json ] && [ -f /seed-anki/openclaw.json ]; then
+          cp -r /seed-anki/. /state-anki/
         fi
-        chown -R 1000:1000 /state-main /state-sub1
+        if [ ! -f /state-research/openclaw.json ] && [ -f /seed-research/openclaw.json ]; then
+          cp -r /seed-research/. /state-research/
+        fi
+        if [ ! -f /state-daily/openclaw.json ] && [ -f /seed-daily/openclaw.json ]; then
+          cp -r /seed-daily/. /state-daily/
+        fi
+
+        if [ ! -f /state-dev-bak/openclaw.json ] && [ -f /seed-dev/openclaw.json ]; then
+          cp -r /seed-dev/. /state-dev-bak/
+        fi
+        if [ ! -f /state-anki-bak/openclaw.json ] && [ -f /seed-anki/openclaw.json ]; then
+          cp -r /seed-anki/. /state-anki-bak/
+        fi
+        if [ ! -f /state-research-bak/openclaw.json ] && [ -f /seed-research/openclaw.json ]; then
+          cp -r /seed-research/. /state-research-bak/
+        fi
+        if [ ! -f /state-daily-bak/openclaw.json ] && [ -f /seed-daily/openclaw.json ]; then
+          cp -r /seed-daily/. /state-daily-bak/
+        fi
+
+        chown -R 1000:1000 \
+          /state-dev /state-anki /state-research /state-daily \
+          /state-dev-bak /state-anki-bak /state-research-bak /state-daily-bak
     restart: "no"
+
+  docker-proxy:
+    image: alpine/socat
+    container_name: moltbot-docker-proxy
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - 'set -eu; mkdir -p /proxy; rm -f /proxy/docker.sock; socat UNIX-LISTEN:/proxy/docker.sock,fork,unlink-early UNIX-CONNECT:/var/run/docker.sock & pid=$$!; for _ in $$(seq 1 50); do [ -S /proxy/docker.sock ] && break; sleep 0.1; done; chown 1000:1000 /proxy/docker.sock; chmod 660 /proxy/docker.sock; wait "$$pid"'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - docker_proxy_sock:/proxy
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
 
   prompt-web:
     image: node:20-alpine
@@ -38,7 +87,7 @@ services:
     image: nginx:1.27-alpine
     container_name: moltbot-proxy
     depends_on:
-      - openclaw-main
+      - openclaw-dev
       - prompt-web
     volumes:
       - ./docker/nginx/moltbot.conf:/etc/nginx/conf.d/default.conf:ro
@@ -48,6 +97,8 @@ services:
     restart: unless-stopped
     networks:
       - moltbot-network
+    profiles:
+      - live
 
   moltbot-web-proxy:
     image: nginx:1.27-alpine
@@ -63,33 +114,60 @@ services:
     networks:
       - moltbot-network
 
-  # 메인 OpenClaw - Telegram 연동
-  openclaw-main:
-    image: openclaw:local
-    container_name: moltbot-main
+  openclaw-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-dev
     depends_on:
       openclaw-init:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
     environment:
       HOME: /home/node
       TERM: xterm-256color
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_DEV:-${OPENCLAW_GATEWAY_TOKEN:-}}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ""
       OPENCLAW_GEMINI_API_KEY: ""
       GOOGLE_API_KEY: ""
       OPENCLAW_GOOGLE_API_KEY: ""
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID}
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_DEV:-${TELEGRAM_BOT_TOKEN:-}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_DEV:-${TELEGRAM_USER_ID:-}}
+      MOLTBOT_BOT_ID: bot-dev
+      MOLTBOT_BOT_ROLE: worker
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "work,inspect,deploy,ops,status,link,project"
+      BRIDGE_BLOCK_HINT: "개발 전용 봇입니다. 안키/리서쳐/일상 봇으로 요청을 보내주세요."
     volumes:
-      - openclaw_main_state:/home/node/.openclaw:rw
+      - openclaw_dev_state:/home/node/.openclaw:rw
       - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:18789:18789"
       - "127.0.0.1:18790:18790"
     init: true
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     networks:
       - moltbot-network
     command:
@@ -97,38 +175,84 @@ services:
       - -lc
       - |
         if [ -f /home/node/.openclaw/workspace/.env ]; then
-          echo "[openclaw-main] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          echo "[openclaw-dev] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
           exit 1
         fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
         exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - live
 
-  # 서브 OpenClaw
-  openclaw-sub1:
-    image: openclaw:local
-    container_name: moltbot-sub1
+  openclaw-anki:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-anki
     depends_on:
       openclaw-init:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
     environment:
       HOME: /home/node
       TERM: xterm-256color
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_SUB1}
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_ANKI:-${OPENCLAW_GATEWAY_TOKEN_SUB1:-${OPENCLAW_GATEWAY_TOKEN:-}}}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ""
       OPENCLAW_GEMINI_API_KEY: ""
       GOOGLE_API_KEY: ""
       OPENCLAW_GOOGLE_API_KEY: ""
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_SUB1:-}
-      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_SUB1:-}
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_ANKI:-${TELEGRAM_BOT_TOKEN_SUB1:-}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_ANKI:-${TELEGRAM_USER_ID_SUB1:-${TELEGRAM_USER_ID:-}}}
+      MOLTBOT_BOT_ID: bot-anki
+      MOLTBOT_BOT_ROLE: worker
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word"
+      BRIDGE_BLOCK_HINT: "안키 전용 봇입니다. 개발/리서쳐/일상 봇으로 요청을 보내주세요."
     volumes:
-      - openclaw_sub1_state:/home/node/.openclaw:rw
+      - openclaw_anki_state:/home/node/.openclaw:rw
       - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:18889:18789"
       - "127.0.0.1:18890:18790"
     init: true
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     networks:
       - moltbot-network
     command:
@@ -136,17 +260,552 @@ services:
       - -lc
       - |
         if [ -f /home/node/.openclaw/workspace/.env ]; then
-          echo "[openclaw-sub1] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          echo "[openclaw-anki] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
           exit 1
         fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
         exec node dist/index.js gateway --bind loopback --port 18789
     profiles:
       - sub
+      - live
+
+  openclaw-research:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-research
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_RESEARCH:-${OPENCLAW_GATEWAY_TOKEN:-}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_TREND:-${TELEGRAM_BOT_TOKEN_RESEARCH:-}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_TREND:-${TELEGRAM_USER_ID_RESEARCH:-${TELEGRAM_USER_ID:-}}}
+      MOLTBOT_BOT_ID: bot-research
+      MOLTBOT_BOT_ROLE: worker
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "news,report,prompt"
+      BRIDGE_BLOCK_HINT: "리서쳐 전용 봇입니다. 개발/안키/일상 봇으로 요청을 보내주세요."
+    volumes:
+      - openclaw_research_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:18989:18789"
+      - "127.0.0.1:18990:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-research] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - live
+
+  openclaw-daily:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-daily
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_DAILY:-${OPENCLAW_GATEWAY_TOKEN:-}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_DAILY:-}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_DAILY:-${TELEGRAM_USER_ID:-}}
+      MOLTBOT_BOT_ID: bot-daily
+      MOLTBOT_BOT_ROLE: supervisor
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place"
+      BRIDGE_BLOCK_HINT: "데일리 허브에서 처리할 수 없는 명령입니다. 템플릿/프리픽스를 확인해주세요."
+    volumes:
+      - openclaw_daily_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:19089:18789"
+      - "127.0.0.1:19090:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-daily] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - live
+
+  openclaw-dev-bak:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-dev-bak
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_DEV_BAK:-${OPENCLAW_GATEWAY_TOKEN_MAIN_BAK:-${OPENCLAW_GATEWAY_TOKEN_DEV:-${OPENCLAW_GATEWAY_TOKEN:-}}}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_DEV_BAK:-${TELEGRAM_BOT_TOKEN_MAIN_BAK:-}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_DEV_BAK:-${TELEGRAM_USER_ID_MAIN_BAK:-${TELEGRAM_USER_ID:-}}}
+      MOLTBOT_BOT_ID: bot-dev-bak
+      MOLTBOT_BOT_ROLE: worker
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "work,inspect,deploy,ops,status,link,project"
+      BRIDGE_BLOCK_HINT: "개발 백업 봇입니다. 평시에는 사용하지 않습니다."
+    volumes:
+      - openclaw_dev_bak_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:19189:18789"
+      - "127.0.0.1:19190:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-dev-bak] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - backup
+
+  openclaw-anki-bak:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-anki-bak
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_ANKI_BAK:-${OPENCLAW_GATEWAY_TOKEN_SUB1_BAK:-${OPENCLAW_GATEWAY_TOKEN_ANKI:-${OPENCLAW_GATEWAY_TOKEN_SUB1:-${OPENCLAW_GATEWAY_TOKEN:-}}}}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_ANKI_BAK:-${TELEGRAM_BOT_TOKEN_SUB1_BAK:-}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_ANKI_BAK:-${TELEGRAM_USER_ID_SUB1_BAK:-${TELEGRAM_USER_ID_ANKI:-${TELEGRAM_USER_ID_SUB1:-${TELEGRAM_USER_ID:-}}}}}
+      MOLTBOT_BOT_ID: bot-anki-bak
+      MOLTBOT_BOT_ROLE: worker
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word"
+      BRIDGE_BLOCK_HINT: "안키 백업 봇입니다. 평시에는 사용하지 않습니다."
+    volumes:
+      - openclaw_anki_bak_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:19289:18789"
+      - "127.0.0.1:19290:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-anki-bak] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - backup
+
+  openclaw-research-bak:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-research-bak
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_RESEARCH_BAK:-${OPENCLAW_GATEWAY_TOKEN_RESEARCH:-${OPENCLAW_GATEWAY_TOKEN:-}}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_TREND_BAK:-${TELEGRAM_BOT_TOKEN_RESEARCH_BAK:-}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_TREND_BAK:-${TELEGRAM_USER_ID_RESEARCH_BAK:-${TELEGRAM_USER_ID_RESEARCH:-${TELEGRAM_USER_ID:-}}}}
+      MOLTBOT_BOT_ID: bot-research-bak
+      MOLTBOT_BOT_ROLE: worker
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "news,report,prompt"
+      BRIDGE_BLOCK_HINT: "리서쳐 백업 봇입니다. 평시에는 사용하지 않습니다."
+    volumes:
+      - openclaw_research_bak_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:19389:18789"
+      - "127.0.0.1:19390:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-research-bak] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - backup
+
+  openclaw-daily-bak:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-daily-bak
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_DAILY_BAK:-${OPENCLAW_GATEWAY_TOKEN_DAILY:-${OPENCLAW_GATEWAY_TOKEN:-}}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_DAILY_BAK:-}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_DAILY_BAK:-${TELEGRAM_USER_ID_DAILY:-${TELEGRAM_USER_ID:-}}}
+      MOLTBOT_BOT_ID: bot-daily-bak
+      MOLTBOT_BOT_ROLE: supervisor
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place"
+      BRIDGE_BLOCK_HINT: "데일리(백업) 허브에서 처리할 수 없는 명령입니다. 템플릿/프리픽스를 확인해주세요."
+    volumes:
+      - openclaw_daily_bak_state:/home/node/.openclaw:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:19489:18789"
+      - "127.0.0.1:19490:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-daily-bak] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - backup
 
 networks:
   moltbot-network:
     driver: bridge
 
 volumes:
-  openclaw_main_state:
-  openclaw_sub1_state:
+  docker_proxy_sock:
+  openclaw_dev_state:
+  openclaw_anki_state:
+  openclaw_research_state:
+  openclaw_daily_state:
+  openclaw_dev_bak_state:
+  openclaw_anki_bak_state:
+  openclaw_research_bak_state:
+  openclaw_daily_bak_state:
