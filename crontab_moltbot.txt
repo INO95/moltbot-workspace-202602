@@ -4,16 +4,26 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # Morning Briefing
 0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "morning-briefing" -- "node scripts/morning_briefing.js" >> logs/cron.log 2>&1
 
+# Personal Briefing (routine/todo focus)
+10 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "personal-briefing-morning" -- "node scripts/personal_briefing.js morning" >> logs/cron.log 2>&1
+30 21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "personal-briefing-evening" -- "node scripts/personal_briefing.js evening" >> logs/cron.log 2>&1
+
+# Dev external keys TODO (daily morning)
+20 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "dev-thirdparty-keys-todolist" -- "node scripts/dev_thirdparty_keys_todolist.js" >> logs/cron.log 2>&1
+
+# Notion personal sync (prepare draft + approval token notify)
+5 9 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "notion-personal-sync-prepare-09" -- "node scripts/notion_personal_sync_scheduler.js prepare" >> logs/cron.log 2>&1
+5 21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "notion-personal-sync-prepare-21" -- "node scripts/notion_personal_sync_scheduler.js prepare" >> logs/cron.log 2>&1
+
 # Daily Telegram Digest
 30 8 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-telegram-digest" -- "node scripts/daily_telegram_digest.js" >> logs/cron.log 2>&1
 
-# News Digest fixed slots (07:00 overnight, 12:00 midday, 18:00 evening) [DISABLED – rate-limit safe mode]
-# 0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-07" -- "NEWS_WINDOW_MINUTES=540 node scripts/news_digest.js send" >> logs/cron.log 2>&1
-# 0 12 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-12" -- "NEWS_WINDOW_MINUTES=300 node scripts/news_digest.js send" >> logs/cron.log 2>&1
-# 0 18 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-18" -- "NEWS_WINDOW_MINUTES=360 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+# News Digest fixed slots (morning/evening)
+0 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-07" -- "NEWS_WINDOW_MINUTES=540 node scripts/news_digest.js send" >> logs/cron.log 2>&1
+0 19 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-19" -- "NEWS_WINDOW_MINUTES=360 node scripts/news_digest.js send" >> logs/cron.log 2>&1
 
-# News event-only checks (hourly in daytime; send only when threshold is exceeded) [DISABLED – rate-limit safe mode]
-# 0 8-21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-event-hourly" -- "node scripts/news_digest.js event" >> logs/cron.log 2>&1
+# News event-only checks (hourly in daytime; send only when threshold is exceeded)
+0 9-21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-event-hourly" -- "node scripts/news_digest.js event" >> logs/cron.log 2>&1
 
 # Daily Summary
 55 23 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-summary" -- "node scripts/daily_summary.js" >> logs/cron.log 2>&1
@@ -41,3 +51,15 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 # Ops host worker (every minute): process queued restart requests + status snapshot refresh
 * * * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "ops-host-worker" -- "npm run -s ops:worker" >> logs/cron.log 2>&1
+
+# Ops daily supervisor (state scan + briefings)
+*/30 * * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "ops-daily-scan" -- "npm run -s ops:daily:scan" >> logs/cron.log 2>&1
+30 8 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "ops-daily-briefing-morning" -- "npm run -s ops:daily:briefing:morning" >> logs/cron.log 2>&1
+30 18 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "ops-daily-briefing-evening" -- "npm run -s ops:daily:briefing:evening" >> logs/cron.log 2>&1
+
+# Personal retention (raw_text 90-day TTL)
+15 2 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "personal-retention-90d" -- "node scripts/personal_retention.js --apply --days 90" >> logs/cron.log 2>&1
+
+# OpenClaw backup and verification
+40 2 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "openclaw-backup-sync" -- "bash scripts/openclaw_backup_sync.sh" >> logs/cron.log 2>&1
+45 2 * * 0 cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "openclaw-backup-verify" -- "bash scripts/openclaw_backup_verify.sh" >> logs/cron.log 2>&1
