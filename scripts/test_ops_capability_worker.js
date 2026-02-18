@@ -139,6 +139,61 @@ function main() {
     const browserTokenPath = path.join(opsApprovalStore.APPROVAL_PENDING_DIR, `${browserRow.token_id}.json`);
     assert.ok(fs.existsSync(browserTokenPath), 'browser pending approval token file should exist');
 
+    const execSafeRequestId = `test-opsc-exec-safe-${Date.now()}`;
+    opsCommandQueue.enqueueCommand({
+      schema_version: '1.0',
+      request_id: execSafeRequestId,
+      command_kind: 'capability',
+      phase: 'plan',
+      capability: 'exec',
+      action: 'run',
+      intent_action: 'capability:exec:run',
+      requested_by: requesterId,
+      payload: {
+        command: 'pwd',
+      },
+      created_at: new Date().toISOString(),
+    });
+
+    runWorker();
+    const rowsAfterExecSafe = readResults();
+    const execSafeRow = rowsAfterExecSafe.find((row) => row && row.request_id === execSafeRequestId);
+    assert.ok(execSafeRow, 'exec safe capability result should exist');
+    assert.strictEqual(execSafeRow.command_kind, 'capability');
+    assert.strictEqual(execSafeRow.capability, 'exec');
+    assert.strictEqual(execSafeRow.action, 'run');
+    assert.strictEqual(execSafeRow.ok, true);
+    assert.strictEqual(execSafeRow.token_id, null, 'safe exec should not mint approval token');
+
+    const execRiskyRequestId = `test-opsc-exec-risky-${Date.now()}`;
+    opsCommandQueue.enqueueCommand({
+      schema_version: '1.0',
+      request_id: execRiskyRequestId,
+      command_kind: 'capability',
+      phase: 'plan',
+      capability: 'exec',
+      action: 'run',
+      intent_action: 'capability:exec:run',
+      requested_by: requesterId,
+      payload: {
+        command: 'git push origin main',
+      },
+      created_at: new Date().toISOString(),
+    });
+
+    runWorker();
+    const rowsAfterExecRisky = readResults();
+    const execRiskyRow = rowsAfterExecRisky.find((row) => row && row.request_id === execRiskyRequestId);
+    assert.ok(execRiskyRow, 'exec risky capability plan result should exist');
+    assert.strictEqual(execRiskyRow.command_kind, 'capability');
+    assert.strictEqual(execRiskyRow.capability, 'exec');
+    assert.strictEqual(execRiskyRow.action, 'run');
+    assert.strictEqual(execRiskyRow.ok, true);
+    assert.ok(execRiskyRow.token_id, 'risky exec plan should mint approval token');
+
+    const execRiskyTokenPath = path.join(opsApprovalStore.APPROVAL_PENDING_DIR, `${execRiskyRow.token_id}.json`);
+    assert.ok(fs.existsSync(execRiskyTokenPath), 'exec risky pending approval token file should exist');
+
     finalizer.__setModelCallerForTest((params) => `요약\\n${String(params.draft || '')}`);
     const bypass = finalizeOpsTelegramReply({
       command_kind: 'capability',
@@ -162,6 +217,7 @@ function main() {
     // Cleanup only the token minted by this test.
     fs.rmSync(pendingTokenPath, { force: true });
     fs.rmSync(browserTokenPath, { force: true });
+    fs.rmSync(execRiskyTokenPath, { force: true });
     opsApprovalStore.clearApprovalGrant(requesterId);
     finalizer.__setModelCallerForTest(null);
 

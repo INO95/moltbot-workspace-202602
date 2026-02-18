@@ -1,12 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const config = require('../data/config.json');
+const approvalAuditLog = require('./approval_audit_log');
 
 const ROOT = path.join(__dirname, '..');
 const COMMANDS_STATE_ROOT = path.join(ROOT, 'ops', 'commands', 'state');
 const APPROVAL_PENDING_DIR = path.join(COMMANDS_STATE_ROOT, 'pending');
 const APPROVAL_CONSUMED_DIR = path.join(COMMANDS_STATE_ROOT, 'consumed');
 const APPROVAL_GRANTS_DIR = path.join(COMMANDS_STATE_ROOT, 'grants');
+const DEFAULT_PENDING_APPROVALS_STATE_PATH = path.join(ROOT, 'data', 'state', 'pending_approvals.json');
 
 function nowIso() {
     return new Date().toISOString();
@@ -84,6 +87,250 @@ function makeGrantId() {
     return `grt_${raw}`;
 }
 
+function resolveUnifiedApprovalsConfig() {
+    const section = (config && typeof config.opsUnifiedApprovals === 'object')
+        ? config.opsUnifiedApprovals
+        : {};
+    const pendingStateRaw = String(section.pendingStatePath || '').trim();
+    const pendingStatePath = pendingStateRaw
+        ? (path.isAbsolute(pendingStateRaw) ? pendingStateRaw : path.join(ROOT, pendingStateRaw))
+        : DEFAULT_PENDING_APPROVALS_STATE_PATH;
+    const ttlPolicy = (section.ttlPolicy && typeof section.ttlPolicy === 'object')
+        ? section.ttlPolicy
+        : {};
+    return {
+        enabled: section.enabled !== false,
+        pendingStatePath,
+        ttlPolicy,
+    };
+}
+
+function hashValue(value) {
+    return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
+function redactValue(value) {
+    if (value == null) return value;
+    if (typeof value === 'string') {
+        return value
+            .replace(/\b(Bearer\s+)[A-Za-z0-9._-]+\b/gi, '$1[REDACTED]')
+            .replace(/\b(api[_-]?key|token|password|secret|authorization)\s*[:=]\s*([^\s,;]+)/gi, '$1=[REDACTED]');
+    }
+    if (Array.isArray(value)) return value.map((item) => redactValue(item));
+    if (typeof value === 'object') {
+        const out = {};
+        for (const [key, val] of Object.entries(value)) {
+            const lower = String(key || '').toLowerCase();
+            if (
+                lower.includes('token')
+                || lower.includes('secret')
+                || lower.includes('password')
+                || lower.includes('authorization')
+                || lower.includes('cookie')
+            ) {
+                out[key] = '[REDACTED]';
+                continue;
+            }
+            out[key] = redactValue(val);
+        }
+        return out;
+    }
+    return value;
+}
+
+function listApprovalFiles(dirPath) {
+    try {
+        if (!fs.existsSync(dirPath)) return [];
+        return fs.readdirSync(dirPath)
+            .filter((name) => name.endsWith('.json'))
+            .sort()
+            .map((name) => path.join(dirPath, name));
+    } catch (_) {
+        return [];
+    }
+}
+
+function parseTokenFromPath(filePath) {
+    const base = path.basename(String(filePath || ''));
+    const m = base.match(/^(apv_[a-f0-9]{16})\.json$/i);
+    return m ? String(m[1]).trim() : '';
+}
+
+function deriveActionType(record) {
+    const direct = String(record && (record.action_type || record.actionType) || '').trim().toLowerCase();
+    if (direct) return direct;
+    const plan = (record && record.plan && typeof record.plan === 'object') ? record.plan : {};
+    if (String(plan.command_kind || '').trim().toLowerCase() === 'capability') {
+        return String(plan.capability || 'capability').trim().toLowerCase() || 'capability';
+    }
+    return 'file_control';
+}
+
+function deriveRiskLevel(record) {
+    const direct = String(record && (record.risk_level || record.riskLevel) || '').trim().toUpperCase();
+    if (direct) return direct;
+    const plan = (record && record.plan && typeof record.plan === 'object') ? record.plan : {};
+    return String(plan.risk_tier || 'MEDIUM').trim().toUpperCase() || 'MEDIUM';
+}
+
+function deriveBotId(record) {
+    const direct = String(record && (record.bot_id || record.botId) || '').trim();
+    if (direct) return direct;
+    return String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+}
+
+function derivePayload(record) {
+    const plan = (record && record.plan && typeof record.plan === 'object') ? record.plan : {};
+    const payload = (plan.payload && typeof plan.payload === 'object') ? plan.payload : {};
+    return redactValue(payload);
+}
+
+function deriveStatus(record) {
+    const key = String(record && record.status || '').trim().toLowerCase();
+    if (key === 'pending' || key === 'consumed' || key === 'denied' || key === 'expired') return key;
+    if (record && record.consumed_at) return 'consumed';
+    return 'pending';
+}
+
+function deriveTtlSeconds(record) {
+    const direct = Number(record && record.ttl_seconds);
+    if (Number.isFinite(direct) && direct > 0) return Math.floor(direct);
+    const createdMs = Date.parse(String(record && record.created_at || ''));
+    const expiresMs = Date.parse(String(record && record.expires_at || ''));
+    if (Number.isFinite(createdMs) && Number.isFinite(expiresMs) && expiresMs > createdMs) {
+        return Math.floor((expiresMs - createdMs) / 1000);
+    }
+    return 0;
+}
+
+function toMirrorRecord(record, tokenOverride = '') {
+    if (!record || typeof record !== 'object') return null;
+    const token = String(tokenOverride || record.token || '').trim();
+    if (!token) return null;
+    return {
+        id: token,
+        created_at: String(record.created_at || '').trim() || null,
+        expires_at: String(record.expires_at || '').trim() || null,
+        ttl_seconds: deriveTtlSeconds(record),
+        bot_id: deriveBotId(record),
+        action_type: deriveActionType(record),
+        payload: derivePayload(record),
+        risk_level: deriveRiskLevel(record),
+        requested_by: String(record.requested_by || '').trim() || 'unknown',
+        status: deriveStatus(record),
+        request_id: String(record.request_id || '').trim() || null,
+        consumed_at: String(record.consumed_at || '').trim() || null,
+        denied_at: String(record.denied_at || '').trim() || null,
+    };
+}
+
+function buildPendingApprovalsSnapshot() {
+    const pending = [];
+    const history = [];
+    const seen = new Set();
+
+    for (const filePath of listApprovalFiles(APPROVAL_PENDING_DIR)) {
+        const token = parseTokenFromPath(filePath);
+        if (!token) continue;
+        const record = readJson(filePath, null);
+        const mirror = toMirrorRecord(record, token);
+        if (!mirror) continue;
+        seen.add(token);
+        if (mirror.status === 'pending') {
+            pending.push(mirror);
+        } else {
+            history.push(mirror);
+        }
+    }
+
+    for (const filePath of listApprovalFiles(APPROVAL_CONSUMED_DIR)) {
+        const token = parseTokenFromPath(filePath);
+        if (!token || seen.has(token)) continue;
+        const record = readJson(filePath, null);
+        const mirror = toMirrorRecord(record, token);
+        if (!mirror) continue;
+        history.push(mirror);
+    }
+
+    history.sort((a, b) => String(b.consumed_at || b.created_at || '').localeCompare(String(a.consumed_at || a.created_at || '')));
+    return {
+        schema_version: '1.0',
+        updated_at: nowIso(),
+        pending,
+        history: history.slice(0, 500),
+    };
+}
+
+function syncPendingApprovalsMirror() {
+    const unified = resolveUnifiedApprovalsConfig();
+    if (!unified.enabled) return null;
+    const snapshot = buildPendingApprovalsSnapshot();
+    const current = readJson(unified.pendingStatePath, null);
+    if (current && stableStringify(current) === stableStringify(snapshot)) {
+        return snapshot;
+    }
+    writeJsonAtomic(unified.pendingStatePath, snapshot);
+    return snapshot;
+}
+
+function expirePendingTokens() {
+    ensureLayout();
+    const now = Date.now();
+    let changed = false;
+    for (const filePath of listApprovalFiles(APPROVAL_PENDING_DIR)) {
+        const token = parseTokenFromPath(filePath);
+        if (!token) continue;
+        const record = readJson(filePath, null);
+        if (!record || typeof record !== 'object') continue;
+        if (record.consumed_at) continue;
+        const expiresAtMs = Date.parse(String(record.expires_at || ''));
+        if (!Number.isFinite(expiresAtMs) || expiresAtMs > now) continue;
+        const expiredAt = nowIso();
+        const updated = {
+            ...record,
+            status: 'expired',
+            consumed_at: expiredAt,
+            consumed_by: 'system:ttl',
+            execution_request_id: record.execution_request_id || null,
+        };
+        writeJsonAtomic(consumedTokenPath(token), updated);
+        fs.rmSync(filePath, { force: true });
+        changed = true;
+        approvalAuditLog.append('approval_decision', {
+            decision: 'expired',
+            token,
+            token_hash: `tok_${hashValue(token).slice(0, 16)}`,
+            action_type: deriveActionType(updated),
+            risk_level: deriveRiskLevel(updated),
+            requested_by: updated.requested_by || 'unknown',
+            request_id: updated.request_id || null,
+        });
+    }
+    if (changed) {
+        syncPendingApprovalsMirror();
+    }
+}
+
+function resolveConsumedTokenError(token, consumed) {
+    const status = String(consumed && consumed.status || '').trim().toLowerCase();
+    if (status === 'denied') {
+        throw makeError('TOKEN_DENIED', 'Approval token was denied.', {
+            token,
+            denied_at: consumed.denied_at || consumed.consumed_at || null,
+        });
+    }
+    if (status === 'expired') {
+        throw makeError('TOKEN_EXPIRED', 'Approval token expired.', {
+            token,
+            expires_at: consumed.expires_at || null,
+        });
+    }
+    throw makeError('TOKEN_CONSUMED', 'Approval token was already consumed.', {
+        token,
+        consumed_at: consumed && consumed.consumed_at ? consumed.consumed_at : null,
+    });
+}
+
 function readJson(filePath, fallback = null) {
     try {
         if (!fs.existsSync(filePath)) return fallback;
@@ -94,6 +341,7 @@ function readJson(filePath, fallback = null) {
 }
 
 function writeJsonAtomic(filePath, payload) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
     fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     fs.renameSync(tmpPath, filePath);
@@ -126,11 +374,21 @@ function grantRecordPath(requestedBy) {
 }
 
 function resolveTtlSeconds(policy = {}, requested = null) {
-    const defaults = {
-        defaultTtlSeconds: 180,
-        minTtlSeconds: 120,
-        maxTtlSeconds: 300,
+    const unified = resolveUnifiedApprovalsConfig();
+    const unifiedTtl = (unified.ttlPolicy && typeof unified.ttlPolicy === 'object')
+        ? unified.ttlPolicy
+        : {};
+    const asPositive = (value, fallback) => {
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? num : fallback;
     };
+    const defaults = {
+        defaultTtlSeconds: asPositive(unifiedTtl.defaultTtlSeconds, 600),
+        minTtlSeconds: asPositive(unifiedTtl.minTtlSeconds, 120),
+        maxTtlSeconds: asPositive(unifiedTtl.maxTtlSeconds, 1800),
+    };
+    defaults.maxTtlSeconds = Math.max(defaults.minTtlSeconds, defaults.maxTtlSeconds);
+    defaults.defaultTtlSeconds = Math.max(defaults.minTtlSeconds, Math.min(defaults.defaultTtlSeconds, defaults.maxTtlSeconds));
     const cfg = {
         ...defaults,
         ...((policy && typeof policy === 'object') ? policy : {}),
@@ -168,6 +426,7 @@ function resolveGrantTtlSeconds(policy = {}, requested = null) {
 
 function createApprovalToken(options = {}) {
     ensureLayout();
+    expirePendingTokens();
     const token = makeToken();
     const createdAtMs = Date.now();
     const ttlSeconds = resolveTtlSeconds(options.ttlPolicy || {}, options.ttlSeconds);
@@ -176,27 +435,49 @@ function createApprovalToken(options = {}) {
     const plan = options.plan || {};
     const planSnapshotHash = String(options.planSnapshotHash || hashPlanSnapshot(plan));
     const requiredFlags = normalizeFlags(options.requiredFlags || []);
+    const actionType = String(options.actionType || options.action_type || deriveActionType({ plan }) || 'file_control').trim().toLowerCase() || 'file_control';
+    const riskLevel = String(options.riskLevel || options.risk_level || plan.risk_tier || 'MEDIUM').trim().toUpperCase() || 'MEDIUM';
+    const botId = String(options.botId || options.bot_id || process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
     const record = {
         schema_version: '1.0',
         token,
         created_at: new Date(createdAtMs).toISOString(),
         expires_at: expiresAt,
+        ttl_seconds: ttlSeconds,
+        bot_id: botId,
+        action_type: actionType,
+        risk_level: riskLevel,
         required_flags: requiredFlags,
         requested_by: String(options.requestedBy || '').trim() || 'unknown',
         request_id: String(options.requestId || '').trim() || null,
         plan_snapshot_hash: planSnapshotHash,
         plan,
         plan_summary: options.planSummary || {},
+        status: 'pending',
+        denied_at: null,
+        denied_by: null,
         consumed_at: null,
         consumed_by: null,
         execution_request_id: null,
     };
     writeJsonAtomic(tokenPath(token), record);
+    syncPendingApprovalsMirror();
+    approvalAuditLog.append('approval_request_created', {
+        token,
+        action_type: actionType,
+        risk_level: riskLevel,
+        requested_by: record.requested_by,
+        request_id: record.request_id,
+        expires_at: record.expires_at,
+        ttl_seconds: ttlSeconds,
+        payload: derivePayload(record),
+    });
     return record;
 }
 
 function readPendingToken(token) {
     ensureLayout();
+    expirePendingTokens();
     return readJson(tokenPath(token), null);
 }
 
@@ -211,6 +492,7 @@ function validateApproval(options = {}) {
     if (!token) {
         throw makeError('TOKEN_REQUIRED', 'Approval token is required.');
     }
+    expirePendingTokens();
 
     let record = null;
     try {
@@ -222,18 +504,26 @@ function validateApproval(options = {}) {
     if (!record) {
         const consumed = readConsumedToken(token);
         if (consumed) {
-            throw makeError('TOKEN_CONSUMED', 'Approval token was already consumed.', { token, consumed_at: consumed.consumed_at || null });
+            resolveConsumedTokenError(token, consumed);
         }
         throw makeError('TOKEN_NOT_FOUND', 'Approval token was not found.', { token });
     }
 
+    if (String(record.status || '').trim().toLowerCase() === 'denied') {
+        throw makeError('TOKEN_DENIED', 'Approval token was denied.', {
+            token,
+            denied_at: record.denied_at || record.consumed_at || null,
+        });
+    }
+
     if (record.consumed_at) {
-        throw makeError('TOKEN_CONSUMED', 'Approval token was already consumed.', { token, consumed_at: record.consumed_at });
+        resolveConsumedTokenError(token, record);
     }
 
     const nowMs = Date.now();
     const expiresAtMs = Date.parse(String(record.expires_at || ''));
     if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
+        expirePendingTokens();
         throw makeError('TOKEN_EXPIRED', 'Approval token expired.', { token, expires_at: record.expires_at || null });
     }
 
@@ -267,25 +557,93 @@ function validateApproval(options = {}) {
 }
 
 function consumeApproval(options = {}) {
+    ensureLayout();
+    expirePendingTokens();
     const token = String(options.token || '').trim();
     const pendingPath = tokenPath(token);
     const record = readJson(pendingPath, null);
     if (!record) {
+        const consumed = readConsumedToken(token);
+        if (consumed) resolveConsumedTokenError(token, consumed);
         throw makeError('TOKEN_NOT_FOUND', 'Approval token was not found.', { token });
     }
+    if (String(record.status || '').trim().toLowerCase() === 'denied') {
+        throw makeError('TOKEN_DENIED', 'Approval token was denied.', { token, denied_at: record.denied_at || record.consumed_at || null });
+    }
     if (record.consumed_at) {
-        throw makeError('TOKEN_CONSUMED', 'Approval token was already consumed.', { token, consumed_at: record.consumed_at });
+        resolveConsumedTokenError(token, record);
     }
 
     const now = nowIso();
     const updated = {
         ...record,
+        status: 'consumed',
         consumed_at: now,
         consumed_by: String(options.consumedBy || '').trim() || 'unknown',
         execution_request_id: String(options.executionRequestId || '').trim() || null,
     };
     writeJsonAtomic(pendingPath, updated);
     writeJsonAtomic(consumedTokenPath(token), updated);
+    syncPendingApprovalsMirror();
+    approvalAuditLog.append('approval_decision', {
+        decision: 'approved',
+        token,
+        action_type: deriveActionType(updated),
+        risk_level: deriveRiskLevel(updated),
+        requested_by: updated.requested_by || 'unknown',
+        request_id: updated.request_id || null,
+        execution_request_id: updated.execution_request_id || null,
+    });
+    return updated;
+}
+
+function denyApproval(options = {}) {
+    ensureLayout();
+    expirePendingTokens();
+    const token = String(options.token || '').trim();
+    if (!token) {
+        throw makeError('TOKEN_REQUIRED', 'Approval token is required.');
+    }
+    const pendingPath = tokenPath(token);
+    const record = readJson(pendingPath, null);
+    if (!record) {
+        const consumed = readConsumedToken(token);
+        if (consumed) resolveConsumedTokenError(token, consumed);
+        throw makeError('TOKEN_NOT_FOUND', 'Approval token was not found.', { token });
+    }
+    if (String(record.status || '').trim().toLowerCase() === 'denied') {
+        throw makeError('TOKEN_DENIED', 'Approval token was denied.', {
+            token,
+            denied_at: record.denied_at || record.consumed_at || null,
+        });
+    }
+    if (record.consumed_at) {
+        resolveConsumedTokenError(token, record);
+    }
+
+    const now = nowIso();
+    const deniedBy = String(options.deniedBy || options.consumedBy || '').trim() || 'unknown';
+    const updated = {
+        ...record,
+        status: 'denied',
+        denied_at: now,
+        denied_by: deniedBy,
+        consumed_at: now,
+        consumed_by: deniedBy,
+        execution_request_id: String(options.executionRequestId || '').trim() || null,
+    };
+    fs.rmSync(pendingPath, { force: true });
+    writeJsonAtomic(consumedTokenPath(token), updated);
+    syncPendingApprovalsMirror();
+    approvalAuditLog.append('approval_decision', {
+        decision: 'denied',
+        token,
+        action_type: deriveActionType(updated),
+        risk_level: deriveRiskLevel(updated),
+        requested_by: updated.requested_by || 'unknown',
+        request_id: updated.request_id || null,
+        execution_request_id: updated.execution_request_id || null,
+    });
     return updated;
 }
 
@@ -398,10 +756,12 @@ module.exports = {
     APPROVAL_PENDING_DIR,
     APPROVAL_CONSUMED_DIR,
     APPROVAL_GRANTS_DIR,
+    DEFAULT_PENDING_APPROVALS_STATE_PATH,
     ensureLayout,
     createApprovalToken,
     validateApproval,
     consumeApproval,
+    denyApproval,
     createApprovalGrant,
     readApprovalGrant,
     clearApprovalGrant,
@@ -414,4 +774,6 @@ module.exports = {
     hashPlanSnapshot,
     normalizeFlags,
     stableStringify,
+    syncPendingApprovalsMirror,
+    expirePendingTokens,
 };

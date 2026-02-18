@@ -220,6 +220,18 @@
         ],
         "allowedGroupIds": []
     },
+    "opsUnifiedApprovals": {
+        "enabled": true,
+        "pendingStatePath": "data/state/pending_approvals.json",
+        "auditLogDir": "logs/approvals",
+        "ttlPolicy": {
+            "defaultTtlSeconds": 600,
+            "minTtlSeconds": 120,
+            "maxTtlSeconds": 1800
+        },
+        "allowlistPath": "data/policy/exec_allowlist.json",
+        "denylistMode": "approval_required"
+    },
     "opsFileControlPolicy": {
         "enabled": true,
         "allowedRoots": [

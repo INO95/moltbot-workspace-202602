@@ -103,6 +103,40 @@ function main() {
     assert.strictEqual(browserRow.requires_approval, true);
     assert.strictEqual(browserRow.risk_tier, 'HIGH');
 
+    const execWrapped = '[Telegram Test User id:7704103236 chat:123456 +0m 2026-02-16 13:13 UTC] 운영: 액션: 실행; 작업: pwd [message_id: 24]';
+    const beforeExec = new Set(listOutbox());
+    const outExec = runBridge(execWrapped);
+    assert.strictEqual(outExec.route, 'ops');
+    assert.strictEqual(outExec.templateValid, true);
+    assert.strictEqual(outExec.success, true);
+    assert.strictEqual(outExec.capability, 'exec');
+    assert.strictEqual(outExec.capabilityAction, 'run');
+    assert.strictEqual(outExec.requiresApproval, false);
+
+    const execQueued = findAddedRowByRequestId(beforeExec, outExec.requestId);
+    const execRow = execQueued.row;
+    assert.strictEqual(execRow.command_kind, 'capability');
+    assert.strictEqual(execRow.capability, 'exec');
+    assert.strictEqual(execRow.action, 'run');
+    assert.strictEqual(execRow.payload.command, 'pwd');
+
+    const denyToken = 'apv_deadbeefdeadbeef';
+    const denyWrapped = `[Telegram Test User id:7704103236 chat:123456 +0m 2026-02-16 13:14 UTC] /deny ${denyToken} [message_id: 25]`;
+    const beforeDeny = new Set(listOutbox());
+    const outDeny = runBridge(denyWrapped);
+    assert.strictEqual(outDeny.route, 'ops');
+    assert.strictEqual(outDeny.templateValid, true);
+    assert.strictEqual(outDeny.success, true);
+    assert.strictEqual(outDeny.action, 'deny');
+    assert.strictEqual(outDeny.phase, 'execute');
+    assert.strictEqual(outDeny.token, denyToken);
+
+    const denyQueued = findAddedRowByRequestId(beforeDeny, outDeny.requestId);
+    const denyRow = denyQueued.row;
+    assert.strictEqual(denyRow.phase, 'execute');
+    assert.strictEqual(denyRow.payload.token, denyToken);
+    assert.strictEqual(denyRow.payload.decision, 'deny');
+
     console.log('test_bridge_ops_capability_routes: ok');
 }
 

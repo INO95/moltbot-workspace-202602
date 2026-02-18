@@ -15,7 +15,9 @@ const mailManager = require('./capabilities/mail_manager');
 const photoManager = require('./capabilities/photo_manager');
 const scheduleManager = require('./capabilities/schedule_manager');
 const browserManager = require('./capabilities/browser_manager');
+const execManager = require('./capabilities/exec_manager');
 const telegramFinalizer = require('./finalizer');
+const approvalAuditLog = require('./approval_audit_log');
 
 const RUNTIME_DIR = path.join(__dirname, '..', 'data', 'runtime');
 const QUEUE_PATH = path.join(RUNTIME_DIR, 'ops_requests.jsonl');
@@ -55,6 +57,7 @@ const CAPABILITY_HANDLERS = Object.freeze({
   photo: photoManager,
   schedule: scheduleManager,
   browser: browserManager,
+  exec: execManager,
 });
 
 const KNOWN_CONTAINERS = [
@@ -429,6 +432,39 @@ function finalizeOpsTelegramReply(request, replyText, phase = '') {
   return raw;
 }
 
+function logAutoExecuteDecision(request, plan, decision) {
+  approvalAuditLog.append('auto_execute_decision', {
+    request_id: String(request && request.request_id || ''),
+    requested_by: String(request && request.requested_by || 'unknown'),
+    command_kind: String(request && request.command_kind || 'file_control'),
+    action_type: String((plan && (plan.action_type || plan.capability)) || 'file_control'),
+    capability: String(plan && plan.capability || ''),
+    action: String(plan && plan.action || plan && plan.intent_action || ''),
+    decision: String(decision || '').trim() || 'approval_required',
+    risk_level: String(plan && plan.risk_tier || request && request.risk_tier || 'MEDIUM'),
+    payload: plan && plan.payload ? plan.payload : {},
+  });
+}
+
+function logExecutionResult(request, planOrResult, executeResult, ok) {
+  const source = (planOrResult && typeof planOrResult === 'object') ? planOrResult : {};
+  const result = (executeResult && typeof executeResult === 'object') ? executeResult : {};
+  approvalAuditLog.append('execution_result', {
+    request_id: String(request && request.request_id || ''),
+    requested_by: String(request && request.requested_by || 'unknown'),
+    command_kind: String(request && request.command_kind || source.command_kind || 'file_control'),
+    action_type: String(source.action_type || source.capability || 'file_control'),
+    capability: String(source.capability || request && request.capability || ''),
+    action: String(source.action || source.intent_action || request && request.action || ''),
+    risk_level: String(source.risk_tier || request && request.risk_tier || 'MEDIUM'),
+    ok: Boolean(ok),
+    error_code: result.error_code || null,
+    error: result.error || null,
+    summary: result.summary || null,
+    payload: source.payload || {},
+  });
+}
+
 function notifyBridgePlanResult(request, plan, approvalRecord, ok, errorCode = '', errorMessage = '') {
   const baseReply = ok
     ? opsFileControl.formatPlanReply(plan, approvalRecord)
@@ -458,20 +494,23 @@ function notifyBridgePlanResult(request, plan, approvalRecord, ok, errorCode = '
 }
 
 function notifyBridgeExecuteResult(request, executeResult, ok, errorCode = '', errorMessage = '') {
+  const directReply = executeResult && typeof executeResult.telegramReply === 'string'
+    ? String(executeResult.telegramReply).trim()
+    : '';
   let approvalGrantLine = '';
   if (executeResult && executeResult.approval_grant && typeof executeResult.approval_grant === 'object') {
     const scope = String(executeResult.approval_grant.scope || 'all');
     const expiresAt = String(executeResult.approval_grant.expires_at || '').trim();
     approvalGrantLine = `- approval grant: active (${scope}${expiresAt ? ` until ${expiresAt}` : ''})`;
   }
-  const telegramReplyRaw = ok
+  const telegramReplyRaw = directReply || (ok
     ? opsFileControl.formatExecuteReply(executeResult)
     : [
         '[RESULT] execute failed',
         `- error: ${errorCode || 'EXECUTE_FAILED'}`,
         `- detail: ${errorMessage || 'unknown error'}`,
         approvalGrantLine,
-      ].filter(Boolean).join('\n');
+      ].filter(Boolean).join('\n'));
   const telegramReply = finalizeOpsTelegramReply(request, telegramReplyRaw, 'execute');
 
   enqueueBridgePayload({
@@ -855,6 +894,8 @@ function handleCapabilityPlanPhase(request, policy) {
     };
   }
 
+  logAutoExecuteDecision(request, plan, plan.requires_approval ? 'approval_required' : 'auto_execute');
+
   const snapshotHash = opsApprovalStore.hashPlanSnapshot(plan);
   if (plan.requires_approval) {
     const approvalRecord = opsApprovalStore.createApprovalToken({
@@ -865,6 +906,9 @@ function handleCapabilityPlanPhase(request, policy) {
       planSnapshotHash: snapshotHash,
       plan,
       planSummary: capabilitySummaryObject(plan, null),
+      actionType: plan.capability || 'capability',
+      riskLevel: plan.risk_tier || 'MEDIUM',
+      botId: process.env.MOLTBOT_BOT_ID || '',
     });
     notifyBridgeCapabilityPlanResult(request, plan, approvalRecord, true);
     return buildCapabilityResultBase(request, {
@@ -883,6 +927,7 @@ function handleCapabilityPlanPhase(request, policy) {
   }
   const executed = executeCapabilityPlan(request, plan, built.handler, policy);
   if (!executed.ok) {
+    logExecutionResult(request, plan, executed.details || executed, false);
     notifyBridgeCapabilityExecuteResult(request, {
       ...(executed.details || {}),
       approval_grant: plan.approval_grant || null,
@@ -901,6 +946,7 @@ function handleCapabilityPlanPhase(request, policy) {
     });
   }
 
+  logExecutionResult(request, plan, executed.details || executed, true);
   notifyBridgeCapabilityExecuteResult(request, {
     capability: plan.capability,
     action: plan.action,
@@ -992,6 +1038,7 @@ function handleCapabilityExecuteWithToken(request, policy, token, tokenRecord, p
 
   const executed = executeCapabilityPlan(request, recomputedPlan, rebuilt.handler, policy);
   if (!executed.ok) {
+    logExecutionResult(request, recomputedPlan, executed.details || executed, false);
     notifyBridgeCapabilityExecuteResult(request, {
       ...(executed.details || {}),
       approval_grant: approvalGrant,
@@ -1009,6 +1056,7 @@ function handleCapabilityExecuteWithToken(request, policy, token, tokenRecord, p
     });
   }
 
+  logExecutionResult(request, recomputedPlan, executed.details || executed, true);
   const planSummary = {
     ...(tokenRecord.plan_summary || {}),
     consumed_at: consumed ? consumed.consumed_at : null,
@@ -1081,6 +1129,13 @@ function handlePlanPhase(request, policy) {
     };
   }
 
+  logAutoExecuteDecision(request, {
+    ...plan,
+    action_type: 'file_control',
+    capability: 'file_control',
+    action: plan.intent_action,
+  }, (plan.mutating && !plan.approval_grant) ? 'approval_required' : 'auto_execute');
+
   let approvalRecord = null;
   if (plan.mutating && !plan.approval_grant) {
     const snapshotHash = opsApprovalStore.hashPlanSnapshot(plan);
@@ -1092,6 +1147,9 @@ function handlePlanPhase(request, policy) {
       planSnapshotHash: snapshotHash,
       plan,
       planSummary: planSummaryObject(plan, null),
+      actionType: 'file_control',
+      riskLevel: plan.risk_tier || 'MEDIUM',
+      botId: process.env.MOLTBOT_BOT_ID || '',
     });
   }
 
@@ -1107,6 +1165,12 @@ function handlePlanPhase(request, policy) {
     };
     const ok = Boolean(execResult && execResult.ok);
     if (!ok) {
+      logExecutionResult(request, {
+        ...plan,
+        action_type: 'file_control',
+        capability: 'file_control',
+        action: plan.intent_action,
+      }, execResult || {}, false);
       const errorCode = String(execResult && execResult.error_code ? execResult.error_code : 'EXECUTE_FAILED');
       const errorMessage = String(execResult && execResult.error ? execResult.error : 'execute failed');
       notifyBridgeExecuteResult(request, executePayload, false, errorCode, errorMessage);
@@ -1122,6 +1186,12 @@ function handlePlanPhase(request, policy) {
         hashes: Array.isArray(execResult && execResult.hashes) ? execResult.hashes : [],
       });
     }
+    logExecutionResult(request, {
+      ...plan,
+      action_type: 'file_control',
+      capability: 'file_control',
+      action: plan.intent_action,
+    }, execResult || {}, true);
     notifyBridgeExecuteResult(request, executePayload, true);
     return buildFileControlResultBase(request, {
       token_id: null,
@@ -1145,7 +1215,83 @@ function handlePlanPhase(request, policy) {
 function handleExecutePhase(request, policy) {
   const payload = request.payload && typeof request.payload === 'object' ? request.payload : {};
   const token = String(payload.token || '').trim();
+  const decision = String(payload.decision || 'approve').trim().toLowerCase() || 'approve';
   const providedFlags = opsFileControl.normalizeApprovalFlags(payload.approval_flags || payload.options || '');
+
+  if (decision === 'deny') {
+    if (!token) {
+      const errorCode = 'TOKEN_REQUIRED';
+      const errorMessage = 'approval token is required for deny';
+      notifyBridgeExecuteResult(request, null, false, errorCode, errorMessage);
+      return buildFileControlResultBase(request, {
+        token_id: null,
+        ok: false,
+        error_code: errorCode,
+        error: errorMessage,
+      });
+    }
+    let denied;
+    try {
+      denied = opsApprovalStore.denyApproval({
+        token,
+        deniedBy: request.requested_by,
+        executionRequestId: request.request_id,
+      });
+    } catch (error) {
+      const errorCode = String(error && error.code ? error.code : 'TOKEN_DENY_FAILED');
+      const errorMessage = String(error && error.message ? error.message : error);
+      notifyBridgeExecuteResult(request, null, false, errorCode, errorMessage);
+      return buildFileControlResultBase(request, {
+        token_id: token || null,
+        ok: false,
+        error_code: errorCode,
+        error: errorMessage,
+      });
+    }
+
+    const deniedActionType = String(denied && denied.action_type || 'file_control');
+    notifyBridgeExecuteResult(request, {
+      ok: true,
+      action: 'deny',
+      telegramReply: [
+        '[RESULT] approval denied',
+        `- token: ${token}`,
+        `- action_type: ${deniedActionType}`,
+      ].join('\n'),
+    }, true);
+    const deniedPlan = (denied && denied.plan && typeof denied.plan === 'object') ? denied.plan : null;
+    if (deniedPlan && String(deniedPlan.command_kind || '').trim().toLowerCase() === 'capability') {
+      return buildCapabilityResultBase({
+        ...request,
+        command_kind: 'capability',
+        capability: deniedPlan.capability || null,
+        action: deniedPlan.action || null,
+      }, {
+        token_id: token,
+        capability: deniedPlan.capability || null,
+        action: deniedPlan.action || null,
+        plan_summary: denied && denied.plan_summary ? denied.plan_summary : null,
+        executed_steps: [],
+        details: {
+          action: 'deny',
+          denied: true,
+          denied_at: denied && denied.denied_at ? denied.denied_at : nowIso(),
+        },
+        ok: true,
+      });
+    }
+    return buildFileControlResultBase(request, {
+      token_id: token,
+      ok: true,
+      plan_summary: denied && denied.plan_summary ? denied.plan_summary : null,
+      executed_steps: [],
+      details: {
+        action: 'deny',
+        denied: true,
+        denied_at: denied && denied.denied_at ? denied.denied_at : nowIso(),
+      },
+    });
+  }
 
   let validated;
   try {
@@ -1262,6 +1408,12 @@ function handleExecutePhase(request, policy) {
 
   const ok = Boolean(execResult && execResult.ok);
   if (!ok) {
+    logExecutionResult(request, {
+      ...recomputedPlan,
+      action_type: 'file_control',
+      capability: 'file_control',
+      action: recomputedPlan.intent_action,
+    }, execResult || {}, false);
     const errorCode = String(execResult && execResult.error_code ? execResult.error_code : 'EXECUTE_FAILED');
     const errorMessage = String(execResult && execResult.error ? execResult.error : 'execute failed');
     notifyBridgeExecuteResult(request, executePayload, false, errorCode, errorMessage);
@@ -1278,6 +1430,12 @@ function handleExecutePhase(request, policy) {
     });
   }
 
+  logExecutionResult(request, {
+    ...recomputedPlan,
+    action_type: 'file_control',
+    capability: 'file_control',
+    action: recomputedPlan.intent_action,
+  }, execResult || {}, true);
   const planSummary = {
     ...(tokenRecord.plan_summary || {}),
     consumed_at: consumed ? consumed.consumed_at : null,

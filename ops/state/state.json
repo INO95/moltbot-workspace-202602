@@ -1,10 +1,10 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-02-18T12:00:01.720Z",
+  "updated_at": "2026-02-18T13:00:02.039Z",
   "timezone": "Asia/Tokyo",
   "scan_cursor_ts_by_bot": {
     "bot-dev": "2026-02-17T23:00:02.017Z",
-    "bot-anki": "2026-02-18T10:36:45.526Z",
+    "bot-anki": "2026-02-18T12:05:25.897Z",
     "bot-research": "2026-02-17T14:46:55.586Z"
   },
   "bot_health": {
@@ -15,7 +15,7 @@
       "last_success_ts": "2026-02-17T23:00:02.017Z",
       "last_run_id": "2836ffe2-0d0b-4c99-a7c2-3fb02bf284d0",
       "last_run_ts": "2026-02-17T23:00:02.017Z",
-      "staleness_minutes": 779.99505,
+      "staleness_minutes": 840.0003666666667,
       "signal_source": "latest+heartbeat",
       "container_state": {
         "supported": true,
@@ -28,7 +28,7 @@
       "telegram_channel": {
         "healthy": true,
         "container": "moltbot-dev",
-        "since": "2026-02-18T11:40:01.720Z",
+        "since": "2026-02-18T12:40:02.039Z",
         "provider_starts": 0,
         "channel_exits": 0,
         "auth_invalids": 0,
@@ -40,11 +40,11 @@
     "bot-anki": {
       "bot_id": "bot-anki",
       "status": "WARN",
-      "last_seen_ts": "2026-02-18T10:36:45.526Z",
-      "last_success_ts": "2026-02-18T10:36:45.526Z",
-      "last_run_id": "461c9591-25d3-4ebb-81fa-44b43488641b",
-      "last_run_ts": "2026-02-18T10:36:45.526Z",
-      "staleness_minutes": 83.2699,
+      "last_seen_ts": "2026-02-18T12:05:25.897Z",
+      "last_success_ts": "2026-02-18T12:05:25.898Z",
+      "last_run_id": "07bed048-61ae-4820-91bc-84cc25ac6910",
+      "last_run_ts": "2026-02-18T12:05:25.897Z",
+      "staleness_minutes": 54.60236666666667,
       "signal_source": "latest+heartbeat",
       "container_state": {
         "supported": true,
@@ -57,13 +57,13 @@
       "telegram_channel": {
         "healthy": true,
         "container": "moltbot-anki",
-        "since": "2026-02-18T11:40:01.720Z",
+        "since": "2026-02-18T12:40:02.039Z",
         "provider_starts": 0,
         "channel_exits": 0,
         "auth_invalids": 0,
         "last_error": null
       },
-      "runs_observed": 47,
+      "runs_observed": 50,
       "retries_recovered": 0
     },
     "bot-research": {
@@ -73,7 +73,7 @@
       "last_success_ts": "2026-02-17T14:46:55.587Z",
       "last_run_id": "e30f24cf-eb30-4ed5-b8be-d2eb01b5092b",
       "last_run_ts": "2026-02-17T14:46:55.586Z",
-      "staleness_minutes": 1273.1022333333333,
+      "staleness_minutes": 1333.10755,
       "signal_source": "latest+heartbeat",
       "container_state": {
         "supported": true,
@@ -86,7 +86,7 @@
       "telegram_channel": {
         "healthy": true,
         "container": "moltbot-research",
-        "since": "2026-02-18T11:40:01.720Z",
+        "since": "2026-02-18T12:40:02.039Z",
         "provider_starts": 0,
         "channel_exits": 0,
         "auth_invalids": 0,

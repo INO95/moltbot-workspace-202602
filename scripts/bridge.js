@@ -650,9 +650,10 @@ const COMMAND_TEMPLATE_SCHEMA = {
             '키',
             '값',
             '메서드',
+            '명령',
         ],
         aliases: {
-            액션: ['액션', 'action', '명령'],
+            액션: ['액션', 'action'],
             대상: ['대상', 'target', '서비스'],
             사유: ['사유', 'reason', '메모'],
             작업: ['작업', 'task', 'operation', 'intent'],
@@ -677,6 +678,7 @@ const COMMAND_TEMPLATE_SCHEMA = {
             키: ['키', 'key'],
             값: ['값', 'value', 'text'],
             메서드: ['메서드', 'method'],
+            명령: ['명령', 'command', 'cmd'],
         },
     },
 };
@@ -721,11 +723,13 @@ function normalizeOpsAction(value) {
     if (/(재시작|restart|reboot)/.test(v)) return 'restart';
     if (/(상태|status|health|check)/.test(v)) return 'status';
     if (/(파일|file|fs|git)/.test(v)) return 'file';
+    if (/(실행|exec|shell|terminal|command)/.test(v)) return 'exec';
     if (/(메일|mail|email)/.test(v)) return 'mail';
     if (/(사진|photo|image|camera|cam)/.test(v)) return 'photo';
     if (/(일정|스케줄|schedule|calendar)/.test(v)) return 'schedule';
     if (/(브라우저|browser|웹자동화)/.test(v)) return 'browser';
     if (/(승인|approve)/.test(v)) return 'approve';
+    if (/(거부|deny)/.test(v)) return 'deny';
     return null;
 }
 
@@ -756,6 +760,9 @@ const OPS_CAPABILITY_POLICY = Object.freeze({
         checkout: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
         post: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
         send: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
+    }),
+    exec: Object.freeze({
+        run: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
     }),
 });
 
@@ -792,6 +799,9 @@ function normalizeOpsCapabilityAction(capability, value) {
         if (/(send|보내기|발송)/.test(raw)) return 'send';
         return 'list';
     }
+    if (capability === 'exec') {
+        return 'run';
+    }
     return null;
 }
 
@@ -816,6 +826,7 @@ function buildCapabilityPayload(fields = {}) {
         key: String(fields.키 || '').trim(),
         value: String(fields.값 || '').trim(),
         method: String(fields.메서드 || '').trim(),
+        command: String(fields.명령 || '').trim(),
     };
 }
 
@@ -977,7 +988,7 @@ function normalizeOpsFileIntent(value) {
 }
 
 function isFileControlAction(action) {
-    return action === 'file' || action === 'approve';
+    return action === 'file' || action === 'approve' || action === 'deny' || action === 'exec';
 }
 
 function enforceFileControlTelegramGuard(telegramContext, policy) {
@@ -1049,7 +1060,7 @@ function isApprovalGrantEnabled(policy) {
 function parseApproveShorthand(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
-    const match = raw.match(/^approve\s+([A-Za-z0-9._:-]+)\s*(.*)$/i);
+    const match = raw.match(/^\/?approve\s+([A-Za-z0-9._:-]+)\s*(.*)$/i);
     if (!match) return null;
     const token = String(match[1] || '').trim();
     const flags = normalizeOpsOptionFlags(match[2] || '');
@@ -1063,17 +1074,39 @@ function parseApproveShorthand(text) {
     };
 }
 
+function parseDenyShorthand(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    const match = raw.match(/^\/?deny\s+([A-Za-z0-9._:-]+)\s*$/i);
+    if (!match) return null;
+    const token = String(match[1] || '').trim();
+    return {
+        token,
+        normalizedPayload: `액션: 거부; 토큰: ${token}`,
+    };
+}
+
 function normalizeOpsPayloadText(text) {
     const approve = parseApproveShorthand(text);
     if (approve) {
         return {
             payloadText: approve.normalizedPayload,
             approveShorthand: approve,
+            denyShorthand: null,
+        };
+    }
+    const deny = parseDenyShorthand(text);
+    if (deny) {
+        return {
+            payloadText: deny.normalizedPayload,
+            approveShorthand: null,
+            denyShorthand: deny,
         };
     }
     return {
         payloadText: String(text || '').trim(),
         approveShorthand: null,
+        denyShorthand: null,
     };
 }
 
@@ -1273,7 +1306,7 @@ function runOpsCommand(payloadText, options = {}) {
             route: 'ops',
             templateValid: false,
             error: '지원하지 않는 액션입니다.',
-            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `메일`, `사진`, `일정`, `브라우저`, `승인`만 지원합니다.',
+            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `실행`, `메일`, `사진`, `일정`, `브라우저`, `승인`, `거부`만 지원합니다.',
         };
     }
 
@@ -1425,7 +1458,7 @@ function runOpsCommand(payloadText, options = {}) {
         };
     }
 
-    if (action === 'mail' || action === 'photo' || action === 'schedule' || action === 'browser') {
+    if (action === 'mail' || action === 'photo' || action === 'schedule' || action === 'browser' || action === 'exec') {
         const capabilityAction = normalizeOpsCapabilityAction(action, parsed.fields.작업);
         const capabilityPolicy = OPS_CAPABILITY_POLICY[action] || {};
         const capabilityRoutePolicy = (capabilityAction && capabilityPolicy[capabilityAction]) || null;
@@ -1448,6 +1481,20 @@ function runOpsCommand(payloadText, options = {}) {
             ...buildCapabilityPayload(parsed.fields),
             options: normalizeOpsOptionFlags(parsed.fields.옵션 || ''),
         };
+        if (action === 'exec') {
+            const commandText = String(parsed.fields.작업 || parsed.fields.명령 || parsed.fields.내용 || payload.command || '').trim();
+            if (!commandText) {
+                return {
+                    route: 'ops',
+                    templateValid: false,
+                    success: false,
+                    action,
+                    errorCode: 'EXEC_COMMAND_REQUIRED',
+                    telegramReply: '실행 명령이 필요합니다. 예: 운영: 액션: 실행; 작업: ls -la',
+                };
+            }
+            payload.command = commandText;
+        }
         const queued = enqueueCapabilityCommand({
             phase: 'plan',
             capability: action,
@@ -1459,9 +1506,11 @@ function runOpsCommand(payloadText, options = {}) {
             risk_tier: capabilityRoutePolicy.risk_tier,
             requires_approval: capabilityRoutePolicy.requires_approval,
         });
-        const approvalHint = capabilityRoutePolicy.requires_approval
+        const approvalHint = action === 'exec'
+            ? '- allowlist 검사 후 안전 명령은 자동 실행, 위험 명령은 승인 토큰이 발급됩니다.'
+            : (capabilityRoutePolicy.requires_approval
             ? '- 고위험 작업으로 분류되어 승인 토큰이 발급됩니다. 승인 후 `APPROVE <token>`로 실행됩니다.'
-            : '- 저위험 작업으로 분류되어 PLAN 검증 후 호스트 runner가 즉시 실행합니다.';
+            : '- 저위험 작업으로 분류되어 PLAN 검증 후 호스트 runner가 즉시 실행합니다.');
         const grantHint = (capabilityRoutePolicy.requires_approval && isApprovalGrantEnabled(policy))
             ? '- 승인 성공 시 일정 시간 전체 권한 세션이 열려, 추가 고위험 작업이 토큰 없이 실행될 수 있습니다.'
             : '';
@@ -1512,6 +1561,7 @@ function runOpsCommand(payloadText, options = {}) {
             payload: {
                 token,
                 approval_flags: approveFlags,
+                decision: 'approve',
             },
         });
         return {
@@ -1534,6 +1584,47 @@ function runOpsCommand(payloadText, options = {}) {
                     ? '- 승인 성공 시 일정 시간 전체 권한 세션이 열립니다.'
                     : '',
             ].filter(Boolean).join('\n'),
+        };
+    }
+
+    if (action === 'deny') {
+        const token = String(parsed.fields.토큰 || (normalized.denyShorthand && normalized.denyShorthand.token) || '').trim();
+        if (!token) {
+            return {
+                route: 'ops',
+                templateValid: false,
+                success: false,
+                action,
+                errorCode: 'TOKEN_REQUIRED',
+                telegramReply: '거부 토큰이 필요합니다. 예: /deny <token>',
+            };
+        }
+        const queued = enqueueFileControlCommand({
+            phase: 'execute',
+            intent_action: 'execute',
+            requested_by: requestedBy,
+            telegram_context: telegramContext,
+            payload: {
+                token,
+                decision: 'deny',
+            },
+        });
+        return {
+            route: 'ops',
+            templateValid: true,
+            success: true,
+            queued: true,
+            phase: 'execute',
+            action,
+            requestId: queued.requestId,
+            token,
+            decision: 'deny',
+            telegramContext,
+            telegramReply: [
+                `승인 거부 요청 접수: ${queued.requestId}`,
+                `- token: ${token}`,
+                '- 호스트 runner가 토큰 상태를 확인하고 영구 거부 처리합니다.',
+            ].join('\n'),
         };
     }
 
@@ -1834,6 +1925,7 @@ function buildNoPrefixGuide() {
         '- 링크: 프롬프트',
         '- 상태: [옵션]',
         '- APPROVE <token> [--force] [--push]',
+        '- /deny <token>',
         '- 단어: 단어1',
         '- 작업: 요청: ...; 대상: ...; 완료기준: ...',
         '- 점검: 대상: ...; 체크항목: ...',
@@ -2362,6 +2454,13 @@ function routeByPrefix(text) {
         return {
             route: 'ops',
             payload: approve.normalizedPayload,
+        };
+    }
+    const deny = parseDenyShorthand(input);
+    if (deny) {
+        return {
+            route: 'ops',
+            payload: deny.normalizedPayload,
         };
     }
     const inferred = inferNaturalLanguageRoute(input, { env: process.env });
