@@ -18,6 +18,7 @@ const {
     buildWordCandidates,
     createWordQuality,
     normalizeQualityPolicy,
+    suggestToeicTypoCorrection,
 } = require('./anki_word_quality');
 const { analyzeWordFailures, detectTypoSuspicion } = require('./anki_typo_guard');
 const { buildProjectBootstrapPlan } = require('./project_bootstrap');
@@ -331,11 +332,13 @@ const DAILY_PERSONA = normalizeDailyPersonaConfig(config.dailyPersona, {
 const NATURAL_LANGUAGE_ROUTING = normalizeNaturalLanguageRoutingConfig(config.naturalLanguageRouting, process.env);
 
 function applyDailyPersonaToOutput(base, metaInput = {}) {
-    if (!isHubRuntime(process.env)) return base;
     if (!base || typeof base !== 'object') return base;
     if (typeof base.telegramReply !== 'string' || !String(base.telegramReply).trim()) return base;
     const route = String(metaInput.route || base.route || '').trim().toLowerCase();
-    const telegramReply = applyPersonaToSystemReply(base.telegramReply, DAILY_PERSONA, { route });
+    const rewritten = rewriteLocalLinks(base.telegramReply, getPublicBases());
+    const telegramReply = isHubRuntime(process.env)
+        ? applyPersonaToSystemReply(rewritten, DAILY_PERSONA, { route })
+        : rewritten;
     if (telegramReply === base.telegramReply) return base;
     return {
         ...base,
@@ -413,12 +416,27 @@ function splitWords(text) {
         .map(s => s.trim())
         .filter(Boolean);
 
-    const primaryTokens = byLines.length > 1
+    let primaryTokens = byLines.length > 1
         ? byLines
         : raw
             .split(',')
             .map(s => s.trim())
             .filter(Boolean);
+
+    // 한 줄에 "Word 뜻 Word 뜻 ..." 형태로 붙여 보낼 때를 대비한 보정.
+    if (primaryTokens.length === 1) {
+        const compact = String(primaryTokens[0] || '').replace(/\s+/g, ' ').trim();
+        const looksPacked = (compact.match(/[A-Za-z][A-Za-z\-']*\s+[가-힣]/g) || []).length >= 2;
+        if (looksPacked) {
+            const packedSplit = compact
+                .split(/\s+(?=[A-Z][A-Za-z\-']*(?:\s+[a-z][A-Za-z\-']*){0,4}\s+[~\(\[]*[가-힣])/)
+                .map((v) => v.trim())
+                .filter(Boolean);
+            if (packedSplit.length > 1) {
+                primaryTokens = packedSplit;
+            }
+        }
+    }
 
     const expanded = [];
     for (const token of primaryTokens) {
@@ -439,20 +457,43 @@ function stripListPrefix(token) {
         .trim();
 }
 
+function normalizeWordParseInput(token) {
+    return String(token || '')
+        .replace(/[’‘`´]/g, "'")
+        .replace(/[–—]/g, '-')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeHintParseInput(hint) {
+    return String(hint || '')
+        .replace(/^[~\s]+/, '')
+        .replace(/[()[\]{}<>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function parseWordToken(token) {
-    const clean = stripListPrefix(token);
+    const clean = normalizeWordParseInput(stripListPrefix(token));
     if (!clean) return null;
 
     // 명시 구분자 우선 (:, |, " - ")
-    const explicit = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,80}?)\s*(?:[:：|]| - )\s*(.+)$/);
+    const explicit = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s*(?:[:：|]| - )\s*(.+)$/);
     if (explicit) {
-        return { word: explicit[1].trim(), hint: explicit[2].trim() };
+        return {
+            word: explicit[1].trim(),
+            hint: normalizeHintParseInput(explicit[2]),
+        };
     }
 
-    // "activate 활성화하다" 같은 형태: 영어 구간 + 한글 뜻
-    const mixed = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,80}?)\s+([가-힣].+)$/);
+    // "activate 활성화하다", "make it to ~에 참석하다", "wave (손,팔을) 흔들다" 형태 처리
+    const mixed = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s+[\(\[\{<~\s]*([가-힣].+)$/);
     if (mixed) {
-        return { word: mixed[1].trim(), hint: mixed[2].trim() };
+        return {
+            word: mixed[1].trim(),
+            hint: normalizeHintParseInput(mixed[2]),
+        };
     }
 
     // 영어만 있으면 전체를 단어/구로 간주
@@ -461,6 +502,36 @@ function parseWordToken(token) {
     }
 
     return null;
+}
+
+function isKoreanHintFragment(token) {
+    const text = String(token || '').trim();
+    if (!text) return false;
+    if (/[A-Za-z]/.test(text)) return false;
+    if (!/[가-힣]/.test(text)) return false;
+    return /^[가-힣0-9\s,./()\-~·'"“”‘’]+$/.test(text);
+}
+
+function mergeDetachedHintTokens(tokens = []) {
+    const merged = [];
+    for (const raw of (Array.isArray(tokens) ? tokens : [])) {
+        const token = String(raw || '').trim();
+        if (!token) continue;
+
+        if (merged.length > 0 && isKoreanHintFragment(token)) {
+            const prev = String(merged[merged.length - 1] || '').trim();
+            const prevParsed = parseWordToken(prev);
+            if (prevParsed && String(prevParsed.hint || '').trim()) {
+                const joiner = /[,;]\s*$/.test(prevParsed.hint) ? ' ' : ', ';
+                const combinedHint = `${prevParsed.hint}${joiner}${token}`.trim();
+                merged[merged.length - 1] = `${prevParsed.word} ${combinedHint}`.trim();
+                continue;
+            }
+        }
+
+        merged.push(token);
+    }
+    return merged;
 }
 
 function buildToeicAnswer(word, hint) {
@@ -582,6 +653,11 @@ const COMMAND_TEMPLATE_SCHEMA = {
             '장치',
             '식별자',
             '내용',
+            'URL',
+            '셀렉터',
+            '키',
+            '값',
+            '메서드',
         ],
         aliases: {
             액션: ['액션', 'action', '명령'],
@@ -604,6 +680,11 @@ const COMMAND_TEMPLATE_SCHEMA = {
             장치: ['장치', 'device', 'camera'],
             식별자: ['식별자', 'id', 'event_id', 'schedule_id'],
             내용: ['내용', 'content', 'note'],
+            URL: ['url', 'URL', '링크', '주소'],
+            셀렉터: ['셀렉터', 'selector', 'ref'],
+            키: ['키', 'key'],
+            값: ['값', 'value', 'text'],
+            메서드: ['메서드', 'method'],
         },
     },
 };
@@ -651,6 +732,7 @@ function normalizeOpsAction(value) {
     if (/(메일|mail|email)/.test(v)) return 'mail';
     if (/(사진|photo|image|camera|cam)/.test(v)) return 'photo';
     if (/(일정|스케줄|schedule|calendar)/.test(v)) return 'schedule';
+    if (/(브라우저|browser|웹자동화)/.test(v)) return 'browser';
     if (/(승인|approve)/.test(v)) return 'approve';
     return null;
 }
@@ -671,6 +753,17 @@ const OPS_CAPABILITY_POLICY = Object.freeze({
         create: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
         update: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
         delete: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
+    }),
+    browser: Object.freeze({
+        open: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
+        list: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
+        click: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
+        type: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
+        wait: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
+        screenshot: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
+        checkout: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
+        post: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
+        send: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
     }),
 });
 
@@ -695,6 +788,18 @@ function normalizeOpsCapabilityAction(capability, value) {
         if (/(delete|remove|삭제)/.test(raw)) return 'delete';
         return 'list';
     }
+    if (capability === 'browser') {
+        if (/(open|열기|navigate|접속|이동)/.test(raw)) return 'open';
+        if (/(list|목록|조회)/.test(raw)) return 'list';
+        if (/(click|클릭)/.test(raw)) return 'click';
+        if (/(type|입력)/.test(raw)) return 'type';
+        if (/(wait|대기)/.test(raw)) return 'wait';
+        if (/(screenshot|캡처|스크린샷)/.test(raw)) return 'screenshot';
+        if (/(checkout|결제)/.test(raw)) return 'checkout';
+        if (/(post|요청|전송요청)/.test(raw)) return 'post';
+        if (/(send|보내기|발송)/.test(raw)) return 'send';
+        return 'list';
+    }
     return null;
 }
 
@@ -714,6 +819,11 @@ function buildCapabilityPayload(fields = {}) {
         attachment: String(fields.첨부 || '').trim(),
         device: String(fields.장치 || '').trim(),
         identifier: String(fields.식별자 || '').trim(),
+        url: String(fields.URL || '').trim(),
+        selector: String(fields.셀렉터 || '').trim(),
+        key: String(fields.키 || '').trim(),
+        value: String(fields.값 || '').trim(),
+        method: String(fields.메서드 || '').trim(),
     };
 }
 
@@ -1171,7 +1281,7 @@ function runOpsCommand(payloadText, options = {}) {
             route: 'ops',
             templateValid: false,
             error: '지원하지 않는 액션입니다.',
-            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `메일`, `사진`, `일정`, `승인`만 지원합니다.',
+            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `메일`, `사진`, `일정`, `브라우저`, `승인`만 지원합니다.',
         };
     }
 
@@ -1323,7 +1433,7 @@ function runOpsCommand(payloadText, options = {}) {
         };
     }
 
-    if (action === 'mail' || action === 'photo' || action === 'schedule') {
+    if (action === 'mail' || action === 'photo' || action === 'schedule' || action === 'browser') {
         const capabilityAction = normalizeOpsCapabilityAction(action, parsed.fields.작업);
         const capabilityPolicy = OPS_CAPABILITY_POLICY[action] || {};
         const capabilityRoutePolicy = (capabilityAction && capabilityPolicy[capabilityAction]) || null;
@@ -1524,6 +1634,9 @@ function appendExternalLinks(reply) {
     const rewritten = rewriteLocalLinks(reply, bases);
     const links = buildExternalLinksText();
     if (!links) return rewritten;
+    if (/(^|\n)외부 확인 링크(\n|$)/.test(String(rewritten || ''))) {
+        return String(rewritten || '').trim();
+    }
     return `${String(rewritten || '').trim()}\n\n${links}`.trim();
 }
 
@@ -2261,6 +2374,7 @@ function handlePromptPayload(payloadText) {
 
 function isWeakEnrichment(word, hint, enriched, threshold = DEFAULT_QUALITY_POLICY.qualityThreshold) {
     const quality = enriched && enriched.quality ? enriched.quality : null;
+    const hasHint = Boolean(String(hint || '').trim());
     if (quality) {
         const warnings = new Set(
             (Array.isArray(quality.warnings) ? quality.warnings : [])
@@ -2271,7 +2385,7 @@ function isWeakEnrichment(word, hint, enriched, threshold = DEFAULT_QUALITY_POLI
             const p = String(prefix || '').trim();
             if (!p) return false;
             for (const w of warnings) {
-                if (w === p || w.startsWith(`${p}:`)) return true;
+                if (w === p || w.startsWith(p + ':')) return true;
             }
             return false;
         };
@@ -2289,21 +2403,23 @@ function isWeakEnrichment(word, hint, enriched, threshold = DEFAULT_QUALITY_POLI
             'example_generic_template',
             'tip_not_specific',
             'tip_lacks_detail',
-            'example_not_toeic_context',
-            'example_missing_target',
         ];
+        if (!hasHint) {
+            criticalWarningPrefixes.push('example_not_toeic_context', 'example_missing_target');
+        }
+        const effectiveThreshold = hasHint
+            ? Math.min(Number(threshold || DEFAULT_QUALITY_POLICY.qualityThreshold || 0.82), 0.45)
+            : Number(threshold || DEFAULT_QUALITY_POLICY.qualityThreshold || 0.82);
         return Boolean(quality.hardFail)
             || Boolean(quality.degraded)
-            || (Number.isFinite(confidence) && confidence < threshold)
+            || (Number.isFinite(confidence) && confidence < effectiveThreshold)
             || criticalWarningPrefixes.some((prefix) => hasWarningPrefix(prefix));
     }
-    const hasHint = Boolean(String(hint || '').trim());
     if (hasHint) return false;
     const meaning = String((enriched && enriched.meaning) || '').trim();
     const example = String((enriched && enriched.example) || '').trim();
     return meaning === '(의미 보강 필요)' && example === fallbackExample(word);
 }
-
 function safeRecordVocabLog(row, options = {}) {
     try {
         personalStorage.recordVocabLog(row, options);
@@ -2334,9 +2450,11 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
     });
     const addCardFn = options.addCardFn || ((deck, front, back, tags, addOpts) => anki.addCard(deck, front, back, tags, addOpts));
     const syncFn = options.syncFn || (() => anki.syncWithDelay());
-    const tokens = splitWords(text);
+    const rawTokens = splitWords(text);
+    const tokens = mergeDetachedHintTokens(rawTokens);
     const results = [];
     const failures = [];
+    const autoCorrections = [];
     const warningSet = new Set();
     let syncWarning = null;
     let failedParseCount = 0;
@@ -2353,6 +2471,7 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
             payload: {
                 deck: toeicDeck,
                 tokens: tokens.slice(0, 200),
+                rawTokens: rawTokens.slice(0, 200),
             },
             dedupeMaterial: `word:${personalStorage.normalizeSpace(text).toLowerCase()}`,
         }, options);
@@ -2377,29 +2496,56 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
                 }, options);
                 continue;
             }
-            const word = parsed.word;
+            const originalWord = parsed.word;
+            let word = originalWord;
             const hint = parsed.hint;
             if (!String(hint || '').trim()) {
                 const typoSignal = detectTypoSuspicion(word);
                 if (typoSignal.suspicious && typoSignal.primary) {
-                    failures.push({
+                    const shouldUseLlmCorrection = options.enableLlmTypoCorrection !== undefined
+                        ? Boolean(options.enableLlmTypoCorrection)
+                        : !(options.qualityFn || options.enrichFn);
+                    const correctionFn = options.typoCorrectionFn || suggestToeicTypoCorrection;
+                    const corrected = await correctionFn({
                         token,
-                        reason: `typo_suspected:${typoSignal.suggestions.join('|')}`,
-                    });
-                    failedQualityCount += 1;
-                    safeRecordVocabLog({
-                        eventId: vocabEventId,
                         word,
-                        deck: toeicDeck,
-                        saveStatus: 'failed',
-                        errorText: `typo_suspected:${typoSignal.suggestions.join('|')}`,
-                        meta: {
+                        primary: typoSignal.primary,
+                        suggestions: typoSignal.suggestions,
+                    }, {
+                        llmThinking: options.llmThinking || 'high',
+                        mode: shouldUseLlmCorrection ? 'llm' : 'rule',
+                    });
+                    const correctedWord = normalizeWordToken(
+                        corrected && corrected.word ? corrected.word : typoSignal.primary,
+                    );
+                    if (correctedWord) {
+                        word = correctedWord;
+                        autoCorrections.push({
                             token,
-                            typo: true,
-                            suggestions: typoSignal.suggestions,
-                        },
-                    }, options);
-                    continue;
+                            from: typoSignal.target || normalizeWordToken(originalWord),
+                            to: correctedWord,
+                            source: String((corrected && corrected.source) || 'rule_fallback'),
+                        });
+                    } else {
+                        failures.push({
+                            token,
+                            reason: `typo_suspected:${typoSignal.suggestions.join('|')}`,
+                        });
+                        failedQualityCount += 1;
+                        safeRecordVocabLog({
+                            eventId: vocabEventId,
+                            word,
+                            deck: toeicDeck,
+                            saveStatus: 'failed',
+                            errorText: `typo_suspected:${typoSignal.suggestions.join('|')}`,
+                            meta: {
+                                token,
+                                typo: true,
+                                suggestions: typoSignal.suggestions,
+                            },
+                        }, options);
+                        continue;
+                    }
                 }
             }
             const enriched = await enrichFn(word, hint);
@@ -2492,6 +2638,8 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
                 saveStatus: 'saved',
                 meta: {
                     token,
+                    originalWord,
+                    correctedWord: word !== originalWord ? word : '',
                     duplicate: Boolean(noteMeta.duplicate),
                     action: noteMeta.action || '',
                     quality: {
@@ -2525,6 +2673,21 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
         }
     }
     const failedTotal = failedParseCount + failedQualityCount + failedAddCount;
+    const correctionMap = new Map();
+    for (const row of autoCorrections) {
+        const from = String(row && row.from ? row.from : '').trim();
+        const to = String(row && row.to ? row.to : '').trim();
+        if (!from || !to || from === to) continue;
+        const key = `${from}->${to}`;
+        if (!correctionMap.has(key)) {
+            correctionMap.set(key, {
+                from,
+                to,
+                source: String(row && row.source ? row.source : 'rule_fallback').trim() || 'rule_fallback',
+            });
+        }
+    }
+    const correctionRows = [...correctionMap.values()];
     const sourceModeCounts = {};
     let degradedCount = 0;
     for (const row of results) {
@@ -2538,12 +2701,15 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
     const telegramReplyCore = failedRows.length > 0
         ? `${summary}\n실패 목록:\n- ${failedRows.map(f => `${f.token}: ${f.reason}`).join('\n- ')}`
         : `${summary}\n실패 목록: 없음`;
+    const correctionBlock = correctionRows.length > 0
+        ? `\n자동 보정:\n- ${correctionRows.map((row) => `${row.from} -> ${row.to} (${row.source})`).join('\n- ')}`
+        : '';
     const clarificationBlock = typoReview.needsClarification
         ? `\n\n입력 확인 필요:\n${typoReview.clarificationLines.join('\n')}\n수정 후 다시 "단어: ..." 로 보내주세요.`
         : '';
     const telegramReply = syncWarning
-        ? `${telegramReplyCore}\n동기화 경고: ${syncWarning}${clarificationBlock}`
-        : `${telegramReplyCore}${clarificationBlock}`;
+        ? `${telegramReplyCore}${correctionBlock}\n동기화 경고: ${syncWarning}${clarificationBlock}`
+        : `${telegramReplyCore}${correctionBlock}${clarificationBlock}`;
     return {
         success: failedTotal === 0,
         saved: results.length,
@@ -2557,6 +2723,7 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
         failedTokens: failedRows.map(f => `${f.token}: ${f.reason}`),
         results,
         failures: failedRows,
+        autoCorrections: correctionRows,
         needsClarification: typoReview.needsClarification,
         clarificationLines: typoReview.clarificationLines,
         warnings: [...warningSet],

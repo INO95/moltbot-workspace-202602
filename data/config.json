@@ -348,6 +348,27 @@
                     "required_flags": [
                         "force"
                     ]
+                },
+                "browser:checkout": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "browser:post": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "browser:send": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
                 }
             }
         }
