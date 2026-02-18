@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "request_id": "opsfc-1771250270874-sp0ebv",
+  "created_at": "2026-02-16T13:57:50.874Z",
+  "phase": "execute",
+  "intent_action": "execute",
+  "requested_by": "7704103236",
+  "telegram_context": {
+    "provider": "telegram",
+    "userId": "7704103236",
+    "groupId": "123456",
+    "header": "Ops Verifier id:7704103236 chat:123456 +0m 2026-02-16 14:00 UTC"
+  },
+  "payload": {
+    "token": "apv_2264624b77733dc3",
+    "approval_flags": [
+      "force"
+    ]
+  }
+}

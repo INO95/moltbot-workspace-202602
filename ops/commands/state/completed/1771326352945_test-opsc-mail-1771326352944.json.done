@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "request_id": "test-opsc-mail-1771326352944",
+  "created_at": "2026-02-17T11:05:52.944Z",
+  "command_kind": "capability",
+  "phase": "plan",
+  "capability": "mail",
+  "action": "send",
+  "intent_action": "capability:mail:send",
+  "requested_by": "test-opsc-1771326351363",
+  "payload": {
+    "recipient": "ops@example.com",
+    "subject": "test subject",
+    "body": "test body"
+  }
+}

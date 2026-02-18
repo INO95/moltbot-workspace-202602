@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MVP Bot Event Log Schema v1.0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ts",
+    "bot_id",
+    "run_id",
+    "event_type",
+    "status",
+    "severity",
+    "message",
+    "component"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bot_id": {
+      "type": "string",
+      "pattern": "^bot-[a-z0-9-]+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["start", "step", "retry", "end", "heartbeat"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "warn", "error"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["P1", "P2", "P3"]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "component": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "attempt": {
+      "type": "number",
+      "minimum": 1
+    },
+    "max_attempts": {
+      "type": "number",
+      "minimum": 1
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "http_status": { "type": "number" },
+        "stack": { "type": "string" },
+        "fingerprint": { "type": "string" },
+        "retriable": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "refs": {
+      "type": "object",
+      "properties": {
+        "input_ref": { "type": "string" },
+        "output_ref": { "type": "string" },
+        "artifact_ref": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "env": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "trace_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

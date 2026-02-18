@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_68bea908c696642c",
+  "created_at": "2026-02-16T13:57:48.930Z",
+  "expires_at": "2026-02-16T14:00:48.930Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771250268843-xtrzbr",
+  "plan_snapshot_hash": "6be546e49bf60bc4f6913114e3d36ee88602d2c57373e1f3c7b28437e3adedf1",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T13:57:48.926Z",
+    "intent_action": "move",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/Users/moltbot/Downloads/opsfc_demo_C/src/external-move.txt",
+      "target_path": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target",
+      "pattern": "",
+      "repository": "",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/Users/moltbot/Downloads/opsfc_demo_C/src/external-move.txt"
+    ],
+    "target_path": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target",
+    "risk_tier": "HIGH_PRECHECK",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Downloads/opsfc_demo_C/src/external-move.txt",
+      "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target/external-move.txt"
+    ],
+    "operations": [
+      {
+        "kind": "move",
+        "src": "/Users/moltbot/Downloads/opsfc_demo_C/src/external-move.txt",
+        "dst": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target/external-move.txt",
+        "mode": "move"
+      }
+    ],
+    "warnings": [],
+    "blockers": [
+      {
+        "code": "DRIVE_NOT_WRITABLE",
+        "path": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target/external-move.txt",
+        "message": "DRIVE_NOT_WRITABLE"
+      }
+    ],
+    "plan_summary": "move plan: 1 item(s)",
+    "rollback_instructions": [
+      "mv \"/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target/external-move.txt\" \"/Users/moltbot/Downloads/opsfc_demo_C/src/external-move.txt\""
+    ],
+    "preflight": {
+      "driveRoot": "/Volumes/Macintosh HD",
+      "mounted": true,
+      "writable": false,
+      "freeBytes": 130678214656,
+      "freeOk": true,
+      "errors": [
+        "DRIVE_NOT_WRITABLE"
+      ]
+    },
+    "git": null
+  },
+  "plan_summary": {
+    "intent_action": "move",
+    "risk_tier": "HIGH_PRECHECK",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Downloads/opsfc_demo_C/src/external-move.txt",
+      "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target/external-move.txt"
+    ],
+    "warnings": [],
+    "blockers": [
+      {
+        "code": "DRIVE_NOT_WRITABLE",
+        "path": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C_target/external-move.txt",
+        "message": "DRIVE_NOT_WRITABLE"
+      }
+    ],
+    "preflight": {
+      "driveRoot": "/Volumes/Macintosh HD",
+      "mounted": true,
+      "writable": false,
+      "freeBytes": 130678214656,
+      "freeOk": true,
+      "errors": [
+        "DRIVE_NOT_WRITABLE"
+      ]
+    }
+  },
+  "consumed_at": null,
+  "consumed_by": null,
+  "execution_request_id": null
+}

@@ -15,7 +15,7 @@ const mailManager = require('./capabilities/mail_manager');
 const photoManager = require('./capabilities/photo_manager');
 const scheduleManager = require('./capabilities/schedule_manager');
 const browserManager = require('./capabilities/browser_manager');
-const { normalizeDailyPersonaConfig, applyPersonaToSystemReply } = require('./daily_persona');
+const telegramFinalizer = require('./finalizer');
 
 const RUNTIME_DIR = path.join(__dirname, '..', 'data', 'runtime');
 const QUEUE_PATH = path.join(RUNTIME_DIR, 'ops_requests.jsonl');
@@ -55,10 +55,6 @@ const CAPABILITY_HANDLERS = Object.freeze({
   photo: photoManager,
   schedule: scheduleManager,
   browser: browserManager,
-});
-const DAILY_PERSONA = normalizeDailyPersonaConfig(config.dailyPersona, {
-  rootDir: ROOT,
-  env: process.env,
 });
 
 const KNOWN_CONTAINERS = [
@@ -407,24 +403,30 @@ function summarizeGitPreview(plan) {
   return lines.join('\n');
 }
 
-function styleOpsTelegramReply(request, replyText, phase = '') {
+function finalizeOpsTelegramReply(request, replyText, phase = '') {
   const raw = String(replyText || '').trim();
   if (!raw) return raw;
-  const routeKey = [
-    'ops',
-    String(request && request.command_kind || '').trim().toLowerCase(),
-    String(request && request.capability || '').trim().toLowerCase(),
-    String(request && request.action || '').trim().toLowerCase(),
-    String(phase || '').trim().toLowerCase(),
-  ].filter(Boolean).join(':');
-  return applyPersonaToSystemReply(raw, DAILY_PERSONA, { route: routeKey });
-}
-
-function finalizeOpsTelegramReply(request, replyText, phase = '') {
-  const styled = styleOpsTelegramReply(request, replyText, phase);
-  const normalized = String(styled || '').trim();
+  const telegramContext = request && request.telegram_context && typeof request.telegram_context === 'object'
+    ? request.telegram_context
+    : null;
+  const requestedBy = String(request && request.requested_by || '').trim();
+  const finalized = telegramFinalizer.finalizeTelegramReply(raw, {
+    botId: process.env.MOLTBOT_BOT_ID,
+    botRole: process.env.MOLTBOT_BOT_ROLE,
+    telegramContext,
+    requestedBy,
+    route: [
+      'ops',
+      String(request && request.command_kind || '').trim().toLowerCase(),
+      String(request && request.capability || '').trim().toLowerCase(),
+      String(request && request.action || '').trim().toLowerCase(),
+      String(phase || '').trim().toLowerCase(),
+    ].filter(Boolean).join(':'),
+    finalizerApplied: false,
+  });
+  const normalized = String(finalized || '').trim();
   if (normalized) return normalized;
-  return String(replyText || '').trim();
+  return raw;
 }
 
 function notifyBridgePlanResult(request, plan, approvalRecord, ok, errorCode = '', errorMessage = '') {
@@ -1434,9 +1436,15 @@ function main() {
   console.log(JSON.stringify(out, null, 2));
 }
 
-try {
-  main();
-} catch (e) {
-  console.error(String(e.message || e));
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (e) {
+    console.error(String(e.message || e));
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  finalizeOpsTelegramReply,
+};

@@ -1,6 +1,6 @@
 # User Operating Policy (BAEK INHO)
 
-Last updated: 2026-02-08
+Last updated: 2026-02-14
 
 ## Core principles
 - Always ask for required missing information before irreversible decisions.
@@ -31,7 +31,10 @@ Last updated: 2026-02-08
 - `배포:` deploy/release requests
 - `프롬프트:` prompt drafting/finalizing
 
-## Model routing policy
-- Default low-cost path: `google/gemini-3-flash-preview` (daily chat, routine updates).
-- Complex work path: `openai-codex/gpt-5.2` via `작업:` prefix when deeper reasoning/precision is needed.
-- If codex OAuth is unavailable, fall back to Gemini and mark result as degraded confidence.
+## Model/API routing policy
+- Provider baseline: OpenAI-only.
+- Default complex-work lane: `oauth-codex` (`work/inspect/deploy/prompt/report`).
+- API-key lane (`api-key-openai`) is currently disabled and reserved for future activation.
+- When enabled later, use it only for API-key-specific workflows (`responses/realtime/batch/webhook`) and explicit `API:key` overrides.
+- Local-only lane is preferred for routine routes (`word/news/status/link/ops`).
+- If OAuth lane fails, suggest API-key lane as fallback option only; do not auto-switch without policy approval.

@@ -1,8 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { inferRouteFromCommand, decideApiLane, loadRoutingPolicy } = require('./oai_api_router');
 
 const OUT_PATH = path.join(__dirname, '../logs/model_routing_report_latest.json');
+const BRIDGE_LOG_PATH = path.join(__dirname, '../data/bridge/inbox.jsonl');
+const CONFIG_PATH = path.join(__dirname, '../data/config.json');
 
 function run(cmd) {
     return execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -17,18 +20,18 @@ function parseJson(text, fallback = null) {
 }
 
 function getSessions() {
-    const out = run('docker exec moltbot-main /bin/sh -lc "node dist/index.js sessions --json"');
+    const out = run('docker exec moltbot-dev /bin/sh -lc "node dist/index.js sessions --json"');
     return parseJson(out, { sessions: [] }) || { sessions: [] };
 }
 
 function getModelStatus() {
-    const out = run('docker exec moltbot-main /bin/sh -lc "node dist/index.js models status"');
+    const out = run('docker exec moltbot-dev /bin/sh -lc "node dist/index.js models status"');
     return String(out || '');
 }
 
 function getCodexCatalog() {
     const out = run(
-        'docker exec moltbot-main /bin/sh -lc "node dist/index.js models list --all --provider openai-codex --plain"',
+        'docker exec moltbot-dev /bin/sh -lc "node dist/index.js models list --all --provider openai-codex --plain"',
     );
     return out
         .split('\n')
@@ -66,7 +69,77 @@ function summarizeSessions(sessions) {
     };
 }
 
-function buildRecommendations(summary, codexCatalog) {
+function loadBudgetPolicy() {
+    const cfg = fs.existsSync(CONFIG_PATH) ? parseJson(fs.readFileSync(CONFIG_PATH, 'utf8'), {}) : {};
+    const policy = (cfg && cfg.budgetPolicy) || {};
+    return {
+        monthlyApiBudgetYen: Number(policy.monthlyApiBudgetYen || 0),
+        paidApiRequiresApproval: Boolean(policy.paidApiRequiresApproval),
+    };
+}
+
+function summarizeApiLanes() {
+    const apiLanes = {
+        total: 0,
+        byLane: {
+            'oauth-codex': 0,
+            'api-key-openai': 0,
+            'local-only': 0,
+        },
+        blocked: 0,
+        blockedByReason: {},
+    };
+    if (!fs.existsSync(BRIDGE_LOG_PATH)) return apiLanes;
+
+    const cfg = fs.existsSync(CONFIG_PATH) ? parseJson(fs.readFileSync(CONFIG_PATH, 'utf8'), {}) : {};
+    const commandPrefixes = (cfg && cfg.commandPrefixes) || {};
+    const budgetPolicy = loadBudgetPolicy();
+    const routingPolicy = loadRoutingPolicy();
+
+    const lines = fs.readFileSync(BRIDGE_LOG_PATH, 'utf8')
+        .split('\n')
+        .map(v => v.trim())
+        .filter(Boolean);
+
+    for (const line of lines) {
+        const row = parseJson(line, null);
+        if (!row) continue;
+        const command = String(row.command || '').trim();
+        const source = String(row.source || '').trim().toLowerCase();
+        const looksSystemEvent = /^\[(ALERT|NOTIFY|CRON FAIL)\]/i.test(command);
+        const isCronFail = source === 'cron-guard' || command.startsWith('[CRON FAIL]');
+        if (!command || isCronFail) continue;
+        if (source && source !== 'user' && looksSystemEvent) continue;
+
+        const inferred = inferRouteFromCommand(command, { commandPrefixes });
+        const decision = decideApiLane(
+            {
+                route: inferred.route,
+                commandText: inferred.payload || command,
+            },
+            {
+                policy: routingPolicy,
+                budgetPolicy,
+                env: process.env,
+            },
+        );
+
+        apiLanes.total += 1;
+        if (!Object.prototype.hasOwnProperty.call(apiLanes.byLane, decision.apiLane)) {
+            apiLanes.byLane[decision.apiLane] = 0;
+        }
+        apiLanes.byLane[decision.apiLane] += 1;
+        if (decision.blocked) {
+            apiLanes.blocked += 1;
+            const reason = decision.blockReason || 'unknown';
+            apiLanes.blockedByReason[reason] = (apiLanes.blockedByReason[reason] || 0) + 1;
+        }
+    }
+
+    return apiLanes;
+}
+
+function buildRecommendations(summary, codexCatalog, apiLaneSummary) {
     const rec = [];
     const codexBest =
         codexCatalog.find(m => m.includes('gpt-5.3-codex')) ||
@@ -76,8 +149,8 @@ function buildRecommendations(summary, codexCatalog) {
 
     rec.push({
         rule: 'default_route',
-        value: 'google/gemini-3-flash-preview',
-        reason: 'Low-cost baseline for routine logging and lightweight Q&A.',
+        value: codexBest || 'openai-codex/gpt-5.3-codex',
+        reason: 'OpenAI-only routing baseline for routine and medium-complexity tasks.',
     });
     if (codexBest) {
         rec.push({
@@ -88,8 +161,8 @@ function buildRecommendations(summary, codexCatalog) {
     } else {
         rec.push({
             rule: 'complex_route',
-            value: 'google/gemini-3-pro-preview',
-            reason: 'Codex catalog unavailable; fallback to deep Gemini profile.',
+            value: 'openai-codex/gpt-5.3-codex',
+            reason: 'Codex catalog unavailable; keep OpenAI-only path and restore OAuth/catalog access.',
         });
     }
 
@@ -99,6 +172,22 @@ function buildRecommendations(summary, codexCatalog) {
             rule: 'adoption_hint',
             value: 'Increase 작업: prefix usage for difficult tasks to improve quality.',
             reason: 'No codex session usage detected in current session store.',
+        });
+    }
+
+    if (Number(apiLaneSummary && apiLaneSummary.blocked || 0) > 0) {
+        rec.push({
+            rule: 'api_key_lane_blocked',
+            value: apiLaneSummary.blocked,
+            reason: 'API-key lane requests were blocked by policy. Approve paid API only when necessary.',
+        });
+    }
+
+    if (Number((apiLaneSummary && apiLaneSummary.byLane && apiLaneSummary.byLane['api-key-openai']) || 0) > 0) {
+        rec.push({
+            rule: 'api_key_lane_observed',
+            value: apiLaneSummary.byLane['api-key-openai'],
+            reason: 'API-key lane traffic exists. Keep monitoring budget and auth posture.',
         });
     }
     return rec;
@@ -116,12 +205,14 @@ function main() {
     const summary = summarizeSessions(sessions);
     const codexCatalog = getCodexCatalog();
     const statusRaw = getModelStatus();
-    const recommendations = buildRecommendations(summary, codexCatalog);
+    const apiLaneSummary = summarizeApiLanes();
+    const recommendations = buildRecommendations(summary, codexCatalog, apiLaneSummary);
 
     const report = {
         generatedAt: new Date().toISOString(),
         sessionStore: sessionsDoc.path || null,
         sessions: summary,
+        apiLaneSummary,
         codexCatalog,
         modelStatusRaw: statusRaw,
         recommendations,

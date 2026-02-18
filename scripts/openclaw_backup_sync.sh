@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TS="$(date +%Y%m%d_%H%M%S)"
 PRIVATE_ROOT="${MOLTBOT_PRIVATE_DIR:-$(cd "$ROOT/.." && pwd)/Moltbot_Private}"
-BK_DIR="$PRIVATE_ROOT/backups/openclaw/main_$TS"
+BK_DIR="$PRIVATE_ROOT/backups/openclaw/dev_$TS"
 
 mkdir -p "$BK_DIR/configs" "$BK_DIR/data" "$BK_DIR/meta"
 
@@ -16,31 +16,36 @@ case "$BK_DIR" in
     ;;
 esac
 
-rsync -a "$ROOT/configs/main/" "$BK_DIR/configs/main/"
+for profile in dev anki research daily; do
+  if [[ -d "$ROOT/configs/$profile" ]]; then
+    rsync -a "$ROOT/configs/$profile/" "$BK_DIR/configs/$profile/"
+  fi
+done
+
 rsync -a "$ROOT/data/" "$BK_DIR/data/"
 cp "$ROOT/docker-compose.yml" "$BK_DIR/meta/docker-compose.yml"
 cp "$ROOT/package.json" "$BK_DIR/meta/package.json"
 
-docker inspect moltbot-main > "$BK_DIR/meta/moltbot-main.inspect.json"
-docker image inspect openclaw:local > "$BK_DIR/meta/openclaw-local.image.inspect.json"
+for container in moltbot-dev moltbot-anki moltbot-research moltbot-daily; do
+  if docker ps -a --format '{{.Names}}' | grep -qx "$container"; then
+    docker inspect "$container" > "$BK_DIR/meta/${container}.inspect.json"
+  fi
+done
 
-# Seed sub profile as warm standby backup runtime
-mkdir -p "$ROOT/configs/sub1"
-rsync -a --delete "$ROOT/configs/main/" "$ROOT/configs/sub1/"
-node "$ROOT/scripts/openclaw_config_secrets.js" inject sub1 >/dev/null
+if docker image inspect openclaw:local-dockercli >/dev/null 2>&1; then
+  docker image inspect openclaw:local-dockercli > "$BK_DIR/meta/openclaw-local-dockercli.image.inspect.json"
+fi
 
 cat > "$BK_DIR/meta/backup.json" <<JSON
 {
   "timestamp": "$TS",
   "snapshotDir": "$BK_DIR",
   "privateRoot": "$PRIVATE_ROOT",
-  "seededSubConfig": "$ROOT/configs/sub1/openclaw.json",
-  "notes": "sub1 seeded from main and telegram disabled for standby backup"
+  "mode": "cold-standby",
+  "backupProfiles": ["dev_bak", "anki_bak", "research_bak", "daily_bak"],
+  "notes": "Backup containers remain stopped by default. Enable and start only during failover."
 }
 JSON
 
-cd "$ROOT"
-docker compose --profile sub up -d openclaw-sub1 >/dev/null
-
 echo "Backup created: $BK_DIR"
-echo "Standby container: moltbot-sub1 (port 18889)"
+echo "Cold standby profiles: dev_bak, anki_bak, research_bak, daily_bak (not started)"

@@ -1,0 +1,14 @@
+FROM openclaw:local
+
+USER root
+
+# news/trend pipeline uses sqlite3 CLI in scripts/news_storage.js.
+# Browser tool requires a local Chromium/Chrome binary.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sqlite3 chromium jq gh python3-yaml \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI by copying the static client from the official CLI image.
+COPY --from=docker:29.2.0-cli /usr/local/bin/docker /usr/local/bin/docker
+
+USER node

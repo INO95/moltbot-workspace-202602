@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_9a4be27a488aa1fe",
+  "created_at": "2026-02-16T15:40:05.086Z",
+  "expires_at": "2026-02-16T15:43:05.086Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771256404989-mha9c6",
+  "plan_snapshot_hash": "ab921e273216837540dcda3b2b8c6bf8af1d4240327f7a13edd88dee6c2078f4",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T15:40:05.084Z",
+    "intent_action": "rename",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/alpha.txt",
+      "target_path": "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/beta.txt",
+      "pattern": "",
+      "repository": "",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/alpha.txt"
+    ],
+    "target_path": "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/beta.txt",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/alpha.txt",
+      "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/beta.txt"
+    ],
+    "operations": [
+      {
+        "kind": "move",
+        "src": "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/alpha.txt",
+        "dst": "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/beta.txt",
+        "mode": "rename"
+      }
+    ],
+    "warnings": [],
+    "blockers": [],
+    "plan_summary": "rename plan created",
+    "rollback_instructions": [
+      "mv \"/Users/moltbot/Documents/openclaw_grant_test_1771256404851/beta.txt\" \"/Users/moltbot/Documents/openclaw_grant_test_1771256404851/alpha.txt\""
+    ],
+    "preflight": null,
+    "git": null
+  },
+  "plan_summary": {
+    "intent_action": "rename",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/alpha.txt",
+      "/Users/moltbot/Documents/openclaw_grant_test_1771256404851/beta.txt"
+    ],
+    "warnings": [],
+    "blockers": [],
+    "preflight": null
+  },
+  "consumed_at": "2026-02-16T15:40:05.365Z",
+  "consumed_by": "7704103236",
+  "execution_request_id": "opsfc-1771256405282-ujyswx"
+}

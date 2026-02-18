@@ -52,7 +52,7 @@ function releaseLock(fd) {
 }
 
 function runDocker(args, options = {}) {
-    const res = spawnSync('docker', ['exec', 'moltbot-main', ...args], {
+    const res = spawnSync('docker', ['exec', 'moltbot-dev', ...args], {
         encoding: 'utf8',
         maxBuffer: 20 * 1024 * 1024,
         ...options,

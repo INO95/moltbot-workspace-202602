@@ -200,6 +200,18 @@
             }
         ]
     },
+    "telegramFinalizer": {
+        "enabled": true,
+        "reportModeDefault": "ko",
+        "promptPackPath": "data/policy/finalizer_prompts.min.yaml",
+        "personaMapPath": "data/policy/bot_persona_map.json",
+        "prefsPath": "data/state/user_prefs.json",
+        "models": [
+            "gpt-5.3-high",
+            "gpt-5.2-high"
+        ],
+        "fallbackModelAlias": "gpt"
+    },
     "telegramGuard": {
         "enabled": true,
         "requireContext": true,

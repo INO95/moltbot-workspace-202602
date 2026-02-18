@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "request_id": "test-grant-plan2-1771256155298",
+  "created_at": "2026-02-16T15:35:55.298Z",
+  "command_kind": "capability",
+  "phase": "plan",
+  "capability": "photo",
+  "action": "cleanup",
+  "intent_action": "capability:photo:cleanup",
+  "requested_by": "test-approval-grant-1771256154991",
+  "payload": {
+    "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/ops-grant-photo-KFTsu7",
+    "older_than_hours": 1
+  }
+}

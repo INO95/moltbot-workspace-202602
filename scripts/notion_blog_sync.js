@@ -3,6 +3,7 @@ const path = require('path');
 const axios = require('axios');
 const crypto = require('crypto');
 const { loadRuntimeEnv } = require('./env_runtime');
+const { assertDbMetaMutationAllowed } = require('./notion_guard');
 
 const notionBase = 'https://api.notion.com/v1';
 const notionVersion = '2022-06-28';
@@ -220,6 +221,9 @@ async function createPage(client, parentPageId, title, blocks) {
 }
 
 async function syncBlogMemoToNotion(input) {
+    if (input && input.dbMetaMutation === true) {
+        assertDbMetaMutationAllowed({ action: 'blog_sync_db_meta_mutation' });
+    }
     loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
     const token = process.env.NOTION_API_KEY || '';
     const parentPageId = process.env.NOTION_PARENT_PAGE_ID || '';

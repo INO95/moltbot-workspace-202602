@@ -9,7 +9,7 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 30 21 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "personal-briefing-evening" -- "node scripts/personal_briefing.js evening" >> logs/cron.log 2>&1
 
 # Dev external keys TODO (daily morning)
-20 7 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "dev-thirdparty-keys-todolist" -- "node scripts/dev_thirdparty_keys_todolist.js" >> logs/cron.log 2>&1
+0 8 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "dev-thirdparty-keys-todolist" -- "node scripts/dev_thirdparty_keys_todolist.js" >> logs/cron.log 2>&1
 
 # Notion personal sync (prepare draft + approval token notify)
 5 9 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "notion-personal-sync-prepare-09" -- "node scripts/notion_personal_sync_scheduler.js prepare" >> logs/cron.log 2>&1

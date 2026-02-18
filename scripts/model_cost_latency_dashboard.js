@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { inferRouteFromCommand, decideApiLane, loadRoutingPolicy } = require('./oai_api_router');
 
 const DASHBOARD_JSON_PATH = path.join(__dirname, '../logs/model_cost_latency_dashboard_latest.json');
 const DASHBOARD_MD_PATH = path.join(__dirname, '../logs/model_cost_latency_dashboard_latest.md');
@@ -24,7 +25,7 @@ function ensureDirFor(filePath) {
 }
 
 function runDocker(args, options = {}) {
-    const result = spawnSync('docker', ['exec', 'moltbot-main', ...args], {
+    const result = spawnSync('docker', ['exec', 'moltbot-dev', ...args], {
         encoding: 'utf8',
         maxBuffer: 30 * 1024 * 1024,
         ...options,
@@ -134,7 +135,23 @@ function summarizeSessions(sessions) {
 
 function parseBridgeRouteCounts() {
     const counts = { log: 0, word: 0, health: 0, report: 0, work: 0, other: 0 };
-    if (!fs.existsSync(BRIDGE_LOG_PATH)) return { counts, total: 0 };
+    const system = { cronFail: 0, otherSystem: 0, total: 0 };
+    const apiLanes = {
+        total: 0,
+        byLane: {
+            'oauth-codex': 0,
+            'api-key-openai': 0,
+            'local-only': 0,
+        },
+        blocked: 0,
+        blockedByReason: {},
+    };
+    if (!fs.existsSync(BRIDGE_LOG_PATH)) return { counts, total: 0, system, apiLanes };
+
+    const cfg = fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) : {};
+    const commandPrefixes = cfg.commandPrefixes || {};
+    const budgetPolicy = loadBudgetPolicy();
+    const routingPolicy = loadRoutingPolicy();
 
     const lines = fs
         .readFileSync(BRIDGE_LOG_PATH, 'utf8')
@@ -149,18 +166,55 @@ function parseBridgeRouteCounts() {
             continue;
         }
         const cmd = String(obj.command || '').trim();
+        const source = String(obj.source || '').trim().toLowerCase();
+        const isCronFail = source === 'cron-guard' || cmd.startsWith('[CRON FAIL]');
+        const looksSystemEvent = /^\[(ALERT|NOTIFY|CRON FAIL)\]/i.test(cmd);
+        if (isCronFail) {
+            system.cronFail += 1;
+            system.total += 1;
+            continue;
+        }
+        if (source && source !== 'user' && looksSystemEvent) {
+            system.otherSystem += 1;
+            system.total += 1;
+            continue;
+        }
         if (!cmd) {
             counts.other += 1;
             continue;
         }
-        if (cmd.startsWith('기록:')) counts.log += 1;
-        else if (cmd.startsWith('단어:')) counts.word += 1;
+        const inferred = inferRouteFromCommand(cmd, { commandPrefixes });
+        const decision = decideApiLane(
+            {
+                route: inferred.route,
+                commandText: inferred.payload || cmd,
+            },
+            {
+                policy: routingPolicy,
+                budgetPolicy,
+                env: process.env,
+            },
+        );
+        apiLanes.total += 1;
+        if (!Object.prototype.hasOwnProperty.call(apiLanes.byLane, decision.apiLane)) {
+            apiLanes.byLane[decision.apiLane] = 0;
+        }
+        apiLanes.byLane[decision.apiLane] += 1;
+        if (decision.blocked) {
+            apiLanes.blocked += 1;
+            const reason = decision.blockReason || 'unknown';
+            apiLanes.blockedByReason[reason] = (apiLanes.blockedByReason[reason] || 0) + 1;
+        }
+
+        if (cmd.startsWith('기록:') || cmd.startsWith('메모:')) counts.log += 1;
+        else if (cmd.startsWith('단어:') || cmd.startsWith('학습:')) counts.word += 1;
         else if (cmd.startsWith('운동:')) counts.health += 1;
         else if (cmd.startsWith('리포트:')) counts.report += 1;
         else if (cmd.startsWith('작업:')) counts.work += 1;
         else counts.other += 1;
     }
-    return { counts, total: lines.length };
+    const userTotal = Object.values(counts).reduce((acc, value) => acc + Number(value || 0), 0);
+    return { counts, total: userTotal, system, apiLanes };
 }
 
 function loadBudgetPolicy() {
@@ -223,7 +277,7 @@ function benchmarkLatencies(codexModel) {
 }
 
 function estimateCostYen() {
-    // Current policy uses Gemini free/pro + Codex OAuth; direct API spend remains 0 unless explicitly enabled.
+    // Current policy is OpenAI Codex OAuth only; direct API-key spend remains 0 unless explicitly enabled.
     return 0;
 }
 
@@ -253,9 +307,25 @@ function markdownReport(report) {
     lines.push('');
 
     lines.push(`## Route Volume`);
-    lines.push(`- Total bridge events: ${report.routes.total}`);
+    lines.push(`- Total user command events: ${report.routes.total}`);
     for (const [k, v] of Object.entries(report.routes.counts)) {
         lines.push(`- ${k}: ${v}`);
+    }
+    if (report.routes.system) {
+        lines.push(`- system.total: ${report.routes.system.total}`);
+        lines.push(`- system.cronFail: ${report.routes.system.cronFail}`);
+        lines.push(`- system.otherSystem: ${report.routes.system.otherSystem}`);
+    }
+    lines.push('');
+
+    lines.push(`## API Lane Volume`);
+    lines.push(`- total: ${report.routes.apiLanes.total}`);
+    for (const [k, v] of Object.entries(report.routes.apiLanes.byLane || {})) {
+        lines.push(`- ${k}: ${v}`);
+    }
+    lines.push(`- blocked: ${report.routes.apiLanes.blocked}`);
+    for (const [k, v] of Object.entries(report.routes.apiLanes.blockedByReason || {})) {
+        lines.push(`- blocked.${k}: ${v}`);
     }
     lines.push('');
 
@@ -293,7 +363,7 @@ function main() {
         cost: {
             estimatedMonthlyYen: estimateCostYen(),
             budgetPolicy,
-            note: 'OAuth-based codex + current routing policy => direct API key spend assumed 0 JPY.',
+            note: 'Dual-lane routing active; direct API key spend is blocked by default until explicit approval.',
         },
     };
 
@@ -305,6 +375,8 @@ function main() {
         defaultModel,
         bestCodexModel,
         routes: report.routes.counts,
+        routeSystem: report.routes.system,
+        routeApiLanes: report.routes.apiLanes,
         latency: report.latency.probes,
         sessions: {
             total: sessionSummary.sessionCount,

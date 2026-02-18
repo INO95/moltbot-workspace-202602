@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_e7fdc6e7d9a6c096",
+  "created_at": "2026-02-17T11:25:26.675Z",
+  "expires_at": "2026-02-17T11:28:26.675Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771327522440-gacewy",
+  "plan_snapshot_hash": "6ab26513460cd88aa41e4dee5efae4eeec1b2f07d04dacb3241f457ec3e35665",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-17T11:25:26.673Z",
+    "intent_action": "move",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/tmp/codex_move_src.txt",
+      "target_path": "/tmp/codex_move_dst.txt",
+      "pattern": "",
+      "repository": "",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/tmp/codex_move_src.txt"
+    ],
+    "target_path": "/tmp/codex_move_dst.txt",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/tmp/codex_move_src.txt",
+      "/tmp/codex_move_dst.txt/codex_move_src.txt"
+    ],
+    "operations": [
+      {
+        "kind": "move",
+        "src": "/tmp/codex_move_src.txt",
+        "dst": "/tmp/codex_move_dst.txt/codex_move_src.txt",
+        "mode": "move"
+      }
+    ],
+    "warnings": [],
+    "blockers": [],
+    "plan_summary": "move plan: 1 item(s)",
+    "rollback_instructions": [
+      "mv \"/tmp/codex_move_dst.txt/codex_move_src.txt\" \"/tmp/codex_move_src.txt\""
+    ],
+    "preflight": null,
+    "git": null
+  },
+  "plan_summary": {
+    "intent_action": "move",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/tmp/codex_move_src.txt",
+      "/tmp/codex_move_dst.txt/codex_move_src.txt"
+    ],
+    "warnings": [],
+    "blockers": [],
+    "preflight": null
+  },
+  "consumed_at": null,
+  "consumed_by": null,
+  "execution_request_id": null
+}

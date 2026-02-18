@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_57fc75796ed47f66",
+  "created_at": "2026-02-16T13:57:48.363Z",
+  "expires_at": "2026-02-16T14:00:48.363Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771250268275-klabjq",
+  "plan_snapshot_hash": "0fa86b5b35175157cd1be77ba0fc3271c17a5771f974630afbcbc1b60105aa2e",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T13:57:48.361Z",
+    "intent_action": "move",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/Users/moltbot/Downloads/opsfc_demo_B/src/note.txt",
+      "target_path": "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox",
+      "pattern": "",
+      "repository": "",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/Users/moltbot/Downloads/opsfc_demo_B/src/note.txt"
+    ],
+    "target_path": "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Downloads/opsfc_demo_B/src/note.txt",
+      "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox/note.txt"
+    ],
+    "operations": [
+      {
+        "kind": "move",
+        "src": "/Users/moltbot/Downloads/opsfc_demo_B/src/note.txt",
+        "dst": "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox/note.txt",
+        "mode": "move"
+      }
+    ],
+    "warnings": [
+      {
+        "code": "ICLOUD_PATH_MISSING",
+        "path": "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs",
+        "message": "iCloud Drive path is not present on this host."
+      }
+    ],
+    "blockers": [],
+    "plan_summary": "move plan: 1 item(s)",
+    "rollback_instructions": [
+      "mv \"/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox/note.txt\" \"/Users/moltbot/Downloads/opsfc_demo_B/src/note.txt\""
+    ],
+    "preflight": null,
+    "git": null
+  },
+  "plan_summary": {
+    "intent_action": "move",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Downloads/opsfc_demo_B/src/note.txt",
+      "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox/note.txt"
+    ],
+    "warnings": [
+      {
+        "code": "ICLOUD_PATH_MISSING",
+        "path": "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs",
+        "message": "iCloud Drive path is not present on this host."
+      }
+    ],
+    "blockers": [],
+    "preflight": null
+  },
+  "consumed_at": null,
+  "consumed_by": null,
+  "execution_request_id": null
+}

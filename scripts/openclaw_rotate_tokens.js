@@ -6,19 +6,49 @@ const { spawnSync } = require('child_process');
 const { loadRuntimeEnv, resolveRuntimeEnvPath, composeEnvArgs } = require('./env_runtime');
 
 const ROOT = path.resolve(__dirname, '..');
+const TOKEN_GROUPS = [
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_DEV',
+    legacy: ['OPENCLAW_GATEWAY_TOKEN'],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_ANKI',
+    legacy: ['OPENCLAW_GATEWAY_TOKEN_SUB1'],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_RESEARCH',
+    legacy: [],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_DAILY',
+    legacy: [],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_DEV_BAK',
+    legacy: ['OPENCLAW_GATEWAY_TOKEN_MAIN_BAK'],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_ANKI_BAK',
+    legacy: ['OPENCLAW_GATEWAY_TOKEN_SUB1_BAK'],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_RESEARCH_BAK',
+    legacy: [],
+  },
+  {
+    primary: 'OPENCLAW_GATEWAY_TOKEN_DAILY_BAK',
+    legacy: [],
+  },
+];
+const ALL_GATEWAY_KEYS = [...new Set(TOKEN_GROUPS.flatMap((group) => [group.primary, ...group.legacy]))];
 
 function genToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
 function parseEnv(text) {
-  const map = new Map();
   const lines = text.split('\n');
-  for (const line of lines) {
-    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (m) map.set(m[1], m[2]);
-  }
-  return { map, lines };
+  return { lines };
 }
 
 function upsertEnv(lines, key, value) {
@@ -47,55 +77,68 @@ function ensureFileDir(filePath) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+function redactRaw(raw) {
+  let out = String(raw || '');
+  for (const key of ALL_GATEWAY_KEYS) {
+    const re = new RegExp(`^${key}=.*$`, 'gm');
+    out = out.replace(re, `${key}=[REDACTED]`);
+  }
+  return out;
+}
+
 function run() {
   const envMeta = loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true, required: false });
   const runtimeEnvPath = resolveRuntimeEnvPath();
   const sourceEnvPath = envMeta.source || runtimeEnvPath;
   if (!fs.existsSync(sourceEnvPath)) {
-    throw new Error(
-      `runtime env not found. set MOLTBOT_ENV_FILE or create ${runtimeEnvPath}`,
-    );
+    throw new Error(`runtime env not found. set MOLTBOT_ENV_FILE or create ${runtimeEnvPath}`);
   }
 
   const apply = process.argv.includes('--apply');
   const restart = process.argv.includes('--restart');
 
   const raw = fs.readFileSync(sourceEnvPath, 'utf8');
-  const mainToken = genToken();
-  const subToken = genToken();
+  const rotatedByPrimary = Object.fromEntries(TOKEN_GROUPS.map((group) => [group.primary, genToken()]));
+
   let backup = null;
   let wroteEnvPath = null;
 
   if (apply) {
     const { lines } = parseEnv(raw);
-    upsertEnv(lines, 'OPENCLAW_GATEWAY_TOKEN', mainToken);
-    upsertEnv(lines, 'OPENCLAW_GATEWAY_TOKEN_SUB1', subToken);
+    for (const group of TOKEN_GROUPS) {
+      const token = rotatedByPrimary[group.primary];
+      upsertEnv(lines, group.primary, token);
+      for (const legacyKey of group.legacy) {
+        upsertEnv(lines, legacyKey, token);
+      }
+    }
 
     ensureFileDir(runtimeEnvPath);
-    // Backup with redacted secrets to prevent credential exposure.
     backup = `${runtimeEnvPath}.bak.${Date.now()}`;
-    const redactedRaw = raw
-      .replace(/^OPENCLAW_GATEWAY_TOKEN=.*/gm, 'OPENCLAW_GATEWAY_TOKEN=[REDACTED]')
-      .replace(/^OPENCLAW_GATEWAY_TOKEN_SUB1=.*/gm, 'OPENCLAW_GATEWAY_TOKEN_SUB1=[REDACTED]');
-    fs.writeFileSync(backup, redactedRaw, 'utf8');
+    fs.writeFileSync(backup, redactRaw(raw), 'utf8');
     fs.writeFileSync(runtimeEnvPath, `${lines.join('\n').replace(/\n+$/, '')}\n`, 'utf8');
     wroteEnvPath = runtimeEnvPath;
 
-    runCommand('node', ['scripts/openclaw_config_secrets.js', 'inject', 'all'], { cwd: ROOT });
+    runCommand('node', ['scripts/openclaw_config_secrets.js', 'inject', 'all_live'], { cwd: ROOT });
+
     if (restart) {
       const args = [
         'compose',
         ...composeEnvArgs({ allowLegacyFallback: true, required: false }),
         '--profile',
-        'sub',
+        'live',
         'up',
         '-d',
-        'openclaw-main',
-        'openclaw-sub1',
+        'openclaw-dev',
+        'openclaw-anki',
+        'openclaw-research',
+        'openclaw-daily',
       ];
       runCommand('docker', args, { cwd: ROOT });
     }
   }
+
+  const masked = Object.fromEntries(Object.entries(rotatedByPrimary).map(([key, value]) => [key, mask(value)]));
 
   console.log(JSON.stringify({
     ok: true,
@@ -103,10 +146,7 @@ function run() {
     sourceEnvPath,
     wroteEnvPath,
     backup,
-    rotated: {
-      OPENCLAW_GATEWAY_TOKEN: mask(mainToken),
-      OPENCLAW_GATEWAY_TOKEN_SUB1: mask(subToken),
-    },
+    rotated: masked,
     mode: apply ? 'apply' : 'dry-run',
     restarted: Boolean(apply && restart),
   }, null, 2));

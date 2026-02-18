@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "request_id": "opsfc-1771250429084-5w5dm2",
+  "created_at": "2026-02-16T14:00:29.084Z",
+  "phase": "plan",
+  "intent_action": "move",
+  "requested_by": "7704103236",
+  "telegram_context": {
+    "provider": "telegram",
+    "userId": "7704103236",
+    "groupId": "123456",
+    "header": "Ops Verify id:7704103236 chat:123456 +0m 2026-02-16 14:20 UTC"
+  },
+  "payload": {
+    "path": "/Users/moltbot/Downloads/opsfc_demo_B3/src/icloud.txt",
+    "target_path": "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs/OpsDemoInbox3",
+    "pattern": "",
+    "repository": "",
+    "commit_message": "",
+    "options": []
+  }
+}

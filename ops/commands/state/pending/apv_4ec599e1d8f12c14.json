@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_4ec599e1d8f12c14",
+  "created_at": "2026-02-16T14:35:36.917Z",
+  "expires_at": "2026-02-16T14:38:36.917Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771252528606-vrkj2a",
+  "plan_snapshot_hash": "617be9145b3f0ccf4e574440db0cdf117534616086631d4b8d0c56508a4ffaa1",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T14:35:36.915Z",
+    "intent_action": "move",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt",
+      "target_path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst",
+      "pattern": "",
+      "repository": "",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt"
+    ],
+    "target_path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt",
+      "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst/sample.txt"
+    ],
+    "operations": [
+      {
+        "kind": "move",
+        "src": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt",
+        "dst": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst/sample.txt",
+        "mode": "move"
+      }
+    ],
+    "warnings": [],
+    "blockers": [
+      {
+        "code": "PATH_OUTSIDE_ALLOWED_ROOT",
+        "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt",
+        "message": "Path is outside allowed roots."
+      },
+      {
+        "code": "PATH_OUTSIDE_ALLOWED_ROOT",
+        "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst",
+        "message": "Path is outside allowed roots."
+      }
+    ],
+    "plan_summary": "move plan: 1 item(s)",
+    "rollback_instructions": [
+      "mv \"/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst/sample.txt\" \"/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt\""
+    ],
+    "preflight": null,
+    "git": null
+  },
+  "plan_summary": {
+    "intent_action": "move",
+    "risk_tier": "HIGH",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt",
+      "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst/sample.txt"
+    ],
+    "warnings": [],
+    "blockers": [
+      {
+        "code": "PATH_OUTSIDE_ALLOWED_ROOT",
+        "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/src/sample.txt",
+        "message": "Path is outside allowed roots."
+      },
+      {
+        "code": "PATH_OUTSIDE_ALLOWED_ROOT",
+        "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-Ws3l6I/dst",
+        "message": "Path is outside allowed roots."
+      }
+    ],
+    "preflight": null
+  },
+  "consumed_at": null,
+  "consumed_by": null,
+  "execution_request_id": null
+}

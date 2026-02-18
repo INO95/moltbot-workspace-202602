@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "request_id": "opsfc-1771250170469-owvmhj",
+  "created_at": "2026-02-16T13:56:10.469Z",
+  "phase": "plan",
+  "intent_action": "move",
+  "requested_by": "7704103236",
+  "telegram_context": {
+    "provider": "telegram",
+    "userId": "7704103236",
+    "groupId": "123456",
+    "header": "Test User id:7704103236 chat:123456 +0m 2026-02-16 13:00 UTC"
+  },
+  "payload": {
+    "path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-gfCpfW/src/sample.txt",
+    "target_path": "/var/folders/5m/xs99z9n53035d__b9bn7m9mh0000gp/T/bridge-opsfc-gfCpfW/dst",
+    "pattern": "",
+    "repository": "",
+    "commit_message": "",
+    "options": []
+  }
+}

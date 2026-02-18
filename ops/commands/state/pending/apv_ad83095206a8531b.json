@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_ad83095206a8531b",
+  "created_at": "2026-02-16T13:59:10.875Z",
+  "expires_at": "2026-02-16T14:02:10.875Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771250350775-uieb07",
+  "plan_snapshot_hash": "3f763505b9aa9f4b1ea20049254dc9a6eed9ff2ce4b6a22b25f0b6abc3c7aab4",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T13:59:10.861Z",
+    "intent_action": "git_mv",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/Users/moltbot/Projects/opsfc_git_demo2/old_name2.txt",
+      "target_path": "/Users/moltbot/Projects/opsfc_git_demo2/new_name2.txt",
+      "pattern": "",
+      "repository": "/Users/moltbot/Projects/opsfc_git_demo2",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/Users/moltbot/Projects/opsfc_git_demo2/old_name2.txt"
+    ],
+    "target_path": "/Users/moltbot/Projects/opsfc_git_demo2/new_name2.txt",
+    "risk_tier": "GIT_AWARE",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Projects/opsfc_git_demo2/old_name2.txt",
+      "/Users/moltbot/Projects/opsfc_git_demo2/new_name2.txt"
+    ],
+    "operations": [
+      {
+        "kind": "git_mv",
+        "src": "/Users/moltbot/Projects/opsfc_git_demo2/old_name2.txt",
+        "dst": "/Users/moltbot/Projects/opsfc_git_demo2/new_name2.txt"
+      }
+    ],
+    "warnings": [],
+    "blockers": [],
+    "plan_summary": "git mv plan @ /Users/moltbot/Projects/opsfc_git_demo2",
+    "rollback_instructions": [
+      "git -C \"/Users/moltbot/Projects/opsfc_git_demo2\" mv \"new_name2.txt\" \"old_name2.txt\""
+    ],
+    "preflight": null,
+    "git": {
+      "repo_root": "/Users/moltbot/Projects/opsfc_git_demo2",
+      "status": {
+        "ok": true,
+        "code": 0,
+        "stdout": "",
+        "stderr": "",
+        "error": ""
+      },
+      "diff": {
+        "ok": true,
+        "code": 0,
+        "stdout": "",
+        "stderr": "",
+        "error": ""
+      }
+    }
+  },
+  "plan_summary": {
+    "intent_action": "git_mv",
+    "risk_tier": "GIT_AWARE",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Projects/opsfc_git_demo2/old_name2.txt",
+      "/Users/moltbot/Projects/opsfc_git_demo2/new_name2.txt"
+    ],
+    "warnings": [],
+    "blockers": [],
+    "preflight": null
+  },
+  "consumed_at": "2026-02-16T13:59:11.163Z",
+  "consumed_by": "7704103236",
+  "execution_request_id": "opsfc-1771250351065-cxqe0m"
+}

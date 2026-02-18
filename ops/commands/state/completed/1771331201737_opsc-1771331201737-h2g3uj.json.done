@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "request_id": "opsc-1771331201737-h2g3uj",
+  "created_at": "2026-02-17T12:26:41.737Z",
+  "command_kind": "capability",
+  "phase": "plan",
+  "capability": "bot",
+  "action": "dispatch",
+  "intent_action": "capability:bot:dispatch",
+  "risk_tier": "MEDIUM",
+  "requires_approval": false,
+  "requested_by": "hub:auto",
+  "telegram_context": null,
+  "reason": "hub_delegation:work",
+  "payload": {
+    "route": "work",
+    "route_payload": "요청: hub test; 대상: repo; 완료기준: done",
+    "original_message": "작업: 요청: hub test; 대상: repo; 완료기준: done",
+    "target_profile": "dev",
+    "target": "dev"
+  }
+}

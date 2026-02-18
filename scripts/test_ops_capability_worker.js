@@ -6,6 +6,8 @@ const { spawnSync } = require('child_process');
 
 const opsCommandQueue = require('./ops_command_queue');
 const opsApprovalStore = require('./ops_approval_store');
+const finalizer = require('./finalizer');
+const { finalizeOpsTelegramReply } = require('./ops_host_worker');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -32,6 +34,7 @@ function runWorker() {
         env: {
             ...process.env,
             SKILL_FEEDBACK_AUTORUN: '0',
+            TELEGRAM_FINALIZER_ECHO_ONLY: 'true',
         },
     });
     assert.strictEqual(res.status, 0, `ops_host_worker failed: ${res.stderr || res.stdout}`);
@@ -136,10 +139,31 @@ function main() {
     const browserTokenPath = path.join(opsApprovalStore.APPROVAL_PENDING_DIR, `${browserRow.token_id}.json`);
     assert.ok(fs.existsSync(browserTokenPath), 'browser pending approval token file should exist');
 
+    finalizer.__setModelCallerForTest((params) => `요약\\n${String(params.draft || '')}`);
+    const bypass = finalizeOpsTelegramReply({
+      command_kind: 'capability',
+      capability: 'browser',
+      action: 'send',
+      telegram_context: { provider: 'telegram', userId: '7704103236', groupId: '' },
+      requested_by: requesterId,
+    }, 'HEARTBEAT_OK', 'plan');
+    assert.strictEqual(bypass, 'HEARTBEAT_OK');
+
+    const preserved = finalizeOpsTelegramReply({
+      command_kind: 'capability',
+      capability: 'browser',
+      action: 'send',
+      telegram_context: { provider: 'telegram', userId: '7704103236', groupId: '' },
+      requested_by: requesterId,
+    }, '/approve 123\\n```json\\n{\"ok\":true}\\n```\\nURL https://example.com', 'execute');
+    assert.ok(preserved.includes('/approve 123'));
+    assert.ok(preserved.includes('```json\\n{\"ok\":true}\\n```'));
+
     // Cleanup only the token minted by this test.
     fs.rmSync(pendingTokenPath, { force: true });
     fs.rmSync(browserTokenPath, { force: true });
     opsApprovalStore.clearApprovalGrant(requesterId);
+    finalizer.__setModelCallerForTest(null);
 
     console.log('test_ops_capability_worker: ok');
 }

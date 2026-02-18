@@ -38,7 +38,7 @@ function run() {
 
     const names = checks.dockerPs.ok ? checks.dockerPs.output.split('\n').filter(Boolean) : [];
     checks.moltbotContainer = {
-        detected: names.includes('moltbot-main'),
+        detected: names.includes('moltbot-dev'),
         names,
     };
 

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "request_id": "opsc-1771255247014-384y6c",
+  "created_at": "2026-02-16T15:20:47.015Z",
+  "command_kind": "capability",
+  "phase": "plan",
+  "capability": "bot",
+  "action": "restart",
+  "intent_action": "capability:bot:restart",
+  "risk_tier": "MEDIUM",
+  "requires_approval": false,
+  "required_flags": [],
+  "requested_by": "ops-daily-supervisor",
+  "telegram_context": null,
+  "reason": "issue=bot-research:heartbeat_stall; rule=:heartbeat_stall$",
+  "payload": {
+    "target": "moltbot-research",
+    "issue_id": "bot-research:heartbeat_stall",
+    "bot_id": "bot-research",
+    "escalation_rule": "alert_if_repeated",
+    "reason": "auto-remediation:bot-research:heartbeat_stall"
+  }
+}

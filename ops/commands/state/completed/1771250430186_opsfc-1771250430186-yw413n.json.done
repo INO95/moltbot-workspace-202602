@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "request_id": "opsfc-1771250430186-yw413n",
+  "created_at": "2026-02-16T14:00:30.186Z",
+  "phase": "plan",
+  "intent_action": "git_mv",
+  "requested_by": "7704103236",
+  "telegram_context": {
+    "provider": "telegram",
+    "userId": "7704103236",
+    "groupId": "123456",
+    "header": "Ops Verify id:7704103236 chat:123456 +0m 2026-02-16 14:20 UTC"
+  },
+  "payload": {
+    "path": "/Users/moltbot/Projects/opsfc_git_demo3/old_name3.txt",
+    "target_path": "/Users/moltbot/Projects/opsfc_git_demo3/new_name3.txt",
+    "pattern": "",
+    "repository": "/Users/moltbot/Projects/opsfc_git_demo3",
+    "commit_message": "",
+    "options": []
+  }
+}

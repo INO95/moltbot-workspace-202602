@@ -1,0 +1,16 @@
+{
+  "alert_id": "alert_15b293f8-87ed-4223-a78b-825daa8742c1",
+  "issue_id": "bot-dev:bot_down",
+  "severity": "P1",
+  "created_at": "2026-02-16T21:30:00.999Z",
+  "suppressed": false,
+  "suppression_reason": null,
+  "message_markdown": "[P1] Incident — bot-dev — bot-dev:bot_down\n\nImpact:\n- No heartbeat observed for over 6 hours.\n\nEvidence:\n- First seen: 2026-02-16T19:00:01.636Z\n- Last seen: 2026-02-16T21:30:00.999Z\n- Run ID: -\n- Error fingerprint: bot_down\n- Log paths:\n  - /Users/moltbot/Projects/Moltbot_Workspace/logs/bot-dev/heartbeat.json\n\nLikely cause (log-based):\n- No heartbeat observed for over 6 hours.\n\nImmediate mitigation checklist:\n1) Verify upstream/service dependency health and recent config changes.\n2) Trigger one controlled rerun and compare run_id/evidence delta.\n3) If failure repeats, escalate with runbook and keep issue open.\n\nNext update:\n- I will re-check at the next 30-minute scan. (Asia/Tokyo, generated 2026-02-16T21:30:00.999Z)",
+  "evidence": {
+    "run_ids": [],
+    "log_paths": [
+      "/Users/moltbot/Projects/Moltbot_Workspace/logs/bot-dev/heartbeat.json"
+    ]
+  },
+  "decision_rule": "P1 immediate alert"
+}

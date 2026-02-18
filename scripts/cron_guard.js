@@ -53,9 +53,14 @@ function detectMode() {
     return mode === 'detailed' ? 'detailed' : 'short';
 }
 
-function formatAlertMessage({ job, command, code, stderr, at, mode }) {
+function shouldDeliverNoiseAlerts() {
+    return String(process.env.CRON_GUARD_DELIVER_NOISE_ALERTS || '').trim() === '1';
+}
+
+function formatAlertMessage({ job, command, code, stderr, at, mode, severity = 'core' }) {
+    const levelTag = severity === 'noise' ? '[CRON WARN]' : '[CRON FAIL]';
     const short = [
-        `[CRON FAIL] ${job}`,
+        `${levelTag} ${job}`,
         `code=${code}`,
         `time=${at}`,
         `err=${oneLine(stderr)}`,
@@ -109,6 +114,29 @@ function buildErrorSignature({ job, code, stderr }) {
     return `${job}|${code}|${digest}`;
 }
 
+function classifyJobAlertPolicy(job) {
+    const key = String(job || '').trim().toLowerCase();
+    if (/^private-sync/.test(key)) {
+        return {
+            severity: 'noise',
+            minCountBeforeAlert: Number(process.env.CRON_GUARD_PRIVATE_SYNC_MIN_COUNT || 3),
+            cooldownMs: Number(process.env.CRON_GUARD_PRIVATE_SYNC_COOLDOWN_MS || 6 * 60 * 60 * 1000),
+        };
+    }
+    if (/^prompt-web-health/.test(key)) {
+        return {
+            severity: 'noise',
+            minCountBeforeAlert: Number(process.env.CRON_GUARD_HEALTH_MIN_COUNT || 2),
+            cooldownMs: Number(process.env.CRON_GUARD_HEALTH_COOLDOWN_MS || 2 * 60 * 60 * 1000),
+        };
+    }
+    return {
+        severity: 'core',
+        minCountBeforeAlert: 1,
+        cooldownMs: Number(process.env.CRON_GUARD_ALERT_COOLDOWN_MS || 60 * 60 * 1000),
+    };
+}
+
 function pruneAlertState(state, nowMs) {
     const keepMs = Number(process.env.CRON_GUARD_ALERT_KEEP_MS || 7 * 24 * 60 * 60 * 1000);
     for (const [sig, value] of Object.entries(state.signatures || {})) {
@@ -121,7 +149,9 @@ function pruneAlertState(state, nowMs) {
 
 function shouldSendAlert({ job, code, stderr, atIso }) {
     const nowMs = Date.parse(atIso);
-    const cooldownMs = Number(process.env.CRON_GUARD_ALERT_COOLDOWN_MS || 60 * 60 * 1000);
+    const policy = classifyJobAlertPolicy(job);
+    const cooldownMs = Number(policy.cooldownMs || Number(process.env.CRON_GUARD_ALERT_COOLDOWN_MS || 60 * 60 * 1000));
+    const minCountBeforeAlert = Math.max(1, Number(policy.minCountBeforeAlert || 1));
     const signature = buildErrorSignature({ job, code, stderr });
     const state = loadAlertState();
     pruneAlertState(state, nowMs);
@@ -141,7 +171,7 @@ function shouldSendAlert({ job, code, stderr, atIso }) {
 
     const lastSentMs = row.lastSentAt ? Date.parse(row.lastSentAt) : 0;
     const elapsed = Number.isFinite(lastSentMs) && lastSentMs > 0 ? (nowMs - lastSentMs) : Number.POSITIVE_INFINITY;
-    const send = elapsed >= cooldownMs;
+    const send = row.count >= minCountBeforeAlert && elapsed >= cooldownMs;
     if (send) row.lastSentAt = atIso;
 
     state.signatures[signature] = row;
@@ -153,6 +183,8 @@ function shouldSendAlert({ job, code, stderr, atIso }) {
         firstAt: row.firstAt,
         lastAt: row.lastAt,
         cooldownMs,
+        minCountBeforeAlert,
+        severity: policy.severity || 'core',
     };
 }
 
@@ -170,11 +202,25 @@ function sendAlert({ job, command, code, stderr }) {
     const mode = detectMode();
     const messageCore = formatAlertMessage({
         job, command, code, stderr, at, mode,
+        severity: dedupe.severity,
     });
     const summary = dedupe.count > 1
         ? `\nrepeat=${dedupe.count}, first=${dedupe.firstAt}, last=${dedupe.lastAt}`
         : '';
     const message = `${messageCore}${summary}`.trim();
+
+    // Noise-classified jobs (for example private-sync) stay in local logs by default.
+    // Set CRON_GUARD_DELIVER_NOISE_ALERTS=1 to forward them to bridge/Telegram again.
+    if (dedupe.severity === 'noise' && !shouldDeliverNoiseAlerts()) {
+        appendAlertDeliveryLog('suppressed', `${job} sig=${dedupe.signature} count=${dedupe.count} reason=noise_policy`);
+        return {
+            sent: false,
+            suppressed: true,
+            mutedByPolicy: true,
+            ...dedupe,
+        };
+    }
+
     try {
         enqueueBridgePayload({
             taskId: `cron-fail-${Date.now()}`,

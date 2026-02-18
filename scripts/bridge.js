@@ -24,7 +24,7 @@ const { analyzeWordFailures, detectTypoSuspicion } = require('./anki_typo_guard'
 const { buildProjectBootstrapPlan } = require('./project_bootstrap');
 const opsCommandQueue = require('./ops_command_queue');
 const opsFileControl = require('./ops_file_control');
-const { normalizeDailyPersonaConfig, handleDailyPersonaInput, applyPersonaToSystemReply } = require('./daily_persona');
+const telegramFinalizer = require('./finalizer');
 const personalStorage = require('./personal_storage');
 const { handleFinanceCommand } = require('./personal_finance');
 const { handleTodoCommand } = require('./personal_todo');
@@ -325,20 +325,12 @@ const COMMAND_ALLOWLIST = normalizeAllowlistConfig(config.commandAllowlist, proc
 const HUB_DELEGATION = normalizeHubDelegationConfig(config.hubDelegation);
 const HUB_DELEGATION_ACTIVE = HUB_DELEGATION.enabled && isHubRuntime(process.env);
 const BRIDGE_BLOCK_HINT = String(process.env.BRIDGE_BLOCK_HINT || '').trim();
-const DAILY_PERSONA = normalizeDailyPersonaConfig(config.dailyPersona, {
-    rootDir: path.join(__dirname, '..'),
-    env: process.env,
-});
 const NATURAL_LANGUAGE_ROUTING = normalizeNaturalLanguageRoutingConfig(config.naturalLanguageRouting, process.env);
 
 function applyDailyPersonaToOutput(base, metaInput = {}) {
     if (!base || typeof base !== 'object') return base;
     if (typeof base.telegramReply !== 'string' || !String(base.telegramReply).trim()) return base;
-    const route = String(metaInput.route || base.route || '').trim().toLowerCase();
-    const rewritten = rewriteLocalLinks(base.telegramReply, getPublicBases());
-    const telegramReply = isHubRuntime(process.env)
-        ? applyPersonaToSystemReply(rewritten, DAILY_PERSONA, { route })
-        : rewritten;
+    const telegramReply = rewriteLocalLinks(base.telegramReply, getPublicBases());
     if (telegramReply === base.telegramReply) return base;
     return {
         ...base,
@@ -385,7 +377,7 @@ function buildAllowlistBlockedResponse({ requestedCommand = '', requestedRoute =
         telegramReply: lines.join('\n'),
         ...allowlistMeta(),
     };
-    return applyDailyPersonaToOutput(out, { route: 'blocked' });
+    return finalizeTelegramBoundary(out, { route: 'blocked' });
 }
 
 function captureConversationSafe({ route = 'none', message = '', source = 'user', skillHint = '' } = {}) {
@@ -1640,6 +1632,52 @@ function appendExternalLinks(reply) {
     return `${String(rewritten || '').trim()}\n\n${links}`.trim();
 }
 
+function parseReportModeCommand(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return { matched: false, valid: false, mode: '' };
+    const matched = raw.match(/^\/report\s+(.+)$/i);
+    if (!matched) return { matched: false, valid: false, mode: '' };
+    const modeRaw = String(matched[1] || '').trim().toLowerCase();
+    if (modeRaw === 'ko' || modeRaw === 'ko+en') {
+        return { matched: true, valid: true, mode: modeRaw };
+    }
+    return { matched: true, valid: false, mode: modeRaw };
+}
+
+function finalizeTelegramBoundary(base, metaInput = {}) {
+    const prepared = applyDailyPersonaToOutput(base, metaInput);
+    if (!prepared || typeof prepared !== 'object') return prepared;
+    if (prepared.finalizerApplied) return prepared;
+    if (typeof prepared.telegramReply !== 'string' || !String(prepared.telegramReply).trim()) return prepared;
+
+    const appended = appendExternalLinks(prepared.telegramReply);
+    const commandText = String(metaInput.commandText || '').trim();
+    const telegramContext = metaInput.telegramContext
+        || prepared.telegramContext
+        || parseTransportEnvelopeContext(commandText);
+    const requestedBy = String(
+        metaInput.requestedBy
+        || prepared.requestedBy
+        || opsFileControl.normalizeRequester(telegramContext, 'bridge:auto'),
+    ).trim();
+    const finalized = telegramFinalizer.finalizeTelegramReply(appended, {
+        botId: process.env.MOLTBOT_BOT_ID,
+        botRole: process.env.MOLTBOT_BOT_ROLE,
+        telegramContext,
+        requestedBy,
+        route: String(metaInput.route || prepared.route || '').trim().toLowerCase(),
+        finalizerApplied: false,
+    });
+
+    return {
+        ...prepared,
+        telegramReply: String(finalized || appended).trim() || String(appended || '').trim(),
+        telegramContext: telegramContext || null,
+        requestedBy: requestedBy || undefined,
+        finalizerApplied: true,
+    };
+}
+
 function isExternalLinkRequest(text) {
     const t = String(text || '').toLowerCase();
     const hasLink = /(링크|url|주소|접속)/i.test(t);
@@ -1804,9 +1842,27 @@ function buildNoPrefixGuide() {
     ].join('\n');
 }
 
+function isLegacyPersonaSwitchAttempt(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const hasKeyword = /(페르소나|캐릭터|인격|persona|character|모드)/i.test(raw);
+    const hasSwitch = /(바꿔|바꾸|변경|전환|스위치|switch|목록|리스트|종류|라인업|현재|원본|이름|누구|뭐\s*있|뭐있|어떤)/i.test(raw);
+    const hasLegacyName = /(에일리|ailey|베일리|bailey|문학소녀|문소녀|미유|literary|t[_-]?ray|tray|레이)/i.test(raw);
+    return (hasKeyword && hasSwitch) || hasLegacyName;
+}
+
 function buildDailyCasualNoPrefixReply(inputText) {
-    const handled = handleDailyPersonaInput(inputText, DAILY_PERSONA);
-    return String(handled && handled.telegramReply ? handled.telegramReply : buildNoPrefixGuide());
+    const normalized = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
+    if (isLegacyPersonaSwitchAttempt(normalized)) {
+        return [
+            '페르소나는 봇별로 고정되어 있습니다. 전환할 수 없습니다.',
+            '- bot-dev / bot-dev-bak: 지크 예거',
+            '- bot-anki / bot-anki-bak: 한지 단장',
+            '- bot-research / bot-research-bak: 아르민',
+            '- bot-daily / bot-daily-bak / main DM: 엘빈 단장',
+        ].join('\n');
+    }
+    return buildNoPrefixGuide();
 }
 
 function buildDuelModeMeta() {
@@ -1848,7 +1904,7 @@ function buildApiRoutingMeta({ route, routeHint = '', commandText = '', template
 }
 
 function withApiMeta(base, metaInput) {
-    const prepared = applyDailyPersonaToOutput(base, metaInput);
+    const prepared = finalizeTelegramBoundary(base, metaInput);
     return {
         ...prepared,
         ...buildApiRoutingMeta(metaInput),
@@ -3129,7 +3185,48 @@ async function main() {
 
             case 'auto': {
                 // usage: node bridge.js auto "단어: activate 활성화하다"
-                const routed = routeByPrefix(fullText);
+                const normalizedAutoMessage = normalizeIncomingCommandText(fullText) || String(fullText || '').trim();
+                const autoTelegramContext = parseTransportEnvelopeContext(fullText);
+                const autoRequestedBy = opsFileControl.normalizeRequester(autoTelegramContext, 'bridge:auto');
+                const reportModeCommand = parseReportModeCommand(normalizedAutoMessage);
+                if (reportModeCommand.matched) {
+                    if (!reportModeCommand.valid) {
+                        console.log(JSON.stringify(withApiMeta({
+                            route: 'report',
+                            success: false,
+                            telegramContext: autoTelegramContext,
+                            requestedBy: autoRequestedBy,
+                            telegramReply: '지원하지 않는 REPORT_MODE 입니다. 사용 가능: /report ko 또는 /report ko+en',
+                        }, {
+                            route: 'report',
+                            routeHint: 'report-mode',
+                            commandText: fullText,
+                            telegramContext: autoTelegramContext,
+                            requestedBy: autoRequestedBy,
+                        })));
+                        break;
+                    }
+                    telegramFinalizer.writeReportMode({
+                        telegramContext: autoTelegramContext,
+                        requestedBy: autoRequestedBy,
+                        mode: reportModeCommand.mode,
+                    });
+                    console.log(JSON.stringify(withApiMeta({
+                        route: 'report',
+                        success: true,
+                        telegramContext: autoTelegramContext,
+                        requestedBy: autoRequestedBy,
+                        telegramReply: `REPORT_MODE=${reportModeCommand.mode} 로 설정됨`,
+                    }, {
+                        route: 'report',
+                        routeHint: 'report-mode',
+                        commandText: fullText,
+                        telegramContext: autoTelegramContext,
+                        requestedBy: autoRequestedBy,
+                    })));
+                    break;
+                }
+                const routed = routeByPrefix(normalizedAutoMessage);
                 opsLogger.logStep(opsContext, {
                     component: 'router',
                     action: 'auto_route',
@@ -3151,8 +3248,6 @@ async function main() {
                     finalMessage = 'Auto route blocked by allowlist policy.';
                     break;
                 }
-                const normalizedAutoMessage = normalizeIncomingCommandText(fullText) || String(fullText || '').trim();
-                const autoTelegramContext = parseTransportEnvelopeContext(fullText);
                 const delegated = enqueueHubDelegationCommand({
                     route: routed.route,
                     payload: routed.payload,

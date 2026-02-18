@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_fbb4c57252956ad5",
+  "created_at": "2026-02-16T13:57:50.140Z",
+  "expires_at": "2026-02-16T14:00:50.140Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771250270040-rdobta",
+  "plan_snapshot_hash": "5ae26ca2bc84b15acaca8c17ea6cec32ca052ea879da2c306b49a03fa30f7dfe",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T13:57:50.127Z",
+    "intent_action": "git_commit",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "",
+      "target_path": "",
+      "pattern": "",
+      "repository": "/Users/moltbot/Projects/opsfc_git_demo",
+      "commit_message": "rename old_name to new_name",
+      "options": []
+    },
+    "source_candidates": [],
+    "target_path": null,
+    "risk_tier": "GIT_AWARE",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [],
+    "operations": [
+      {
+        "kind": "git_commit",
+        "message": "rename old_name to new_name"
+      }
+    ],
+    "warnings": [],
+    "blockers": [],
+    "plan_summary": "git commit plan @ /Users/moltbot/Projects/opsfc_git_demo",
+    "rollback_instructions": [
+      "If not pushed: git -C \"/Users/moltbot/Projects/opsfc_git_demo\" reset --soft HEAD~1"
+    ],
+    "preflight": null,
+    "git": {
+      "repo_root": "/Users/moltbot/Projects/opsfc_git_demo",
+      "status": {
+        "ok": true,
+        "code": 0,
+        "stdout": "",
+        "stderr": "",
+        "error": ""
+      },
+      "diff": {
+        "ok": true,
+        "code": 0,
+        "stdout": "",
+        "stderr": "",
+        "error": ""
+      }
+    }
+  },
+  "plan_summary": {
+    "intent_action": "git_commit",
+    "risk_tier": "GIT_AWARE",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [],
+    "warnings": [],
+    "blockers": [],
+    "preflight": null
+  },
+  "consumed_at": null,
+  "consumed_by": null,
+  "execution_request_id": null
+}

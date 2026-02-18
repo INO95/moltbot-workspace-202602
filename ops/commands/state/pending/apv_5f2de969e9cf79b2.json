@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_5f2de969e9cf79b2",
+  "created_at": "2026-02-17T11:15:28.085Z",
+  "expires_at": "2026-02-17T11:18:28.085Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "unknown",
+  "request_id": "opsc-1771326922687-f0ar22",
+  "plan_snapshot_hash": "2bbd280002bb99ad626731021eea51f9985b2f845ff2bc507b16bb34eb3eab55",
+  "plan": {
+    "command_kind": "capability",
+    "capability": "mail",
+    "action": "send",
+    "intent_action": "capability:mail:send",
+    "created_at": "2026-02-17T11:15:28.079Z",
+    "requested_by": "unknown",
+    "payload": {
+      "target": "",
+      "reason": "",
+      "path": "",
+      "target_path": "",
+      "pattern": "",
+      "account": "",
+      "recipient": "ops@example.com",
+      "subject": "hub-gate-check",
+      "body": "pending approval",
+      "content": "",
+      "when": "",
+      "attachment": "",
+      "device": "",
+      "identifier": "",
+      "options": []
+    },
+    "mutating": true,
+    "risk_tier": "HIGH",
+    "requires_approval": true,
+    "required_flags": [
+      "force"
+    ],
+    "blockers": [
+      {
+        "code": "CONNECTOR_UNAVAILABLE",
+        "message": "mail connector unavailable: install `himalaya` and configure account credentials before enabling mail actions."
+      }
+    ],
+    "warnings": [],
+    "operations": [
+      {
+        "kind": "send"
+      }
+    ],
+    "rollback_instructions": [],
+    "plan_summary": "mail send",
+    "connector": {
+      "available": false,
+      "command": "himalaya",
+      "install_hint": "mail connector unavailable: install `himalaya` and configure account credentials before enabling mail actions."
+    }
+  },
+  "plan_summary": {
+    "command_kind": "capability",
+    "capability": "mail",
+    "action": "send",
+    "intent_action": "capability:mail:send",
+    "risk_tier": "HIGH",
+    "requires_approval": true,
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "blockers": [
+      {
+        "code": "CONNECTOR_UNAVAILABLE",
+        "message": "mail connector unavailable: install `himalaya` and configure account credentials before enabling mail actions."
+      }
+    ],
+    "warnings": [],
+    "plan_summary": "mail send"
+  },
+  "consumed_at": null,
+  "consumed_by": null,
+  "execution_request_id": null
+}

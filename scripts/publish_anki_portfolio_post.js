@@ -61,6 +61,31 @@ function buildPortfolioContent() {
         '- Upgrade Anki result report: success/failure counts + failed term list.',
         '- Integrate nightly checks into morning briefing.',
         '',
+        '## 8) Business Impact',
+        '- Reduced manual card-entry overhead by consolidating repeated input flows into one command path.',
+        '- Improved operator response speed by returning success/failure diagnostics in the same Telegram thread.',
+        '- Increased reusability by documenting an automation-first workflow that can be replicated across study domains.',
+        '',
+        '## 9) Reliability Metrics (Operational)',
+        '- Batch save outcome is summarized per request (success/failure count + failed tokens).',
+        '- Fallback strategy covers both language enrichment and AnkiConnect host connectivity.',
+        '- Daily operations are observable through bridge logs, cron monitors, and Notion sync dashboards.',
+        '',
+        '## 10) Decision Trade-offs',
+        '- Fast model route for lightweight commands keeps latency/cost low.',
+        '- Deep reasoning route is reserved for structured work/inspection/deploy templates.',
+        '- Strict prefix routing improves predictability but requires onboarding for new operators.',
+        '',
+        '## 11) Production Constraints',
+        '- Secret keys and operational tokens stay outside public repositories.',
+        '- External link replies are forced to publicly reachable URLs (no localhost leakage).',
+        '- DB governance requires explicit approval before Notion conversation DB writes.',
+        '',
+        '## 12) Next 90-Day Plan',
+        '- Expand TOEIC phrase coverage with domain-priority dictionaries.',
+        '- Automate conversation-to-Notion sync using approval-gated batch windows.',
+        '- Track skill improvement ROI (rework reduction, recurrence rate, response quality).',
+        '',
         '---',
         `Published: ${dateLabel}`,
         'This post is generated from operational logs as a portfolio summary.',
@@ -115,3 +140,8 @@ if (require.main === module) {
         process.exit(1);
     });
 }
+
+module.exports = {
+    shouldSyncToNotion,
+    buildPortfolioContent,
+};

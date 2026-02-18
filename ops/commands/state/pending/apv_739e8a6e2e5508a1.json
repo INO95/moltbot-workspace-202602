@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "token": "apv_739e8a6e2e5508a1",
+  "created_at": "2026-02-16T14:00:29.718Z",
+  "expires_at": "2026-02-16T14:03:29.718Z",
+  "required_flags": [
+    "force"
+  ],
+  "requested_by": "7704103236",
+  "request_id": "opsfc-1771250429625-ge5hm3",
+  "plan_snapshot_hash": "854687536cd5540f544ab52ec80b5ed20cd11292c0c7457db8cd6b215d260258",
+  "plan": {
+    "schema_version": "1.0",
+    "created_at": "2026-02-16T14:00:29.714Z",
+    "intent_action": "move",
+    "requested_by": "7704103236",
+    "payload": {
+      "path": "/Users/moltbot/Downloads/opsfc_demo_C3/src/ext.txt",
+      "target_path": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C3_target",
+      "pattern": "",
+      "repository": "",
+      "commit_message": "",
+      "options": []
+    },
+    "source_candidates": [
+      "/Users/moltbot/Downloads/opsfc_demo_C3/src/ext.txt"
+    ],
+    "target_path": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C3_target",
+    "risk_tier": "HIGH_PRECHECK",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Downloads/opsfc_demo_C3/src/ext.txt",
+      "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C3_target/ext.txt"
+    ],
+    "operations": [
+      {
+        "kind": "move",
+        "src": "/Users/moltbot/Downloads/opsfc_demo_C3/src/ext.txt",
+        "dst": "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C3_target/ext.txt",
+        "mode": "move"
+      }
+    ],
+    "warnings": [],
+    "blockers": [],
+    "plan_summary": "move plan: 1 item(s)",
+    "rollback_instructions": [
+      "mv \"/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C3_target/ext.txt\" \"/Users/moltbot/Downloads/opsfc_demo_C3/src/ext.txt\""
+    ],
+    "preflight": {
+      "driveRoot": "/Volumes/Macintosh HD",
+      "writableProbePath": "/Volumes/Macintosh HD/Users/moltbot/Downloads",
+      "mounted": true,
+      "writable": true,
+      "freeBytes": 130681307136,
+      "freeOk": true,
+      "errors": []
+    },
+    "git": null
+  },
+  "plan_summary": {
+    "intent_action": "move",
+    "risk_tier": "HIGH_PRECHECK",
+    "mutating": true,
+    "required_flags": [
+      "force"
+    ],
+    "exact_paths": [
+      "/Users/moltbot/Downloads/opsfc_demo_C3/src/ext.txt",
+      "/Volumes/Macintosh HD/Users/moltbot/Downloads/opsfc_demo_C3_target/ext.txt"
+    ],
+    "warnings": [],
+    "blockers": [],
+    "preflight": {
+      "driveRoot": "/Volumes/Macintosh HD",
+      "writableProbePath": "/Volumes/Macintosh HD/Users/moltbot/Downloads",
+      "mounted": true,
+      "writable": true,
+      "freeBytes": 130681307136,
+      "freeOk": true,
+      "errors": []
+    }
+  },
+  "consumed_at": "2026-02-16T14:00:29.987Z",
+  "consumed_by": "7704103236",
+  "execution_request_id": "opsfc-1771250429896-h86fzv"
+}
