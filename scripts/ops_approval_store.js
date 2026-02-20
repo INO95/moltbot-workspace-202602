@@ -4,12 +4,21 @@ const crypto = require('crypto');
 const config = require('../data/config.json');
 const approvalAuditLog = require('./approval_audit_log');
 
-const ROOT = path.join(__dirname, '..');
-const COMMANDS_STATE_ROOT = path.join(ROOT, 'ops', 'commands', 'state');
+const ROOT = process.env.OPS_WORKSPACE_ROOT
+    ? path.resolve(String(process.env.OPS_WORKSPACE_ROOT))
+    : path.join(__dirname, '..');
+const OPS_COMMANDS_ROOT = process.env.OPS_COMMANDS_ROOT
+    ? path.resolve(String(process.env.OPS_COMMANDS_ROOT))
+    : path.join(ROOT, 'ops', 'commands');
+const COMMANDS_STATE_ROOT = process.env.OPS_COMMANDS_STATE_ROOT
+    ? path.resolve(String(process.env.OPS_COMMANDS_STATE_ROOT))
+    : path.join(OPS_COMMANDS_ROOT, 'state');
 const APPROVAL_PENDING_DIR = path.join(COMMANDS_STATE_ROOT, 'pending');
 const APPROVAL_CONSUMED_DIR = path.join(COMMANDS_STATE_ROOT, 'consumed');
 const APPROVAL_GRANTS_DIR = path.join(COMMANDS_STATE_ROOT, 'grants');
-const DEFAULT_PENDING_APPROVALS_STATE_PATH = path.join(ROOT, 'data', 'state', 'pending_approvals.json');
+const DEFAULT_PENDING_APPROVALS_STATE_PATH = process.env.OPS_PENDING_APPROVALS_STATE_PATH
+    ? path.resolve(String(process.env.OPS_PENDING_APPROVALS_STATE_PATH))
+    : path.join(ROOT, 'data', 'state', 'pending_approvals.json');
 
 function nowIso() {
     return new Date().toISOString();
@@ -91,17 +100,34 @@ function resolveUnifiedApprovalsConfig() {
     const section = (config && typeof config.opsUnifiedApprovals === 'object')
         ? config.opsUnifiedApprovals
         : {};
-    const pendingStateRaw = String(section.pendingStatePath || '').trim();
+    const pendingStateRaw = String(
+        process.env.OPS_PENDING_APPROVALS_STATE_PATH
+        || section.pendingStatePath
+        || '',
+    ).trim();
     const pendingStatePath = pendingStateRaw
         ? (path.isAbsolute(pendingStateRaw) ? pendingStateRaw : path.join(ROOT, pendingStateRaw))
         : DEFAULT_PENDING_APPROVALS_STATE_PATH;
     const ttlPolicy = (section.ttlPolicy && typeof section.ttlPolicy === 'object')
         ? section.ttlPolicy
         : {};
+    const normalizeIdentityMode = (value) => {
+        const key = String(value || '').trim().toLowerCase();
+        if (key === 'strict_user_bot' || key === 'same_user_any_bot' || key === 'any_user_any_bot') {
+            return key;
+        }
+        return 'strict_user_bot';
+    };
+    const identityMode = normalizeIdentityMode(
+        process.env.OPS_UNIFIED_APPROVAL_IDENTITY_MODE
+        || section.identityMode
+        || 'strict_user_bot',
+    );
     return {
         enabled: section.enabled !== false,
         pendingStatePath,
         ttlPolicy,
+        identityMode,
     };
 }
 
@@ -221,6 +247,10 @@ function toMirrorRecord(record, tokenOverride = '') {
         request_id: String(record.request_id || '').trim() || null,
         consumed_at: String(record.consumed_at || '').trim() || null,
         denied_at: String(record.denied_at || '').trim() || null,
+        approved_by: String(record.approved_by || '').trim() || null,
+        approved_bot_id: String(record.approved_bot_id || '').trim() || null,
+        denied_by: String(record.denied_by || '').trim() || null,
+        denied_bot_id: String(record.denied_bot_id || '').trim() || null,
     };
 }
 
@@ -277,12 +307,39 @@ function expirePendingTokens() {
     ensureLayout();
     const now = Date.now();
     let changed = false;
+    let scanned = 0;
+    let expired = 0;
+    let normalizedTerminal = 0;
+    let movedToConsumed = 0;
     for (const filePath of listApprovalFiles(APPROVAL_PENDING_DIR)) {
+        scanned += 1;
         const token = parseTokenFromPath(filePath);
         if (!token) continue;
         const record = readJson(filePath, null);
         if (!record || typeof record !== 'object') continue;
-        if (record.consumed_at) continue;
+        const statusKey = String(record.status || '').trim().toLowerCase();
+        const hasConsumedAt = Boolean(record.consumed_at);
+        const hasDeniedAt = Boolean(record.denied_at);
+        const terminalByStatus = statusKey === 'consumed' || statusKey === 'denied' || statusKey === 'expired';
+        const terminalByFields = hasConsumedAt || hasDeniedAt;
+        if (terminalByStatus || terminalByFields) {
+            let normalizedStatus = statusKey;
+            if (!terminalByStatus) {
+                normalizedStatus = hasDeniedAt ? 'denied' : 'consumed';
+            }
+            const normalized = {
+                ...record,
+                status: normalizedStatus,
+            };
+            writeJsonAtomic(consumedTokenPath(token), normalized);
+            fs.rmSync(filePath, { force: true });
+            changed = true;
+            movedToConsumed += 1;
+            if (statusKey !== normalizedStatus) {
+                normalizedTerminal += 1;
+            }
+            continue;
+        }
         const expiresAtMs = Date.parse(String(record.expires_at || ''));
         if (!Number.isFinite(expiresAtMs) || expiresAtMs > now) continue;
         const expiredAt = nowIso();
@@ -296,6 +353,7 @@ function expirePendingTokens() {
         writeJsonAtomic(consumedTokenPath(token), updated);
         fs.rmSync(filePath, { force: true });
         changed = true;
+        expired += 1;
         approvalAuditLog.append('approval_decision', {
             decision: 'expired',
             token,
@@ -304,11 +362,22 @@ function expirePendingTokens() {
             risk_level: deriveRiskLevel(updated),
             requested_by: updated.requested_by || 'unknown',
             request_id: updated.request_id || null,
+            actor_requested_by: 'system:ttl',
+            actor_bot_id: 'system:ttl',
+            token_owner_requested_by: updated.requested_by || 'unknown',
+            token_owner_bot_id: updated.bot_id || 'unknown',
         });
     }
     if (changed) {
         syncPendingApprovalsMirror();
     }
+    return {
+        scanned,
+        expired,
+        normalizedTerminal,
+        movedToConsumed,
+        changed,
+    };
 }
 
 function resolveConsumedTokenError(token, consumed) {
@@ -438,6 +507,7 @@ function createApprovalToken(options = {}) {
     const actionType = String(options.actionType || options.action_type || deriveActionType({ plan }) || 'file_control').trim().toLowerCase() || 'file_control';
     const riskLevel = String(options.riskLevel || options.risk_level || plan.risk_tier || 'MEDIUM').trim().toUpperCase() || 'MEDIUM';
     const botId = String(options.botId || options.bot_id || process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+    const requestedBy = String(options.requestedBy || options.requested_by || '').trim() || 'unknown';
     const record = {
         schema_version: '1.0',
         token,
@@ -448,7 +518,7 @@ function createApprovalToken(options = {}) {
         action_type: actionType,
         risk_level: riskLevel,
         required_flags: requiredFlags,
-        requested_by: String(options.requestedBy || '').trim() || 'unknown',
+        requested_by: requestedBy,
         request_id: String(options.requestId || '').trim() || null,
         plan_snapshot_hash: planSnapshotHash,
         plan,
@@ -456,8 +526,11 @@ function createApprovalToken(options = {}) {
         status: 'pending',
         denied_at: null,
         denied_by: null,
+        denied_bot_id: null,
         consumed_at: null,
         consumed_by: null,
+        approved_by: null,
+        approved_bot_id: null,
         execution_request_id: null,
     };
     writeJsonAtomic(tokenPath(token), record);
@@ -471,6 +544,10 @@ function createApprovalToken(options = {}) {
         expires_at: record.expires_at,
         ttl_seconds: ttlSeconds,
         payload: derivePayload(record),
+        actor_requested_by: record.requested_by,
+        actor_bot_id: record.bot_id || 'unknown',
+        token_owner_requested_by: record.requested_by,
+        token_owner_bot_id: record.bot_id || 'unknown',
     });
     return record;
 }
@@ -527,13 +604,24 @@ function validateApproval(options = {}) {
         throw makeError('TOKEN_EXPIRED', 'Approval token expired.', { token, expires_at: record.expires_at || null });
     }
 
-    const requestedBy = String(options.requestedBy || '').trim() || 'unknown';
+    const requestedBy = String(options.requestedBy || options.requested_by || '').trim() || 'unknown';
+    const actorBotId = String(options.botId || options.bot_id || process.env.MOLTBOT_BOT_ID || '').trim() || 'unknown';
+    const expectedBotId = String(record.bot_id || '').trim() || 'unknown';
+    const unified = resolveUnifiedApprovalsConfig();
+    const identityMode = String(unified.identityMode || 'strict_user_bot').trim().toLowerCase();
     const expectedRequester = String(record.requested_by || '').trim() || 'unknown';
-    if (requestedBy !== expectedRequester) {
+    if (identityMode !== 'any_user_any_bot' && requestedBy !== expectedRequester) {
         throw makeError('REQUESTER_MISMATCH', 'Approval requester does not match the plan requester.', {
             token,
             requested_by: requestedBy,
             expected_by: expectedRequester,
+        });
+    }
+    if (identityMode === 'strict_user_bot' && actorBotId !== expectedBotId) {
+        throw makeError('BOT_MISMATCH', 'Approval bot does not match the token owner bot.', {
+            token,
+            bot_id: actorBotId,
+            expected_bot_id: expectedBotId,
         });
     }
 
@@ -552,6 +640,7 @@ function validateApproval(options = {}) {
     return {
         token,
         record,
+        identity_mode: identityMode,
         provided_flags: providedFlags,
     };
 }
@@ -575,15 +664,19 @@ function consumeApproval(options = {}) {
     }
 
     const now = nowIso();
+    const consumedBy = String(options.consumedBy || options.consumed_by || '').trim() || 'unknown';
+    const consumedBotId = String(options.consumedBotId || options.consumed_bot_id || process.env.MOLTBOT_BOT_ID || '').trim() || 'unknown';
     const updated = {
         ...record,
         status: 'consumed',
         consumed_at: now,
-        consumed_by: String(options.consumedBy || '').trim() || 'unknown',
+        consumed_by: consumedBy,
+        approved_by: consumedBy,
+        approved_bot_id: consumedBotId,
         execution_request_id: String(options.executionRequestId || '').trim() || null,
     };
-    writeJsonAtomic(pendingPath, updated);
     writeJsonAtomic(consumedTokenPath(token), updated);
+    fs.rmSync(pendingPath, { force: true });
     syncPendingApprovalsMirror();
     approvalAuditLog.append('approval_decision', {
         decision: 'approved',
@@ -593,6 +686,10 @@ function consumeApproval(options = {}) {
         requested_by: updated.requested_by || 'unknown',
         request_id: updated.request_id || null,
         execution_request_id: updated.execution_request_id || null,
+        actor_requested_by: consumedBy,
+        actor_bot_id: consumedBotId,
+        token_owner_requested_by: updated.requested_by || 'unknown',
+        token_owner_bot_id: updated.bot_id || 'unknown',
     });
     return updated;
 }
@@ -623,11 +720,13 @@ function denyApproval(options = {}) {
 
     const now = nowIso();
     const deniedBy = String(options.deniedBy || options.consumedBy || '').trim() || 'unknown';
+    const deniedBotId = String(options.deniedBotId || options.denied_bot_id || process.env.MOLTBOT_BOT_ID || '').trim() || 'unknown';
     const updated = {
         ...record,
         status: 'denied',
         denied_at: now,
         denied_by: deniedBy,
+        denied_bot_id: deniedBotId,
         consumed_at: now,
         consumed_by: deniedBy,
         execution_request_id: String(options.executionRequestId || '').trim() || null,
@@ -643,6 +742,10 @@ function denyApproval(options = {}) {
         requested_by: updated.requested_by || 'unknown',
         request_id: updated.request_id || null,
         execution_request_id: updated.execution_request_id || null,
+        actor_requested_by: deniedBy,
+        actor_bot_id: deniedBotId,
+        token_owner_requested_by: updated.requested_by || 'unknown',
+        token_owner_bot_id: updated.bot_id || 'unknown',
     });
     return updated;
 }

@@ -3,6 +3,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { ensureTestOpsIsolation } = require('./lib/test_ops_isolation');
+
+ensureTestOpsIsolation('bridge-ops-file-control');
 
 const opsCommandQueue = require('./ops_command_queue');
 

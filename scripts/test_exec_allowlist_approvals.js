@@ -2,6 +2,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { ensureTestOpsIsolation } = require('./lib/test_ops_isolation');
+
+ensureTestOpsIsolation('exec-allowlist-approvals');
 
 const ROOT = path.join(__dirname, '..');
 const config = require('../data/config.json');
@@ -17,6 +20,7 @@ function runWorker() {
             ...process.env,
             SKILL_FEEDBACK_AUTORUN: '0',
             TELEGRAM_FINALIZER_ECHO_ONLY: 'true',
+            MOLTBOT_DISABLE_APPROVAL_TOKENS: '0',
         },
     });
     assert.strictEqual(res.status, 0, `ops_host_worker failed: ${res.stderr || res.stdout}`);
@@ -89,6 +93,10 @@ function readJsonl(filePath) {
 }
 
 function resolvePendingStatePath() {
+    const envPath = String(process.env.OPS_PENDING_APPROVALS_STATE_PATH || '').trim();
+    if (envPath) {
+        return path.isAbsolute(envPath) ? envPath : path.resolve(envPath);
+    }
     const section = (config && typeof config.opsUnifiedApprovals === 'object')
         ? config.opsUnifiedApprovals
         : {};
@@ -129,6 +137,16 @@ function main() {
     const riskyPending = opsApprovalStore.readPendingToken(riskyToken);
     assert.ok(riskyPending, 'risky exec token must exist in pending store');
     assert.strictEqual(String(riskyPending.action_type || ''), 'exec');
+
+    const chainId = `test-exec-chain-${Date.now()}`;
+    enqueueCapabilityPlan(chainId, requesterId, 'exec', 'run', { command: 'ls; whoami' });
+    runWorker();
+    const chainRow = findResultRow(chainId);
+    assert.ok(chainRow, 'chain exec plan result should exist');
+    assert.strictEqual(chainRow.ok, true);
+    assert.ok(chainRow.token_id, 'meta chain command must require approval token');
+    const chainPending = opsApprovalStore.readPendingToken(String(chainRow.token_id || ''));
+    assert.ok(chainPending, 'chain command token should exist in pending store');
 
     const pendingStateAfterRisky = JSON.parse(fs.readFileSync(pendingStatePath, 'utf8'));
     const pendingRisky = Array.isArray(pendingStateAfterRisky.pending)
@@ -219,6 +237,7 @@ function main() {
     assert.ok(!appendedRaw.includes(riskyToken), 'raw approval token must not be logged');
 
     fs.rmSync(path.join(opsApprovalStore.APPROVAL_PENDING_DIR, `${browserRow.token_id}.json`), { force: true });
+    fs.rmSync(path.join(opsApprovalStore.APPROVAL_PENDING_DIR, `${chainRow.token_id}.json`), { force: true });
     fs.rmSync(path.join(opsApprovalStore.APPROVAL_CONSUMED_DIR, `${browserRow.token_id}.json`), { force: true });
     fs.rmSync(path.join(opsApprovalStore.APPROVAL_CONSUMED_DIR, `${ttlToken.token}.json`), { force: true });
     fs.rmSync(path.join(opsApprovalStore.APPROVAL_CONSUMED_DIR, `${riskyToken}.json`), { force: true });

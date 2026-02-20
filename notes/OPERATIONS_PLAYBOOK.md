@@ -18,6 +18,10 @@ Last updated: 2026-02-17
 
 ## Local bridge commands
 - `node scripts/bridge.js auto "<message>"`
+- `npm run -s bot:daily:auto -- "<message>"`
+- `npm run -s bot:dev:work -- "<work message>"`
+- `npm run -s bot:anki:word -- "<word payload>"`
+- `npm run -s bot:research:news -- "<news payload>"`
 - `node scripts/openclaw_codex_sync.js [--restart]`
 - `node scripts/ag_bridge_client.js --duel "<work command>"`
 - `node scripts/ag_bridge_client.js --duel --allow-unstructured-critique "<work command>"` (legacy fallback)
@@ -33,6 +37,10 @@ Last updated: 2026-02-17
 - `node scripts/notion_personal_sync.js apply --batch <batchId> --approval <token>`
 - `node scripts/notion_personal_sync_scheduler.js prepare` (prepare + Telegram notify)
 - `npm run -s test:v1-release` (bridge + personal V1 full regression)
+- `npm run -s runtime:daily:status|start|stop|restart`
+- `npm run -s runtime:dev:status|start|stop`
+- `npm run -s runtime:anki:status|start|stop`
+- `npm run -s runtime:research:status|start|stop`
 - Personal Notion env (separate integration):
   - `NOTION_PERSONAL_API_KEY`
   - `NOTION_PERSONAL_DB_ID` (or fallback `NOTION_LOG_DATABASE_ID`)
@@ -75,7 +83,10 @@ Last updated: 2026-02-17
 
 ## OpenClaw container isolation (strict)
 - Invariants:
-  - OpenClaw runs only in containers (live: `moltbot-dev`, `moltbot-anki`, `moltbot-research`, `moltbot-daily`; backup: `moltbot-*-bak`).
+  - Hybrid runtime policy:
+    - local-first: `daily` runs on host profile `openclaw --profile daily` (port `19089`).
+    - container runtime: `moltbot-dev`, `moltbot-anki`, `moltbot-research` remain Docker-first.
+    - rollback-only: `moltbot-daily` container stays stopped with `restart=no` and is used only for emergency rollback.
   - Only workspace bind mount is allowed for OpenClaw services.
   - `.env` inside workspace is forbidden (container startup guard blocks it).
   - OpenClaw ports are bound to `127.0.0.1` only.
@@ -94,6 +105,29 @@ Last updated: 2026-02-17
   - `npm run -s openclaw:down`
   - `npm run -s openclaw:up:backup` (failover/manual test only)
   - `npm run -s openclaw:down:backup`
+  - runtime artifact tracking guard:
+    - check: `npm run -s check:runtime-artifact-tracking`
+    - one-time cleanup (untrack only): `npm run -s fix:runtime-artifact-tracking`
+  - daily local cutover ops:
+    - check: `openclaw --profile daily gateway status`
+    - start: `openclaw --profile daily gateway start`
+    - stop: `openclaw --profile daily gateway stop`
+    - if `gateway status` shows `Service unit not found` or `not loaded`:
+      1) `openclaw --profile daily gateway install`
+      2) `openclaw --profile daily gateway start`
+    - rollback to Docker daily:
+      1) `openclaw --profile daily gateway stop`
+      2) `docker start moltbot-daily`
+      3) verify rollback runtime:
+         - `docker ps --filter name=moltbot-daily`
+         - `docker logs --since 2m moltbot-daily | rg -n "starting provider|listening on ws://127.0.0.1:18789"`
+      4) note:
+         - host `openclaw --profile daily health` can fail with `1006` while Docker daily is active.
+         - use container status/log checks as rollback readiness signal.
+    - return to local-first after rollback rehearsal:
+      1) `docker stop moltbot-daily`
+      2) `openclaw --profile daily gateway install`
+      3) `openclaw --profile daily gateway start`
 - Node execution policy (exec approvals):
   - `node` binary execution is allowlisted.
   - `npm`/`npx` are intentionally not allowlisted.
@@ -117,6 +151,12 @@ Last updated: 2026-02-17
   - `ops/status/link/memo/finance/todo/routine/workout/media/place -> daily(local)`
 - 위임 경로는 `capability: bot:dispatch`로 큐잉되며, 결과는 역할 봇 `telegramReply`를 그대로 회신합니다.
 - 고위험 액션(파일 제어, mail:send, photo:cleanup, schedule:delete)은 기존 approval token 흐름을 유지합니다.
+
+## Bot-specific cron entrypoints
+- `npm run -s cron:dev:keys-todo`
+- `npm run -s cron:daily:digest`
+- `npm run -s cron:research:news-send`
+- `npm run -s cron:research:news-event`
 
 ## Daily health policy (v2)
 - `ops/config/daily_ops_mvp.json -> health_policy` 적용:

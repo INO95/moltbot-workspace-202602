@@ -2,6 +2,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { ensureTestOpsIsolation } = require('./lib/test_ops_isolation');
+
+ensureTestOpsIsolation('bridge-hub-delegation');
 
 const opsCommandQueue = require('./ops_command_queue');
 

@@ -3,14 +3,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const opsCommandQueue = require('./ops_command_queue');
-
 function writeJson(filePath, data) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function listOutbox() {
+function listOutbox(opsCommandQueue) {
     if (!fs.existsSync(opsCommandQueue.OUTBOX_DIR)) return [];
     return fs.readdirSync(opsCommandQueue.OUTBOX_DIR)
         .filter((name) => name.endsWith('.json'))
@@ -20,7 +18,10 @@ function listOutbox() {
 function run() {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-remediation-'));
     process.env.OPS_WORKSPACE_ROOT = tmpRoot;
+    process.env.OPS_COMMANDS_ROOT = path.join(tmpRoot, 'ops', 'commands');
+    process.env.OPS_PENDING_APPROVALS_STATE_PATH = path.join(tmpRoot, 'data', 'state', 'pending_approvals.json');
     process.env.BRIDGE_DIR = path.join(tmpRoot, 'data', 'bridge');
+    const opsCommandQueue = require('./ops_command_queue');
 
     const configPath = path.join(tmpRoot, 'ops', 'config', 'daily_ops_mvp.json');
     const remediationPath = path.join(tmpRoot, 'ops', 'config', 'remediation_policy.json');
@@ -93,14 +94,14 @@ function run() {
     const supervisor = require('./ops_daily_supervisor');
     opsCommandQueue.ensureLayout();
 
-    const outboxBefore = new Set(listOutbox());
+    const outboxBefore = new Set(listOutbox(opsCommandQueue));
     const first = supervisor.runScan({
         now: '2026-02-16T10:00:00+09:00',
         configPath,
         remediationPolicyPath: remediationPath,
         sendEnabled: false,
     });
-    const outboxAfterFirst = listOutbox();
+    const outboxAfterFirst = listOutbox(opsCommandQueue);
     const addedFirst = outboxAfterFirst.filter((name) => !outboxBefore.has(name));
 
     assert.ok(first.remediations.some((item) => item.issue_id === 'bot-research:heartbeat_stall' && item.status === 'queued'));
@@ -112,7 +113,7 @@ function run() {
         remediationPolicyPath: remediationPath,
         sendEnabled: false,
     });
-    const outboxAfterSecond = listOutbox();
+    const outboxAfterSecond = listOutbox(opsCommandQueue);
     const addedSecond = outboxAfterSecond.filter((name) => !outboxBefore.has(name));
 
     assert.ok(second.remediations.some((item) => item.issue_id === 'bot-research:heartbeat_stall' && item.reason === 'max_attempts_reached'));
@@ -147,7 +148,7 @@ function run() {
         remediationPolicyPath: remediationPath,
         sendEnabled: false,
     });
-    const outboxAfterThird = listOutbox();
+    const outboxAfterThird = listOutbox(opsCommandQueue);
     const addedThird = outboxAfterThird.filter((name) => !outboxBefore.has(name));
     assert.ok(third.remediations.some((item) => item.issue_id === 'bot-research:heartbeat_stall' && item.status === 'queued'));
     assert.ok(addedThird.length > addedSecond.length, 're-armed issue should enqueue remediation again after recovery');

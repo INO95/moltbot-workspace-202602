@@ -21,8 +21,9 @@ const {
     suggestToeicTypoCorrection,
 } = require('./anki_word_quality');
 const { analyzeWordFailures, detectTypoSuspicion } = require('./anki_typo_guard');
-const { buildProjectBootstrapPlan } = require('./project_bootstrap');
+const { buildProjectBootstrapPlan, sanitizeProjectName } = require('./project_bootstrap');
 const opsCommandQueue = require('./ops_command_queue');
+const opsApprovalStore = require('./ops_approval_store');
 const opsFileControl = require('./ops_file_control');
 const telegramFinalizer = require('./finalizer');
 const personalStorage = require('./personal_storage');
@@ -31,50 +32,13 @@ const { handleTodoCommand } = require('./personal_todo');
 const { handleRoutineCommand } = require('./personal_routine');
 const { handleWorkoutCommand } = require('./personal_workout');
 const { handleMediaPlaceCommand } = require('./personal_media_place');
+const {
+    DEFAULT_COMMAND_ALLOWLIST,
+    DEFAULT_HUB_DELEGATION,
+    DEFAULT_NATURAL_LANGUAGE_ROUTING,
+} = require('../packages/core-policy/src/bridge_defaults');
 const MODEL_DUEL_LOG_PATH = path.join(__dirname, '../data/bridge/model_duel.jsonl');
 loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
-
-const DEFAULT_COMMAND_ALLOWLIST = Object.freeze({
-    enabled: true,
-    directCommands: ['auto', 'work', 'inspect', 'deploy', 'project', 'ops', 'word', 'news', 'prompt', 'finance', 'todo', 'routine', 'workout', 'media', 'place'],
-    autoRoutes: ['word', 'memo', 'news', 'report', 'work', 'inspect', 'deploy', 'project', 'prompt', 'link', 'status', 'ops', 'finance', 'todo', 'routine', 'workout', 'media', 'place'],
-});
-const DEFAULT_HUB_DELEGATION = Object.freeze({
-    enabled: false,
-    fallbackPolicy: 'local',
-    routeToProfile: Object.freeze({
-        work: 'dev',
-        inspect: 'dev',
-        deploy: 'dev',
-        project: 'dev',
-        prompt: 'dev',
-        word: 'anki',
-        news: 'research',
-        report: 'research',
-        ops: 'daily',
-        status: 'daily',
-        link: 'daily',
-        memo: 'daily',
-        finance: 'daily',
-        todo: 'daily',
-        routine: 'daily',
-        workout: 'daily',
-        media: 'daily',
-        place: 'daily',
-    }),
-});
-const DEFAULT_NATURAL_LANGUAGE_ROUTING = Object.freeze({
-    enabled: true,
-    hubOnly: true,
-    inferMemo: true,
-    inferFinance: true,
-    inferTodo: true,
-    inferRoutine: true,
-    inferWorkout: true,
-    inferStatus: true,
-    inferLink: true,
-    inferReport: true,
-});
 
 const KNOWN_DIRECT_COMMANDS = new Set([
     'checklist',
@@ -106,6 +70,20 @@ const RETRY_SAFE_COMMANDS = new Set([
     'project',
     'prompt',
 ]);
+const ANKI_SYNC_WARNING_COOLDOWN_MS = Number(process.env.ANKI_SYNC_WARNING_COOLDOWN_MS || 10 * 60 * 1000);
+let ankiSyncWarningMemo = { message: '', at: 0 };
+
+function shouldAnnounceAnkiSyncWarning(message) {
+    const text = String(message || '').trim();
+    if (!text) return false;
+    const now = Date.now();
+    const sameMessage = ankiSyncWarningMemo.message === text;
+    if (sameMessage && (now - ankiSyncWarningMemo.at) < ANKI_SYNC_WARNING_COOLDOWN_MS) {
+        return false;
+    }
+    ankiSyncWarningMemo = { message: text, at: now };
+    return true;
+}
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -243,9 +221,11 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
     let inferTodo = pickBool('inferTodo', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferTodo);
     let inferRoutine = pickBool('inferRoutine', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferRoutine);
     let inferWorkout = pickBool('inferWorkout', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferWorkout);
+    let inferBrowser = pickBool('inferBrowser', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferBrowser);
     let inferStatus = pickBool('inferStatus', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferStatus);
     let inferLink = pickBool('inferLink', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferLink);
     let inferReport = pickBool('inferReport', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferReport);
+    let inferProject = pickBool('inferProject', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferProject);
 
     if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_ROUTING_ENABLED')) {
         const parsed = parseBooleanEnv(env.BRIDGE_NL_ROUTING_ENABLED);
@@ -275,6 +255,10 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
         const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_WORKOUT);
         if (parsed != null) inferWorkout = parsed;
     }
+    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_BROWSER')) {
+        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_BROWSER);
+        if (parsed != null) inferBrowser = parsed;
+    }
     if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_STATUS')) {
         const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_STATUS);
         if (parsed != null) inferStatus = parsed;
@@ -287,6 +271,10 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
         const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_REPORT);
         if (parsed != null) inferReport = parsed;
     }
+    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_PROJECT')) {
+        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_PROJECT);
+        if (parsed != null) inferProject = parsed;
+    }
 
     return {
         enabled,
@@ -296,9 +284,11 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
         inferTodo,
         inferRoutine,
         inferWorkout,
+        inferBrowser,
         inferStatus,
         inferLink,
         inferReport,
+        inferProject,
     };
 }
 
@@ -651,6 +641,11 @@ const COMMAND_TEMPLATE_SCHEMA = {
             '값',
             '메서드',
             '명령',
+            '이름',
+            '스타일',
+            '톤',
+            '설명',
+            '금지',
         ],
         aliases: {
             액션: ['액션', 'action'],
@@ -679,6 +674,11 @@ const COMMAND_TEMPLATE_SCHEMA = {
             값: ['값', 'value', 'text'],
             메서드: ['메서드', 'method'],
             명령: ['명령', 'command', 'cmd'],
+            이름: ['이름', 'name', 'persona'],
+            스타일: ['스타일', 'style'],
+            톤: ['톤', 'tone', 'voice'],
+            설명: ['설명', 'desc', 'description'],
+            금지: ['금지', 'forbidden', 'ban'],
         },
     },
 };
@@ -728,6 +728,8 @@ function normalizeOpsAction(value) {
     if (/(사진|photo|image|camera|cam)/.test(v)) return 'photo';
     if (/(일정|스케줄|schedule|calendar)/.test(v)) return 'schedule';
     if (/(브라우저|browser|웹자동화)/.test(v)) return 'browser';
+    if (/(페르소나|persona|캐릭터|tone|스타일)/.test(v)) return 'persona';
+    if (/(토큰조회|승인조회|토큰|token)/.test(v)) return 'token';
     if (/(승인|approve)/.test(v)) return 'approve';
     if (/(거부|deny)/.test(v)) return 'deny';
     return null;
@@ -890,8 +892,63 @@ function execDocker(args) {
     };
 }
 
-const OPS_QUEUE_PATH = path.join(__dirname, '..', 'data', 'runtime', 'ops_requests.jsonl');
-const OPS_SNAPSHOT_PATH = path.join(__dirname, '..', 'data', 'runtime', 'ops_snapshot.json');
+function resolvePathFromEnv(envName, fallback) {
+    const raw = String(process.env[envName] || '').trim();
+    if (!raw) return fallback;
+    return path.isAbsolute(raw) ? raw : path.resolve(raw);
+}
+
+const OPS_QUEUE_PATH = resolvePathFromEnv(
+    'OPS_QUEUE_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'ops_requests.jsonl'),
+);
+const OPS_SNAPSHOT_PATH = resolvePathFromEnv(
+    'OPS_SNAPSHOT_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'ops_snapshot.json'),
+);
+const PROJECT_BOOTSTRAP_STATE_PATH = resolvePathFromEnv(
+    'OPS_PROJECT_BOOTSTRAP_STATE_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'project_bootstrap_last.json'),
+);
+const PENDING_APPROVALS_STATE_PATH = resolvePathFromEnv(
+    'OPS_PENDING_APPROVALS_STATE_PATH',
+    path.join(__dirname, '..', 'data', 'state', 'pending_approvals.json'),
+);
+const LAST_APPROVAL_HINTS_PATH = resolvePathFromEnv(
+    'OPS_LAST_APPROVAL_HINTS_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'ops_last_approval_hints.json'),
+);
+const BOT_PERSONA_MAP_PATH = resolvePathFromEnv(
+    'OPS_BOT_PERSONA_MAP_PATH',
+    path.join(__dirname, '..', 'data', 'policy', 'bot_persona_map.json'),
+);
+
+const OPS_PERSONA_TARGET_TO_BOT = Object.freeze({
+    dev: 'bot-dev',
+    anki: 'bot-anki',
+    research: 'bot-research',
+    daily: 'bot-daily',
+    dev_bak: 'bot-dev-bak',
+    anki_bak: 'bot-anki-bak',
+    research_bak: 'bot-research-bak',
+    daily_bak: 'bot-daily-bak',
+    'moltbot-dev': 'bot-dev',
+    'moltbot-anki': 'bot-anki',
+    'moltbot-research': 'bot-research',
+    'moltbot-daily': 'bot-daily',
+    'moltbot-dev-bak': 'bot-dev-bak',
+    'moltbot-anki-bak': 'bot-anki-bak',
+    'moltbot-research-bak': 'bot-research-bak',
+    'moltbot-daily-bak': 'bot-daily-bak',
+    'bot-dev': 'bot-dev',
+    'bot-anki': 'bot-anki',
+    'bot-research': 'bot-research',
+    'bot-daily': 'bot-daily',
+    'bot-dev-bak': 'bot-dev-bak',
+    'bot-anki-bak': 'bot-anki-bak',
+    'bot-research-bak': 'bot-research-bak',
+    'bot-daily-bak': 'bot-daily-bak',
+});
 
 function parseTransportEnvelopeContext(text) {
     const raw = String(text || '').trim();
@@ -907,6 +964,84 @@ function parseTransportEnvelopeContext(text) {
         groupId: groupIdMatch ? String(groupIdMatch[1]).trim() : '',
         header,
     };
+}
+
+function writeJsonFileSafe(filePath, payload) {
+    try {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function readJsonFileSafe(filePath) {
+    try {
+        if (!fs.existsSync(filePath)) return null;
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (_) {
+        return null;
+    }
+}
+
+function saveLastProjectBootstrap(fields = {}, bootstrap = null) {
+    if (!fields || typeof fields !== 'object') return false;
+    if (!bootstrap || typeof bootstrap !== 'object') return false;
+    const snapshot = {
+        savedAt: new Date().toISOString(),
+        fields: {
+            프로젝트명: String(fields.프로젝트명 || '').trim(),
+            목표: String(fields.목표 || '').trim(),
+            스택: String(fields.스택 || '').trim(),
+            경로: String(fields.경로 || '').trim(),
+            완료기준: String(fields.완료기준 || '').trim(),
+            초기화: String(fields.초기화 || bootstrap.initMode || 'plan').trim(),
+        },
+        bootstrap: {
+            projectName: String(bootstrap.projectName || '').trim(),
+            targetPath: String(bootstrap.targetPath || '').trim(),
+            template: String(bootstrap.template || '').trim(),
+            templateLabel: String(bootstrap.templateLabel || '').trim(),
+            initMode: String(bootstrap.initMode || '').trim(),
+            pathAllowed: Boolean(bootstrap.pathPolicy && bootstrap.pathPolicy.allowed),
+        },
+    };
+    return writeJsonFileSafe(PROJECT_BOOTSTRAP_STATE_PATH, snapshot);
+}
+
+function loadLastProjectBootstrap(maxAgeHours = 48) {
+    const parsed = readJsonFileSafe(PROJECT_BOOTSTRAP_STATE_PATH);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const savedAt = Date.parse(String(parsed.savedAt || ''));
+    if (!Number.isFinite(savedAt)) return null;
+    const ageMs = Date.now() - savedAt;
+    if (ageMs < 0 || ageMs > maxAgeHours * 60 * 60 * 1000) return null;
+    const fields = parsed.fields && typeof parsed.fields === 'object' ? parsed.fields : {};
+    if (!String(fields.프로젝트명 || '').trim()) return null;
+    return parsed;
+}
+
+function resolveDefaultProjectBasePath() {
+    return path.resolve('/Users/moltbot/Projects');
+}
+
+function toProjectTemplatePayload(fields = {}, { forceExecute = false } = {}) {
+    const projectName = sanitizeProjectName(fields.프로젝트명 || fields.projectName || 'rust-tap-game');
+    const goal = String(fields.목표 || fields.goal || '모바일에서 실행 가능한 Rust 웹게임 템플릿 생성').trim();
+    const stack = String(fields.스택 || fields.stack || 'rust wasm web').trim();
+    const basePathRaw = String(fields.경로 || fields.path || resolveDefaultProjectBasePath()).trim();
+    const done = String(fields.완료기준 || fields.done || '프로젝트 폴더와 기본 Rust/WASM 파일 생성').trim();
+    const initRaw = String(fields.초기화 || fields.initMode || 'execute').trim();
+    const initMode = forceExecute ? 'execute' : (initRaw || 'execute');
+    return [
+        `프로젝트명: ${projectName}`,
+        `목표: ${goal}`,
+        `스택: ${stack}`,
+        `경로: ${basePathRaw}`,
+        `완료기준: ${done}`,
+        `초기화: ${initMode}`,
+    ].join('; ');
 }
 
 function resolveHubDelegationTarget(route) {
@@ -979,6 +1114,19 @@ function resolveOpsFilePolicy() {
     });
 }
 
+function isUnifiedApprovalEnabled() {
+    const envRaw = String(process.env.MOLTBOT_DISABLE_APPROVAL_TOKENS || '').trim().toLowerCase();
+    if (envRaw === '1' || envRaw === 'true' || envRaw === 'on') return false;
+    if (envRaw === '0' || envRaw === 'false' || envRaw === 'off') return true;
+    return !(
+        config
+        && typeof config === 'object'
+        && config.opsUnifiedApprovals
+        && typeof config.opsUnifiedApprovals === 'object'
+        && config.opsUnifiedApprovals.enabled === false
+    );
+}
+
 function normalizeOpsOptionFlags(value) {
     return opsFileControl.normalizeApprovalFlags(value);
 }
@@ -988,7 +1136,7 @@ function normalizeOpsFileIntent(value) {
 }
 
 function isFileControlAction(action) {
-    return action === 'file' || action === 'approve' || action === 'deny' || action === 'exec';
+    return action === 'file';
 }
 
 function enforceFileControlTelegramGuard(telegramContext, policy) {
@@ -1060,30 +1208,65 @@ function isApprovalGrantEnabled(policy) {
 function parseApproveShorthand(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
-    const match = raw.match(/^\/?approve\s+([A-Za-z0-9._:-]+)\s*(.*)$/i);
-    if (!match) return null;
-    const token = String(match[1] || '').trim();
-    const flags = normalizeOpsOptionFlags(match[2] || '');
+    const conversationalApprove = /^(?:(?:응|네|예|그래|좋아|오케이|ㅇㅋ|ok|okay)\s*)?(?:승인(?:해|해줘|해주세요|해요|합니다)?|진행(?:해|해줘|해주세요|해요|합니다)?|go\s*ahead)\s*[.!~…]*$/i;
+    const explicitApprove = /^\/?approve\b/i.test(raw);
+    const conversational = conversationalApprove.test(raw);
+    const tokenMatch = raw.match(/\bapv_[a-f0-9]{16}\b/i);
+    const token = tokenMatch ? String(tokenMatch[0] || '').trim() : '';
+    if (!explicitApprove && !conversational) return null;
+
+    const tail = explicitApprove
+        ? raw.replace(/^\/?approve\b/i, '').trim()
+        : raw;
+    const flagSource = token
+        ? String(tail.replace(token, ' ') || '').trim()
+        : tail;
+    const flags = explicitApprove
+        ? normalizeOpsOptionFlags(flagSource)
+        : normalizeOpsOptionFlags((String(flagSource || '').match(/--[a-z0-9_-]+/gi) || []).join(' '));
     const flagText = flags.length > 0
         ? `; 옵션: ${flags.map((flag) => `--${flag}`).join(' ')}`
         : '';
     return {
         token,
         flags,
-        normalizedPayload: `액션: 승인; 토큰: ${token}${flagText}`,
+        normalizedPayload: token
+            ? `액션: 승인; 토큰: ${token}${flagText}`
+            : `액션: 승인${flagText}`,
     };
 }
 
 function parseDenyShorthand(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
-    const match = raw.match(/^\/?deny\s+([A-Za-z0-9._:-]+)\s*$/i);
-    if (!match) return null;
-    const token = String(match[1] || '').trim();
+    const explicitDeny = /^\/?deny\b/i.test(raw);
+    const conversationalDeny = /^(?:(?:응|네|예|그래|오케이|ㅇㅋ|ok|okay)\s*)?(?:거부|거절|취소)(?:해|해줘|해주세요|해요|합니다)?\s*[.!~…]*$/i.test(raw);
+    const tokenMatch = raw.match(/\bapv_[a-f0-9]{16}\b/i);
+    const token = tokenMatch ? String(tokenMatch[0] || '').trim() : '';
+    if (!explicitDeny && !conversationalDeny) return null;
     return {
         token,
-        normalizedPayload: `액션: 거부; 토큰: ${token}`,
+        normalizedPayload: token ? `액션: 거부; 토큰: ${token}` : '액션: 거부',
     };
+}
+
+function parseNaturalApprovalShorthand(text) {
+    const raw = String(text || '')
+        .trim()
+        .replace(/[.!?~]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    if (!raw) return null;
+    if (raw.includes(':') || raw.includes('：') || raw.includes('/')) return null;
+
+    if (/^(응\s*)?(승인|승인해|승인할게|진행|진행해|진행할게|오케이|ok|ㅇㅋ|ㅇㅇ)$/.test(raw)) {
+        return { decision: 'approve', normalizedPayload: '액션: 승인' };
+    }
+    if (/^(응\s*)?(거부|거부해|취소|취소해|중지|멈춰|스탑|stop)$/.test(raw)) {
+        return { decision: 'deny', normalizedPayload: '액션: 거부' };
+    }
+    return null;
 }
 
 function normalizeOpsPayloadText(text) {
@@ -1129,6 +1312,13 @@ function enqueueFileControlCommand(command = {}) {
 function enqueueCapabilityCommand(command = {}) {
     const capability = String(command.capability || '').trim().toLowerCase();
     const action = String(command.action || '').trim().toLowerCase();
+    const payload = (command.payload && typeof command.payload === 'object')
+        ? { ...command.payload }
+        : {};
+    const originBotId = String(command.origin_bot_id || process.env.MOLTBOT_BOT_ID || '').trim();
+    if (originBotId && !String(payload.origin_bot_id || '').trim()) {
+        payload.origin_bot_id = originBotId;
+    }
     const normalized = {
         schema_version: '1.0',
         request_id: opsCommandQueue.makeRequestId('opsc'),
@@ -1144,7 +1334,7 @@ function enqueueCapabilityCommand(command = {}) {
             ? command.telegram_context
             : null,
         reason: String(command.reason || '').trim(),
-        payload: (command.payload && typeof command.payload === 'object') ? command.payload : {},
+        payload,
         created_at: new Date().toISOString(),
     };
     return opsCommandQueue.enqueueCommand(normalized);
@@ -1171,6 +1361,30 @@ function queueOpsRequest(action, targetKey, targets, reason = '') {
     return row;
 }
 
+function isInlineApprovalExecutionEnabled() {
+    const raw = String(process.env.BRIDGE_INLINE_APPROVAL_EXECUTE || 'true').trim().toLowerCase();
+    return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
+}
+
+function triggerInlineOpsWorker() {
+    if (!isInlineApprovalExecutionEnabled()) {
+        return { enabled: false, triggered: false, ok: false, error: '' };
+    }
+    const run = spawnSync('node', ['scripts/ops_host_worker.js'], {
+        cwd: path.resolve(__dirname, '..'),
+        encoding: 'utf8',
+        timeout: 20000,
+        maxBuffer: 1024 * 1024,
+    });
+    const ok = !run.error && run.status === 0;
+    return {
+        enabled: true,
+        triggered: true,
+        ok,
+        error: ok ? '' : String(run.error ? run.error.message || run.error : (run.stderr || run.stdout || 'ops_host_worker failed')).trim(),
+    };
+}
+
 function readOpsSnapshot() {
     try {
         const raw = fs.readFileSync(OPS_SNAPSHOT_PATH, 'utf8');
@@ -1180,6 +1394,252 @@ function readOpsSnapshot() {
     } catch (_) {
         return null;
     }
+}
+
+function readPendingApprovalsState() {
+    try {
+        if (!fs.existsSync(PENDING_APPROVALS_STATE_PATH)) return [];
+        const raw = fs.readFileSync(PENDING_APPROVALS_STATE_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed && parsed.pending) ? parsed.pending : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function readBotPersonaMap() {
+    try {
+        if (!fs.existsSync(BOT_PERSONA_MAP_PATH)) return {};
+        const raw = fs.readFileSync(BOT_PERSONA_MAP_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function writeBotPersonaMap(map = {}) {
+    try {
+        fs.mkdirSync(path.dirname(BOT_PERSONA_MAP_PATH), { recursive: true });
+        fs.writeFileSync(BOT_PERSONA_MAP_PATH, `${JSON.stringify(map, null, 2)}\n`, 'utf8');
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function normalizePersonaTarget(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    if (OPS_PERSONA_TARGET_TO_BOT[raw]) return OPS_PERSONA_TARGET_TO_BOT[raw];
+    return '';
+}
+
+function readLastApprovalHints() {
+    try {
+        if (!fs.existsSync(LAST_APPROVAL_HINTS_PATH)) return {};
+        const raw = fs.readFileSync(LAST_APPROVAL_HINTS_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function writeLastApprovalHints(hints = {}) {
+    try {
+        fs.mkdirSync(path.dirname(LAST_APPROVAL_HINTS_PATH), { recursive: true });
+        fs.writeFileSync(LAST_APPROVAL_HINTS_PATH, `${JSON.stringify(hints, null, 2)}\n`, 'utf8');
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function buildApprovalOwnerKey(requestedBy = '', telegramContext = null) {
+    const requester = String(requestedBy || '').trim();
+    const telegramUserId = String(telegramContext && telegramContext.userId || '').trim();
+    if (requester && requester !== 'unknown') return requester;
+    if (telegramUserId) return telegramUserId;
+    return 'unknown';
+}
+
+function rememberLastApprovalHint({
+    requestedBy = '',
+    telegramContext = null,
+    requestId = '',
+    capability = '',
+    action = '',
+} = {}) {
+    const ownerKey = buildApprovalOwnerKey(requestedBy, telegramContext);
+    const reqId = String(requestId || '').trim();
+    if (!ownerKey || !reqId) return false;
+    const hints = readLastApprovalHints();
+    hints[ownerKey] = {
+        owner_key: ownerKey,
+        request_id: reqId,
+        capability: String(capability || '').trim(),
+        action: String(action || '').trim(),
+        updated_at: new Date().toISOString(),
+    };
+    return writeLastApprovalHints(hints);
+}
+
+function readLastApprovalHint(requestedBy = '', telegramContext = null) {
+    const ownerKey = buildApprovalOwnerKey(requestedBy, telegramContext);
+    if (!ownerKey) return null;
+    const hints = readLastApprovalHints();
+    const row = hints && typeof hints === 'object' ? hints[ownerKey] : null;
+    if (!row || typeof row !== 'object') return null;
+    const reqId = String(row.request_id || '').trim();
+    if (!reqId) return null;
+    return {
+        ownerKey,
+        requestId: reqId,
+        capability: String(row.capability || '').trim(),
+        action: String(row.action || '').trim(),
+        updatedAt: String(row.updated_at || '').trim(),
+    };
+}
+
+function clearLastApprovalHint(requestedBy = '', telegramContext = null) {
+    const ownerKey = buildApprovalOwnerKey(requestedBy, telegramContext);
+    if (!ownerKey) return false;
+    const hints = readLastApprovalHints();
+    if (!Object.prototype.hasOwnProperty.call(hints, ownerKey)) return false;
+    delete hints[ownerKey];
+    return writeLastApprovalHints(hints);
+}
+
+function hasAnyApprovalHint() {
+    const hints = readLastApprovalHints();
+    return Object.keys(hints).length > 0;
+}
+
+function findPendingApprovalByRequestId(requestId = '', rows = []) {
+    const reqId = String(requestId || '').trim();
+    if (!reqId) return null;
+    const src = Array.isArray(rows) ? rows : [];
+    return src.find((row) => String(row && row.request_id || '').trim() === reqId) || null;
+}
+
+function resolveApprovalTokenFromHint(requestedBy = '', telegramContext = null) {
+    const hint = readLastApprovalHint(requestedBy, telegramContext);
+    if (!hint || !hint.requestId) {
+        return { token: '', row: null, hint: null, found: false };
+    }
+    const rows = readPendingApprovalsState();
+    const row = findPendingApprovalByRequestId(hint.requestId, rows);
+    return {
+        token: String(row && row.id || '').trim(),
+        row: row || null,
+        hint,
+        found: Boolean(row),
+    };
+}
+
+function findApprovalTokenCandidates(query = '') {
+    const pending = readPendingApprovalsState();
+    const needle = String(query || '').trim();
+    if (!needle) return pending.slice(0, 5);
+
+    const exact = pending.filter((row) => (
+        String(row && row.request_id || '').trim() === needle
+        || String(row && row.id || '').trim() === needle
+    ));
+    if (exact.length > 0) return exact;
+
+    const partial = pending.filter((row) => (
+        String(row && row.request_id || '').includes(needle)
+        || String(row && row.id || '').includes(needle)
+    ));
+    return partial.slice(0, 5);
+}
+
+function sortPendingApprovalsNewestFirst(rows = []) {
+    const src = Array.isArray(rows) ? rows.slice() : [];
+    src.sort((a, b) => {
+        const aMs = Date.parse(String(a && (a.created_at || a.updated_at) || '')) || 0;
+        const bMs = Date.parse(String(b && (b.created_at || b.updated_at) || '')) || 0;
+        return bMs - aMs;
+    });
+    return src;
+}
+
+function resolveApprovalTokenSelection({
+    query = '',
+    requestedBy = '',
+    telegramContext = null,
+} = {}) {
+    const allPending = readPendingApprovalsState();
+    const queryText = String(query || '').trim();
+    const ownerKey = buildApprovalOwnerKey(requestedBy, telegramContext);
+
+    let candidates = queryText ? findApprovalTokenCandidates(queryText) : allPending;
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return {
+            token: '',
+            row: null,
+            candidates: [],
+            matchedByRequester: false,
+        };
+    }
+
+    candidates = sortPendingApprovalsNewestFirst(candidates);
+    if (!ownerKey || ownerKey === 'unknown') {
+        const row = candidates[0] || null;
+        return {
+            token: String(row && row.id || '').trim(),
+            row,
+            candidates,
+            matchedByRequester: false,
+        };
+    }
+
+    const scoped = candidates.filter((row) => String(row && row.requested_by || '').trim() === ownerKey);
+    if (scoped.length > 0) {
+        const row = scoped[0];
+        return {
+            token: String(row && row.id || '').trim(),
+            row,
+            candidates: scoped,
+            matchedByRequester: true,
+        };
+    }
+
+    const row = candidates[0] || null;
+    return {
+        token: String(row && row.id || '').trim(),
+        row,
+        candidates,
+        matchedByRequester: false,
+    };
+}
+
+function mergeUniqueLower(items = []) {
+    const out = [];
+    const seen = new Set();
+    for (const item of (Array.isArray(items) ? items : [])) {
+        const key = String(item || '').trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(key);
+    }
+    return out;
+}
+
+function resolveApprovalFlagsForToken(token = '', providedFlags = []) {
+    const mergedProvided = mergeUniqueLower(providedFlags);
+    const key = String(token || '').trim();
+    if (!key) return mergedProvided;
+    let required = [];
+    try {
+        const pending = opsApprovalStore.readPendingToken(key);
+        required = mergeUniqueLower(pending && pending.required_flags ? pending.required_flags : []);
+    } catch (_) {
+        required = [];
+    }
+    return mergeUniqueLower([...required, ...mergedProvided]);
 }
 
 function normalizeOpsStateBucket(state, statusText) {
@@ -1288,7 +1748,85 @@ function buildOpsStatusReply(rows, options = {}) {
     return lines.join('\n');
 }
 
+function splitOpsBatchPayloads(payloadText) {
+    const raw = String(payloadText || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trim();
+    if (!raw) return [];
+
+    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (lines.length <= 1) return [raw];
+
+    const chunks = [];
+    let current = '';
+    for (const line of lines) {
+        const stripped = line.replace(/^\s*(?:운영|ops)\s*[:：]\s*/i, '').trim();
+        const hasOpsPrefix = stripped.length > 0 && stripped !== line;
+        if (hasOpsPrefix) {
+            if (current.trim()) chunks.push(current.trim());
+            current = stripped;
+            continue;
+        }
+        if (!current) {
+            current = line;
+            continue;
+        }
+        current += `\n${line}`;
+    }
+    if (current.trim()) chunks.push(current.trim());
+
+    const looksLikeBatch = chunks.length > 1
+        && chunks.every((chunk) => /(?:^|[;\n])\s*(?:액션|action)\s*[:：]/i.test(chunk));
+    return looksLikeBatch ? chunks : [raw];
+}
+
 function runOpsCommand(payloadText, options = {}) {
+    const batchPayloads = splitOpsBatchPayloads(payloadText);
+    if (batchPayloads.length <= 1) {
+        return runOpsCommandSingle(batchPayloads[0] || payloadText, options);
+    }
+
+    const items = batchPayloads.map((entry) => runOpsCommandSingle(entry, options));
+    const templateValid = items.every((item) => item && item.templateValid !== false);
+    const success = items.every((item) => item && item.success !== false);
+    const requestIds = items
+        .map((item) => String(item && item.requestId || '').trim())
+        .filter(Boolean);
+    const lines = [`운영 배치 요청 접수: ${items.length}건`];
+    items.forEach((item, index) => {
+        const capability = String(item && (item.capability || item.action) || 'ops').trim();
+        const capabilityAction = String(item && item.capabilityAction || '').trim();
+        const label = capabilityAction ? `${capability} ${capabilityAction.toUpperCase()}` : capability;
+        const requestId = String(item && item.requestId || '').trim();
+        if (requestId) {
+            const risk = String(item && item.riskTier || '').trim();
+            const approval = (item && typeof item.requiresApproval === 'boolean')
+                ? `, approval=${item.requiresApproval ? 'required' : 'auto'}`
+                : '';
+            lines.push(`${index + 1}. ${label}: ${requestId}${risk ? ` (risk=${risk}${approval})` : approval ? ` (${approval.replace(/^,\s*/, '')})` : ''}`);
+            return;
+        }
+        if (item && item.success === false) {
+            const reason = String(item.error || item.errorCode || item.telegramReply || 'unknown error').trim();
+            lines.push(`${index + 1}. 실패: ${label}${reason ? ` - ${reason}` : ''}`);
+            return;
+        }
+        lines.push(`${index + 1}. ${label}`);
+    });
+
+    return {
+        route: 'ops',
+        templateValid,
+        success,
+        batch: true,
+        items,
+        requestIds,
+        telegramReply: lines.join('\n'),
+    };
+}
+
+function runOpsCommandSingle(payloadText, options = {}) {
     const normalized = normalizeOpsPayloadText(payloadText);
     const parsed = parseStructuredCommand('ops', normalized.payloadText);
     if (!parsed.ok) {
@@ -1306,7 +1844,7 @@ function runOpsCommand(payloadText, options = {}) {
             route: 'ops',
             templateValid: false,
             error: '지원하지 않는 액션입니다.',
-            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `실행`, `메일`, `사진`, `일정`, `브라우저`, `승인`, `거부`만 지원합니다.',
+            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `실행`, `메일`, `사진`, `일정`, `브라우저`, `페르소나`, `토큰`, `승인`, `거부`만 지원합니다.',
         };
     }
 
@@ -1383,6 +1921,148 @@ function runOpsCommand(payloadText, options = {}) {
         };
     }
 
+    if (action === 'token') {
+        if (!isUnifiedApprovalEnabled()) {
+            return {
+                route: 'ops',
+                templateValid: true,
+                success: true,
+                action,
+                results: [],
+                telegramReply: '승인 토큰 제도는 현재 비활성화되어 있습니다.',
+            };
+        }
+        const query = String(parsed.fields.식별자 || parsed.fields.토큰 || parsed.fields.작업 || parsed.fields.내용 || '').trim();
+        const candidates = findApprovalTokenCandidates(query);
+        if (candidates.length === 0) {
+            return {
+                route: 'ops',
+                templateValid: true,
+                success: false,
+                action,
+                errorCode: 'TOKEN_NOT_FOUND',
+                telegramReply: query
+                    ? `토큰 조회 결과 없음: ${query}`
+                    : '현재 대기 중인 승인 토큰이 없습니다.',
+            };
+        }
+
+        const lines = ['승인 토큰 조회 결과:'];
+        for (const row of candidates.slice(0, 5)) {
+            const reqId = String(row && row.request_id || '').trim() || '(no request_id)';
+            const actionType = String(row && row.action_type || '').trim() || 'file_control';
+            const expires = String(row && row.expires_at || '').trim() || '(no expires)';
+            lines.push(`- ${reqId}`);
+            lines.push(`  action: ${actionType}`);
+            lines.push(`  expires: ${expires}`);
+        }
+        lines.push('승인: `운영: 액션: 승인` / 거부: `운영: 액션: 거부`');
+        return {
+            route: 'ops',
+            templateValid: true,
+            success: true,
+            action,
+            query: query || null,
+            results: candidates.slice(0, 5),
+            telegramReply: lines.join('\n'),
+        };
+    }
+
+    if (action === 'persona') {
+        const targetBotId = normalizePersonaTarget(parsed.fields.대상);
+        if (!targetBotId) {
+            return {
+                route: 'ops',
+                templateValid: false,
+                success: false,
+                action,
+                errorCode: 'PERSONA_TARGET_REQUIRED',
+                telegramReply: '페르소나 대상이 필요합니다. 예: 운영: 액션: 페르소나; 대상: daily; 이름: analyst',
+            };
+        }
+
+        const taskRaw = String(parsed.fields.작업 || '').trim().toLowerCase();
+        const map = readBotPersonaMap();
+        const current = (map && typeof map[targetBotId] === 'object') ? map[targetBotId] : null;
+        const isReadOnly = /(조회|상태|show|list|get|확인)/.test(taskRaw) || (!parsed.fields.이름 && !parsed.fields.스타일 && !parsed.fields.톤 && !parsed.fields.설명 && !parsed.fields.금지);
+        if (isReadOnly) {
+            if (!current) {
+                return {
+                    route: 'ops',
+                    templateValid: true,
+                    success: true,
+                    action,
+                    target: targetBotId,
+                    telegramReply: `페르소나 조회: ${targetBotId}\n- 설정 없음`,
+                };
+            }
+            return {
+                route: 'ops',
+                templateValid: true,
+                success: true,
+                action,
+                target: targetBotId,
+                telegramReply: [
+                    `페르소나 조회: ${targetBotId}`,
+                    `- 이름: ${String(current.name || '').trim() || '-'}`,
+                    `- 톤: ${String(current.tone || '').trim() || '-'}`,
+                    `- 스타일: ${String(current.style || '').trim() || '-'}`,
+                    `- 금지: ${String(current.forbidden || '').trim() || '-'}`,
+                    `- 설명: ${String(current.description || '').trim() || '-'}`,
+                ].join('\n'),
+            };
+        }
+
+        const name = String(parsed.fields.이름 || '').trim();
+        if (!name) {
+            return {
+                route: 'ops',
+                templateValid: false,
+                success: false,
+                action,
+                errorCode: 'PERSONA_NAME_REQUIRED',
+                telegramReply: '페르소나 이름이 필요합니다. 예: 운영: 액션: 페르소나; 대상: daily; 이름: analyst; 톤: 간결',
+            };
+        }
+
+        const next = {
+            ...(current || {}),
+            name,
+            tone: String(parsed.fields.톤 || current?.tone || '').trim(),
+            style: String(parsed.fields.스타일 || current?.style || '').trim(),
+            forbidden: String(parsed.fields.금지 || current?.forbidden || '').trim(),
+            description: String(parsed.fields.설명 || current?.description || '').trim(),
+            updated_at: new Date().toISOString(),
+            updated_by: requestedBy || 'unknown',
+        };
+        map[targetBotId] = next;
+        const written = writeBotPersonaMap(map);
+        if (!written) {
+            return {
+                route: 'ops',
+                templateValid: false,
+                success: false,
+                action,
+                errorCode: 'PERSONA_SAVE_FAILED',
+                telegramReply: '페르소나 저장에 실패했습니다.',
+            };
+        }
+        return {
+            route: 'ops',
+            templateValid: true,
+            success: true,
+            action,
+            target: targetBotId,
+            telegramReply: [
+                `페르소나 적용 완료: ${targetBotId}`,
+                `- 이름: ${next.name}`,
+                `- 톤: ${next.tone || '-'}`,
+                `- 스타일: ${next.style || '-'}`,
+                `- 금지: ${next.forbidden || '-'}`,
+            ].join('\n'),
+        };
+    }
+
     if (action === 'restart') {
         if (!targetKey || !OPS_ALLOWED_TARGETS[targetKey]) {
             return {
@@ -1410,6 +2090,7 @@ function runOpsCommand(payloadText, options = {}) {
     }
 
     if (action === 'file') {
+        const unifiedApprovalsEnabled = isUnifiedApprovalEnabled();
         const intentAction = normalizeOpsFileIntent(parsed.fields.작업);
         if (!intentAction) {
             return {
@@ -1452,13 +2133,16 @@ function runOpsCommand(payloadText, options = {}) {
             telegramContext,
             telegramReply: [
                 `파일 제어 PLAN 요청 접수: ${queued.requestId}`,
-                '- 기본 모드: dry-run (실행 전 승인 필요)',
-                '- 호스트 runner가 위험도/정확 경로/토큰을 계산합니다.',
+                unifiedApprovalsEnabled
+                    ? '- 기본 모드: dry-run (실행 전 승인 필요)'
+                    : '- 기본 모드: dry-run (승인 토큰 없이 자동 실행)',
+                '- 호스트 runner가 위험도/정확 경로를 계산합니다.',
             ].join('\n'),
         };
     }
 
     if (action === 'mail' || action === 'photo' || action === 'schedule' || action === 'browser' || action === 'exec') {
+        const unifiedApprovalsEnabled = isUnifiedApprovalEnabled();
         const capabilityAction = normalizeOpsCapabilityAction(action, parsed.fields.작업);
         const capabilityPolicy = OPS_CAPABILITY_POLICY[action] || {};
         const capabilityRoutePolicy = (capabilityAction && capabilityPolicy[capabilityAction]) || null;
@@ -1506,12 +2190,23 @@ function runOpsCommand(payloadText, options = {}) {
             risk_tier: capabilityRoutePolicy.risk_tier,
             requires_approval: capabilityRoutePolicy.requires_approval,
         });
-        const approvalHint = action === 'exec'
-            ? '- allowlist 검사 후 안전 명령은 자동 실행, 위험 명령은 승인 토큰이 발급됩니다.'
-            : (capabilityRoutePolicy.requires_approval
-            ? '- 고위험 작업으로 분류되어 승인 토큰이 발급됩니다. 승인 후 `APPROVE <token>`로 실행됩니다.'
-            : '- 저위험 작업으로 분류되어 PLAN 검증 후 호스트 runner가 즉시 실행합니다.');
-        const grantHint = (capabilityRoutePolicy.requires_approval && isApprovalGrantEnabled(policy))
+        rememberLastApprovalHint({
+            requestedBy,
+            telegramContext,
+            requestId: queued.requestId,
+            capability: action,
+            action: capabilityAction,
+        });
+        const approvalHint = !unifiedApprovalsEnabled
+            ? '- 승인 토큰 정책이 비활성화되어 PLAN 검증 후 자동 실행됩니다.'
+            : action === 'exec'
+                ? (capabilityRoutePolicy.requires_approval
+                    ? '- 실행 요청은 승인 대기로 접수됩니다. `운영: 액션: 승인`으로 실행, `운영: 액션: 거부`로 취소할 수 있습니다.'
+                    : '- allowlist 검사 후 안전 명령은 자동 실행, 위험 명령은 승인 대기 후 `운영: 액션: 승인`으로 실행됩니다.')
+                : (capabilityRoutePolicy.requires_approval
+                    ? '- 고위험 작업으로 분류되어 승인 대기됩니다. `운영: 액션: 승인`으로 실행, `운영: 액션: 거부`로 취소할 수 있습니다.'
+                    : '- 저위험 작업으로 분류되어 PLAN 검증 후 호스트 runner가 즉시 실행합니다.');
+        const grantHint = (unifiedApprovalsEnabled && capabilityRoutePolicy.requires_approval && isApprovalGrantEnabled(policy))
             ? '- 승인 성공 시 일정 시간 전체 권한 세션이 열려, 추가 고위험 작업이 토큰 없이 실행될 수 있습니다.'
             : '';
         return {
@@ -1537,21 +2232,54 @@ function runOpsCommand(payloadText, options = {}) {
     }
 
     if (action === 'approve') {
-        const approveFlags = normalizeOpsOptionFlags([
+        if (!isUnifiedApprovalEnabled()) {
+            return {
+                route: 'ops',
+                templateValid: true,
+                success: true,
+                action,
+                telegramReply: '승인 토큰 제도는 비활성화되어 있습니다. 실행 요청은 자동 처리됩니다.',
+            };
+        }
+        const providedApproveFlags = normalizeOpsOptionFlags([
             ...(normalized.approveShorthand ? normalized.approveShorthand.flags : []),
             ...normalizeOpsOptionFlags(parsed.fields.옵션 || ''),
         ]);
-        const token = String(parsed.fields.토큰 || (normalized.approveShorthand && normalized.approveShorthand.token) || '').trim();
+        const queryText = String(parsed.fields.식별자 || parsed.fields.작업 || parsed.fields.내용 || '').trim();
+        const explicitToken = String(parsed.fields.토큰 || (normalized.approveShorthand && normalized.approveShorthand.token) || '').trim();
+        const useImplicitSelection = !explicitToken && !queryText;
+        if (useImplicitSelection) {
+            triggerInlineOpsWorker();
+        }
+        const hinted = useImplicitSelection
+            ? resolveApprovalTokenFromHint(requestedBy, telegramContext)
+            : { token: '', row: null, hint: null, found: false };
+        const selection = explicitToken
+            ? { token: explicitToken, row: null, candidates: [], matchedByRequester: true }
+            : (hinted && hinted.found
+                ? { token: hinted.token, row: hinted.row, candidates: hinted.row ? [hinted.row] : [], matchedByRequester: true }
+            : resolveApprovalTokenSelection({
+                query: queryText,
+                requestedBy,
+                telegramContext,
+            }));
+        const token = String(selection.token || '').trim();
         if (!token) {
+            const waitingHint = hinted && hinted.hint && !hinted.found
+                ? String(hinted.hint.requestId || '').trim()
+                : '';
             return {
                 route: 'ops',
                 templateValid: false,
                 success: false,
                 action,
                 errorCode: 'TOKEN_REQUIRED',
-                telegramReply: '승인 토큰이 필요합니다. 예: APPROVE <token> --force',
+                telegramReply: waitingHint
+                    ? `방금 요청(${waitingHint}) 승인 토큰을 준비 중입니다. 잠시 후 \`승인\`을 다시 보내주세요.`
+                    : '현재 승인 대기 중인 요청이 없습니다.',
             };
         }
+        const approveFlags = resolveApprovalFlagsForToken(token, providedApproveFlags);
 
         const queued = enqueueFileControlCommand({
             phase: 'execute',
@@ -1564,6 +2292,8 @@ function runOpsCommand(payloadText, options = {}) {
                 decision: 'approve',
             },
         });
+        clearLastApprovalHint(requestedBy, telegramContext);
+        triggerInlineOpsWorker();
         return {
             route: 'ops',
             templateValid: true,
@@ -1576,10 +2306,12 @@ function runOpsCommand(payloadText, options = {}) {
             approvalFlags: approveFlags,
             telegramContext,
             telegramReply: [
-                `파일 제어 EXECUTE 요청 접수: ${queued.requestId}`,
-                `- token: ${token}`,
+                '승인 반영 완료. 실행을 시작했습니다.',
+                selection.row && selection.row.request_id
+                    ? `- request: ${String(selection.row.request_id)}`
+                    : '',
                 `- flags: ${approveFlags.length > 0 ? approveFlags.map((flag) => `--${flag}`).join(' ') : '(none)'}`,
-                '- 호스트 runner가 토큰/요청자/플래그를 검증 후 실행합니다.',
+                `- execution: ${queued.requestId}`,
                 isApprovalGrantEnabled(policy)
                     ? '- 승인 성공 시 일정 시간 전체 권한 세션이 열립니다.'
                     : '',
@@ -1588,15 +2320,47 @@ function runOpsCommand(payloadText, options = {}) {
     }
 
     if (action === 'deny') {
-        const token = String(parsed.fields.토큰 || (normalized.denyShorthand && normalized.denyShorthand.token) || '').trim();
+        if (!isUnifiedApprovalEnabled()) {
+            return {
+                route: 'ops',
+                templateValid: true,
+                success: true,
+                action,
+                telegramReply: '승인 토큰 제도는 비활성화되어 있어 거부할 토큰이 없습니다.',
+            };
+        }
+        const queryText = String(parsed.fields.식별자 || parsed.fields.작업 || parsed.fields.내용 || '').trim();
+        const explicitToken = String(parsed.fields.토큰 || (normalized.denyShorthand && normalized.denyShorthand.token) || '').trim();
+        const useImplicitSelection = !explicitToken && !queryText;
+        if (useImplicitSelection) {
+            triggerInlineOpsWorker();
+        }
+        const hinted = useImplicitSelection
+            ? resolveApprovalTokenFromHint(requestedBy, telegramContext)
+            : { token: '', row: null, hint: null, found: false };
+        const selection = explicitToken
+            ? { token: explicitToken, row: null, candidates: [], matchedByRequester: true }
+            : (hinted && hinted.found
+                ? { token: hinted.token, row: hinted.row, candidates: hinted.row ? [hinted.row] : [], matchedByRequester: true }
+            : resolveApprovalTokenSelection({
+                query: queryText,
+                requestedBy,
+                telegramContext,
+            }));
+        const token = String(selection.token || '').trim();
         if (!token) {
+            const waitingHint = hinted && hinted.hint && !hinted.found
+                ? String(hinted.hint.requestId || '').trim()
+                : '';
             return {
                 route: 'ops',
                 templateValid: false,
                 success: false,
                 action,
                 errorCode: 'TOKEN_REQUIRED',
-                telegramReply: '거부 토큰이 필요합니다. 예: /deny <token>',
+                telegramReply: waitingHint
+                    ? `방금 요청(${waitingHint}) 승인 토큰을 준비 중입니다. 잠시 후 \`거부\`를 다시 보내주세요.`
+                    : '현재 거부할 승인 대기 요청이 없습니다.',
             };
         }
         const queued = enqueueFileControlCommand({
@@ -1609,6 +2373,8 @@ function runOpsCommand(payloadText, options = {}) {
                 decision: 'deny',
             },
         });
+        clearLastApprovalHint(requestedBy, telegramContext);
+        triggerInlineOpsWorker();
         return {
             route: 'ops',
             templateValid: true,
@@ -1621,10 +2387,12 @@ function runOpsCommand(payloadText, options = {}) {
             decision: 'deny',
             telegramContext,
             telegramReply: [
-                `승인 거부 요청 접수: ${queued.requestId}`,
-                `- token: ${token}`,
-                '- 호스트 runner가 토큰 상태를 확인하고 영구 거부 처리합니다.',
-            ].join('\n'),
+                '승인 거부 반영 완료.',
+                selection.row && selection.row.request_id
+                    ? `- request: ${String(selection.row.request_id)}`
+                    : '',
+                `- execution: ${queued.requestId}`,
+            ].filter(Boolean).join('\n'),
         };
     }
 
@@ -1735,13 +2503,30 @@ function parseReportModeCommand(text) {
     return { matched: true, valid: false, mode: modeRaw };
 }
 
+function parsePersonaInfoCommand(text) {
+    return { matched: false };
+}
+
+function buildPersonaStatusReply(context = {}) {
+    return '페르소나 기능은 제거되었습니다.';
+}
+
+function sanitizeUserFacingReply(text) {
+    if (telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function') {
+        return telegramFinalizer.sanitizeForUser(text);
+    }
+    const raw = String(text || '').trim();
+    return raw || '실패\n원인: 내부 실행 오류가 발생했어.\n다음 조치: 잠시 후 다시 시도해줘.';
+}
+
 function finalizeTelegramBoundary(base, metaInput = {}) {
     const prepared = applyDailyPersonaToOutput(base, metaInput);
     if (!prepared || typeof prepared !== 'object') return prepared;
     if (prepared.finalizerApplied) return prepared;
     if (typeof prepared.telegramReply !== 'string' || !String(prepared.telegramReply).trim()) return prepared;
 
-    const appended = appendExternalLinks(prepared.telegramReply);
+    const sanitizedReply = sanitizeUserFacingReply(prepared.telegramReply);
+    const appended = appendExternalLinks(sanitizedReply);
     const commandText = String(metaInput.commandText || '').trim();
     const telegramContext = metaInput.telegramContext
         || prepared.telegramContext
@@ -1924,8 +2709,9 @@ function buildNoPrefixGuide() {
         '- 식당: 라멘집 가고싶음 #도쿄',
         '- 링크: 프롬프트',
         '- 상태: [옵션]',
-        '- APPROVE <token> [--force] [--push]',
-        '- /deny <token>',
+        '- 운영: 액션: 페르소나; 대상: daily; 이름: analyst; 톤: 간결',
+        '- 운영: 액션: 승인',
+        '- 운영: 액션: 거부',
         '- 단어: 단어1',
         '- 작업: 요청: ...; 대상: ...; 완료기준: ...',
         '- 점검: 대상: ...; 체크항목: ...',
@@ -1934,26 +2720,35 @@ function buildNoPrefixGuide() {
     ].join('\n');
 }
 
+function inferPathListReply(inputText) {
+    const raw = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
+    if (!raw) return '';
+    const asksList = /(뭐\s*있|뭐있|무엇|내용|파일|폴더|목록|list|ls|show)/i.test(raw);
+    if (!asksList) return '';
+    const targetPath = extractPreferredProjectBasePath(raw);
+    if (!targetPath) return '';
+    const preview = readDirectoryListPreview(targetPath);
+    if (!preview) return '';
+    return [
+        `${targetPath} 안에는 지금 이게 있어:`,
+        '',
+        preview,
+    ].join('\n');
+}
+
 function isLegacyPersonaSwitchAttempt(text) {
     const raw = String(text || '').trim();
     if (!raw) return false;
-    const hasKeyword = /(페르소나|캐릭터|인격|persona|character|모드)/i.test(raw);
-    const hasSwitch = /(바꿔|바꾸|변경|전환|스위치|switch|목록|리스트|종류|라인업|현재|원본|이름|누구|뭐\s*있|뭐있|어떤)/i.test(raw);
-    const hasLegacyName = /(에일리|ailey|베일리|bailey|문학소녀|문소녀|미유|literary|t[_-]?ray|tray|레이)/i.test(raw);
-    return (hasKeyword && hasSwitch) || hasLegacyName;
+    return /(페르소나|캐릭터|인격|persona|character|모드)/i.test(raw);
 }
 
 function buildDailyCasualNoPrefixReply(inputText) {
     const normalized = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
     if (isLegacyPersonaSwitchAttempt(normalized)) {
-        return [
-            '페르소나는 봇별로 고정되어 있습니다. 전환할 수 없습니다.',
-            '- bot-dev / bot-dev-bak: 지크 예거',
-            '- bot-anki / bot-anki-bak: 한지 단장',
-            '- bot-research / bot-research-bak: 아르민',
-            '- bot-daily / bot-daily-bak / main DM: 엘빈 단장',
-        ].join('\n');
+        return '페르소나 기능은 제거되었습니다.';
     }
+    const pathReply = inferPathListReply(normalized);
+    if (pathReply) return pathReply;
     return buildNoPrefixGuide();
 }
 
@@ -2019,10 +2814,59 @@ function pickPreferredModelMeta(result, fallbackAlias = 'fast', fallbackReasonin
     };
 }
 
+function clampPreview(value, maxLen = 600) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.length <= maxLen) return text;
+    return `${text.slice(0, maxLen)}...(truncated)`;
+}
+
+function executeProjectBootstrapScript(bootstrap) {
+    if (!bootstrap || typeof bootstrap !== 'object') {
+        return { ok: false, error: 'bootstrap payload missing' };
+    }
+    const script = String(bootstrap.script || '').trim();
+    if (!script) {
+        return { ok: false, error: 'bootstrap script is empty' };
+    }
+    const timeoutMs = Number(process.env.PROJECT_BOOTSTRAP_TIMEOUT_MS || 180000);
+    const run = spawnSync('sh', ['-lc', script], {
+        encoding: 'utf8',
+        timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 180000,
+        maxBuffer: 1024 * 1024 * 2,
+    });
+    const stdout = opsLogger.redact(String(run.stdout || ''));
+    const stderr = opsLogger.redact(String(run.stderr || ''));
+    const ok = !run.error && run.status === 0;
+    return {
+        ok,
+        exitCode: Number.isFinite(run.status) ? run.status : null,
+        stdout: clampPreview(stdout),
+        stderr: clampPreview(stderr),
+        error: run.error ? String(run.error.message || run.error) : '',
+    };
+}
+
+function readDirectoryListPreview(targetPath, maxLen = 1600) {
+    const dir = String(targetPath || '').trim();
+    if (!dir) return '';
+    const escaped = dir.replace(/(["\\$`])/g, '\\$1');
+    const run = spawnSync('sh', ['-lc', `ls -la "${escaped}"`], {
+        encoding: 'utf8',
+        timeout: 60000,
+        maxBuffer: 1024 * 1024,
+    });
+    const text = opsLogger.redact(String(run.stdout || run.stderr || ''));
+    if (!text.trim()) return '';
+    return clampPreview(text, maxLen);
+}
+
 function buildProjectRoutePayload(parsed) {
     const bootstrap = parsed.ok ? buildProjectBootstrapPlan(parsed.fields || {}) : null;
+    let execution = null;
     const summaryLines = [];
     if (bootstrap) {
+        saveLastProjectBootstrap(parsed.fields || {}, bootstrap);
         summaryLines.push(`프로젝트 템플릿 확인 완료 (${bootstrap.templateLabel})`);
         summaryLines.push(`- 이름: ${bootstrap.projectName}`);
         summaryLines.push(`- 경로: ${bootstrap.targetPath}`);
@@ -2033,7 +2877,27 @@ function buildProjectRoutePayload(parsed) {
         if (Array.isArray(bootstrap.warnings) && bootstrap.warnings.length > 0) {
             summaryLines.push(`- 주의: ${bootstrap.warnings.join(' / ')}`);
         }
-        if (bootstrap.requiresApproval) {
+        if (bootstrap.initMode === 'execute' && !bootstrap.requiresApproval) {
+            execution = executeProjectBootstrapScript(bootstrap);
+            if (execution.ok) {
+                summaryLines.push('- 초기화 실행: 완료');
+                summaryLines.push(`- 실제 생성된 절대경로: ${bootstrap.targetPath}`);
+                const lsPreview = readDirectoryListPreview(bootstrap.targetPath);
+                if (lsPreview) {
+                    summaryLines.push(`- 생성 파일 목록(ls -la):\n${lsPreview}`);
+                }
+                if (execution.stdout) summaryLines.push(`- 실행 로그(stdout):\n${execution.stdout}`);
+                if (execution.stderr) summaryLines.push(`- 실행 로그(stderr):\n${execution.stderr}`);
+            } else {
+                summaryLines.push('- 초기화 실행: 실패');
+                summaryLines.push('- 실제 생성된 절대경로: 없음');
+                summaryLines.push('- 생성 파일 목록(ls -la): 없음');
+                if (execution.error) summaryLines.push(`- 오류: ${execution.error}`);
+                if (execution.stderr) summaryLines.push(`- stderr:\n${execution.stderr}`);
+                if (execution.stdout) summaryLines.push(`- stdout:\n${execution.stdout}`);
+
+            }
+        } else if (bootstrap.requiresApproval) {
             const reasons = Array.isArray(bootstrap.approvalReasons) && bootstrap.approvalReasons.length > 0
                 ? bootstrap.approvalReasons.join(',')
                 : 'policy';
@@ -2051,6 +2915,7 @@ function buildProjectRoutePayload(parsed) {
         templateValid: parsed.ok,
         ...parsed,
         ...(bootstrap ? { bootstrap } : {}),
+        ...(execution ? { execution } : {}),
         normalizedInstruction,
         telegramReply,
         ...(bootstrap && bootstrap.requiresApproval ? { needsApproval: true } : {}),
@@ -2108,6 +2973,25 @@ function parseStructuredCommand(route, payloadText) {
     };
 }
 
+function resolveWorkspaceRootHint() {
+    const candidates = [
+        String(process.env.OPENCLAW_RUNTIME_WORKSPACE_ROOT || '').trim(),
+        String(process.env.OPENCLAW_WORKSPACE || '').trim(),
+        '/Users/moltbot/Projects/Moltbot_Workspace',
+        path.resolve(__dirname, '..'),
+    ].filter(Boolean);
+    for (const candidate of candidates) {
+        const resolved = path.resolve(candidate);
+        try {
+            fs.accessSync(resolved, fs.constants.W_OK);
+            return resolved;
+        } catch (_) {
+            // continue
+        }
+    }
+    return path.resolve(__dirname, '..');
+}
+
 function normalizeIncomingCommandText(text) {
     let out = String(text || '')
         .replace(/\r\n/g, '\n')
@@ -2122,10 +3006,15 @@ function normalizeIncomingCommandText(text) {
     out = out.replace(/\s*\[Replying to [^\]]+\][\s\S]*$/i, '').trim();
 
     // Remove leading transport envelope, e.g. "[Telegram ...] 작업: ...".
-    const envelope = out.match(/^\s*\[(Telegram|WhatsApp|Discord|Slack|Signal|Line|Matrix|KakaoTalk|Kakao|iMessage|SMS)\b[^\]]*\]\s*(.*)$/i);
+    const envelope = out.match(/^\s*\[(Telegram|WhatsApp|Discord|Slack|Signal|Line|Matrix|KakaoTalk|Kakao|iMessage|SMS)\b[^\]]*\]\s*([\s\S]*)$/i);
     if (envelope) {
         out = String(envelope[2] || '').trim();
     }
+
+    const workspaceRoot = resolveWorkspaceRootHint();
+    out = out
+        .replace(/\~\/\.openclaw\/workspace/gi, workspaceRoot)
+        .replace(/\/home\/node\/\.openclaw\/workspace/gi, workspaceRoot);
 
     return out;
 }
@@ -2288,6 +3177,41 @@ function inferWorkoutIntentPayload(text) {
         .trim() || raw;
 }
 
+function inferBrowserIntentPayload(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+
+    const hasBrowserKeyword = /(브라우저|browser|웹자동화|web automation|openclaw browser|오픈클로 브라우저)/i.test(raw);
+    const hasLookupIntent = /(찾아|검색|search|열어|접속|이동|보여|조회|확인|뭐\s*있|뭐있|추천|최신|인기|베스트|포텐)/i.test(raw);
+    const hasLibraryIntent = /(라이브러리|library|스킬|skill|문서|docs?|도큐먼트)/i.test(raw);
+    const hasCommunityIntent = /(펨코|fmkorea|포텐|디시|dcinside|갤러리|레딧|reddit|커뮤니티)/i.test(raw);
+    if (!hasBrowserKeyword && !(hasLibraryIntent && hasLookupIntent) && !(hasCommunityIntent && hasLookupIntent)) return null;
+
+    const urlMatch = raw.match(/https?:\/\/[^\s<>'"`]+/i);
+    const keywordMatch = raw.match(/(?:키워드|keyword)\s*[:：]\s*([^\n;]+)/i);
+    const keyword = String(keywordMatch && keywordMatch[1] ? keywordMatch[1] : '').trim();
+    const wantsDocs = /(공식문서|문서|docs?)/i.test(raw);
+
+    let targetUrl = String(urlMatch && urlMatch[0] ? urlMatch[0] : '').trim();
+    if (!targetUrl) {
+        if (/(펨코|fmkorea|포텐)/i.test(raw)) {
+            targetUrl = 'https://www.fmkorea.com/best';
+        } else if (/(디시|dcinside|갤러리)/i.test(raw) && /(특이점이\s*온다|thesingularity)/i.test(raw)) {
+            targetUrl = 'https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity';
+        } else if (/(디시|dcinside|갤러리)/i.test(raw)) {
+            targetUrl = 'https://gall.dcinside.com/';
+        } else if (wantsDocs) {
+            targetUrl = 'https://docs.openclaw.ai/';
+        } else if (keyword) {
+            targetUrl = `https://clawhub.com/search?q=${encodeURIComponent(keyword)}`;
+        } else {
+            targetUrl = 'https://clawhub.com/';
+        }
+    }
+
+    return `액션: 브라우저; 작업: open; URL: ${targetUrl}`;
+}
+
 function inferStatusIntentPayload(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
@@ -2338,10 +3262,94 @@ function inferReportIntentPayload(text) {
     return raw;
 }
 
+function extractPreferredProjectBasePath(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return '';
+
+    const workspaceRoot = resolveWorkspaceRootHint();
+    const candidates = [];
+    const seen = new Set();
+    const pathMatches = raw.match(/(?:~\/|\/)[A-Za-z0-9._\-/]+/g) || [];
+    for (const match of pathMatches) {
+        let value = String(match || '').trim();
+        if (!value) continue;
+        value = value
+            .replace(/^~\/\.openclaw\/workspace/i, workspaceRoot)
+            .replace(/^\/home\/node\/\.openclaw\/workspace/i, workspaceRoot)
+            .replace(/[),.;:]+$/g, '')
+            .trim();
+        if (!value || !path.isAbsolute(value)) continue;
+        const resolved = path.resolve(value);
+        if (seen.has(resolved)) continue;
+        seen.add(resolved);
+        candidates.push(resolved);
+    }
+
+    if (candidates.length === 0) return '';
+
+    const preferred = candidates.find((value) => /\/users\/moltbot\/projects(?:\/|$)/i.test(value));
+    if (preferred) return preferred;
+
+    const projectsLike = candidates.find((value) => /\/projects(?:\/|$)/i.test(value));
+    if (projectsLike) return projectsLike;
+
+    return candidates[0];
+}
+
+function inferProjectIntentPayload(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+
+    const explicitBasePath = extractPreferredProjectBasePath(raw);
+
+    const installHereOnly = /^(여기에?\s*)?(설치해|설치|만들어|만들어봐|생성해|세팅해|초기화해)(줘)?$/i.test(raw)
+        || /(여기에|여기|현재\s*경로|지금\s*경로).*(설치|생성|만들|초기화|세팅|setup|bootstrap)/i.test(raw);
+    if (installHereOnly) {
+        const last = loadLastProjectBootstrap();
+        if (last && last.fields) {
+            const fields = {
+                ...last.fields,
+                경로: explicitBasePath || resolveDefaultProjectBasePath(),
+            };
+            return toProjectTemplatePayload(fields, { forceExecute: true });
+        }
+        return toProjectTemplatePayload({
+            프로젝트명: 'rust-tap-game',
+            목표: '모바일에서 실행 가능한 Rust 웹게임 템플릿 생성',
+            스택: 'rust wasm web game',
+            경로: explicitBasePath || resolveDefaultProjectBasePath(),
+            완료기준: '프로젝트 폴더와 기본 Rust/WASM 파일 생성',
+            초기화: 'execute',
+        }, { forceExecute: true });
+    }
+
+    const hasProjectNoun = /(프로젝트|앱|app|웹앱|webapp|web app|게임|템플릿|boilerplate|scaffold)/i.test(raw);
+    const hasBuildVerb = /(만들|생성|초기화|세팅|setup|bootstrap|설치|깔아|구축)/i.test(raw);
+    if (!hasProjectNoun || !hasBuildVerb) return null;
+
+    const rawNameMatch = raw.match(/(?:프로젝트명|이름|projectname|name)\s*[:：]?\s*([a-zA-Z0-9._-]{2,64})/i);
+    const explicitName = rawNameMatch ? String(rawNameMatch[1] || '').trim() : '';
+    const rustHint = /(rust|cargo|wasm|webassembly)/i.test(raw);
+    const gameHint = /(게임|game|tap|터치)/i.test(raw);
+    const defaultName = rustHint
+        ? (gameHint ? 'rust-mobile-tap-game' : 'rust-wasm-app')
+        : 'new-project';
+
+    const fields = {
+        프로젝트명: explicitName || defaultName,
+        목표: raw.replace(/\s+/g, ' ').trim().slice(0, 220),
+        스택: rustHint ? 'rust wasm web game' : 'web app',
+        경로: explicitBasePath || resolveDefaultProjectBasePath(),
+        완료기준: '프로젝트 폴더와 기본 실행 파일 생성',
+        초기화: 'execute',
+    };
+    return toProjectTemplatePayload(fields, { forceExecute: true });
+}
+
 function inferNaturalLanguageRoute(text, options = {}) {
     const env = options.env && typeof options.env === 'object' ? options.env : process.env;
     if (!NATURAL_LANGUAGE_ROUTING.enabled) return null;
-    if (NATURAL_LANGUAGE_ROUTING.hubOnly && !isHubRuntime(env)) return null;
+    if (NATURAL_LANGUAGE_ROUTING.hubOnly && !isHubRuntime(env) && !isResearchRuntime(env)) return null;
 
     const normalized = normalizeIncomingCommandText(text) || String(text || '').trim();
     if (!normalized) return null;
@@ -2376,6 +3384,12 @@ function inferNaturalLanguageRoute(text, options = {}) {
             return { route: 'workout', payload, inferred: true, inferredBy: 'natural-language:workout' };
         }
     }
+    if (NATURAL_LANGUAGE_ROUTING.inferBrowser) {
+        const payload = inferBrowserIntentPayload(normalized);
+        if (payload != null) {
+            return { route: 'ops', payload, inferred: true, inferredBy: 'natural-language:browser' };
+        }
+    }
     if (NATURAL_LANGUAGE_ROUTING.inferStatus) {
         const payload = inferStatusIntentPayload(normalized);
         if (payload != null) {
@@ -2386,6 +3400,12 @@ function inferNaturalLanguageRoute(text, options = {}) {
         const payload = inferLinkIntentPayload(normalized);
         if (payload != null) {
             return { route: 'link', payload, inferred: true, inferredBy: 'natural-language:link' };
+        }
+    }
+    if (NATURAL_LANGUAGE_ROUTING.inferProject) {
+        const payload = inferProjectIntentPayload(normalized);
+        if (payload != null) {
+            return { route: 'project', payload, inferred: true, inferredBy: 'natural-language:project' };
         }
     }
     if (NATURAL_LANGUAGE_ROUTING.inferReport) {
@@ -2462,6 +3482,16 @@ function routeByPrefix(text) {
             route: 'ops',
             payload: deny.normalizedPayload,
         };
+    }
+    const naturalApproval = parseNaturalApprovalShorthand(input);
+    if (naturalApproval) {
+        const hasPending = readPendingApprovalsState().length > 0;
+        if (hasPending || hasAnyApprovalHint()) {
+            return {
+                route: 'ops',
+                payload: naturalApproval.normalizedPayload,
+            };
+        }
     }
     const inferred = inferNaturalLanguageRoute(input, { env: process.env });
     if (inferred) return inferred;
@@ -2823,8 +3853,13 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
             await syncFn();
         } catch (e) {
             console.log('Anki batch sync failed (non-critical):', e.message);
-            syncWarning = `sync_failed: ${e.message}`;
-            warningSet.add(syncWarning);
+            const nextSyncWarning = `sync_failed: ${e.message}`;
+            if (shouldAnnounceAnkiSyncWarning(nextSyncWarning)) {
+                syncWarning = nextSyncWarning;
+                warningSet.add(syncWarning);
+            } else {
+                warningSet.add('sync_warning_suppressed_in_cooldown');
+            }
         }
     }
     const failedTotal = failedParseCount + failedQualityCount + failedAddCount;
@@ -3287,6 +4322,26 @@ async function main() {
                 const normalizedAutoMessage = normalizeIncomingCommandText(fullText) || String(fullText || '').trim();
                 const autoTelegramContext = parseTransportEnvelopeContext(fullText);
                 const autoRequestedBy = opsFileControl.normalizeRequester(autoTelegramContext, 'bridge:auto');
+                const personaInfoCommand = parsePersonaInfoCommand(normalizedAutoMessage);
+                if (personaInfoCommand.matched) {
+                    console.log(JSON.stringify(withApiMeta({
+                        route: 'none',
+                        success: true,
+                        telegramContext: autoTelegramContext,
+                        requestedBy: autoRequestedBy,
+                        telegramReply: buildPersonaStatusReply({
+                            telegramContext: autoTelegramContext,
+                            requestedBy: autoRequestedBy,
+                        }),
+                    }, {
+                        route: 'none',
+                        routeHint: 'persona-status',
+                        commandText: fullText,
+                        telegramContext: autoTelegramContext,
+                        requestedBy: autoRequestedBy,
+                    })));
+                    break;
+                }
                 const reportModeCommand = parseReportModeCommand(normalizedAutoMessage);
                 if (reportModeCommand.matched) {
                     if (!reportModeCommand.valid) {
@@ -3701,9 +4756,10 @@ async function main() {
                     break;
                 }
                 if (routed.route === 'none') {
-                    const noPrefixReply = isHubRuntime(process.env)
+                    const pathReply = inferPathListReply(routed.payload || fullText);
+                    const noPrefixReply = pathReply || (isHubRuntime(process.env)
                         ? buildDailyCasualNoPrefixReply(routed.payload || fullText)
-                        : buildNoPrefixGuide();
+                        : buildNoPrefixGuide());
                     console.log(JSON.stringify(withApiMeta({
                         route: 'none',
                         skipped: fullText,

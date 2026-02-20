@@ -3,6 +3,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { ensureTestOpsIsolation } = require('./lib/test_ops_isolation');
+
+ensureTestOpsIsolation('ops-file-git-gating');
 
 const opsApprovalStore = require('./ops_approval_store');
 const opsFileControl = require('./ops_file_control');

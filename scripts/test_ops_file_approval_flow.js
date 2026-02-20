@@ -1,6 +1,9 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { ensureTestOpsIsolation } = require('./lib/test_ops_isolation');
+
+ensureTestOpsIsolation('ops-file-approval-flow');
 
 const opsApprovalStore = require('./ops_approval_store');
 
@@ -37,6 +40,8 @@ function expectCode(fn, code) {
 }
 
 function main() {
+    const previousMode = process.env.OPS_UNIFIED_APPROVAL_IDENTITY_MODE;
+    process.env.OPS_UNIFIED_APPROVAL_IDENTITY_MODE = 'strict_user_bot';
     opsApprovalStore.ensureLayout();
     cleanup();
 
@@ -147,6 +152,11 @@ function main() {
     assert.strictEqual(expiredGrant.error_code, 'GRANT_EXPIRED');
 
     cleanup();
+    if (previousMode == null) {
+        delete process.env.OPS_UNIFIED_APPROVAL_IDENTITY_MODE;
+    } else {
+        process.env.OPS_UNIFIED_APPROVAL_IDENTITY_MODE = previousMode;
+    }
     console.log('test_ops_file_approval_flow: ok');
 }
 
