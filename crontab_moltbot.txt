@@ -34,6 +34,9 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # Daily GitHub Status Report
 50 23 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-github-status" -- "node scripts/github_status_report.js" >> logs/cron.log 2>&1
 
+# Daily no-prefix routing monitor (route=none / potential misclassification)
+45 23 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "no-prefix-routing-report" -- "npm run -s report:no-prefix-routing" >> logs/cron.log 2>&1
+
 # Blog Draft from Reports (KO -> JA -> EN)
 20 0 * * * cd /Users/moltbot/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-blog-publish" -- "node scripts/blog_publish_from_reports.js" >> logs/cron.log 2>&1
 
