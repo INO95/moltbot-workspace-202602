@@ -423,6 +423,14 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
       return { route: 'routine', payload, inferred: true, inferredBy: 'natural-language:routine' };
     }
   }
+  // Prefer explicit project bootstrap/install intent before workout to avoid
+  // false-positives on path-heavy installation sentences.
+  if (routing.inferProject) {
+    const payload = inferProject(normalized);
+    if (payload != null) {
+      return { route: 'project', payload, inferred: true, inferredBy: 'natural-language:project' };
+    }
+  }
   if (routing.inferWorkout) {
     const payload = inferWorkout(normalized);
     if (payload != null) {
@@ -457,12 +465,6 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
     const payload = inferLink(normalized);
     if (payload != null) {
       return { route: 'link', payload, inferred: true, inferredBy: 'natural-language:link' };
-    }
-  }
-  if (routing.inferProject) {
-    const payload = inferProject(normalized);
-    if (payload != null) {
-      return { route: 'project', payload, inferred: true, inferredBy: 'natural-language:project' };
     }
   }
   if (routing.inferReport) {
