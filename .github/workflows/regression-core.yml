@@ -35,6 +35,9 @@ jobs:
       - name: OpenClaw profile template contract guard
         run: npm run -s check:openclaw-profile-templates
 
+      - name: Secrets Scan workflow guard
+        run: npm run -s check:secrets-scan-workflow
+
       - name: Release regression suite
         run: npm run -s test:v1-release
 
