@@ -97,6 +97,7 @@
     "check:runtime-artifact-tracking": "node scripts/check_runtime_artifact_tracking.js",
     "fix:runtime-artifact-tracking": "node scripts/check_runtime_artifact_tracking.js --fix",
     "check:container-isolation-refs": "node scripts/check_container_isolation_refs.js",
+    "check:secrets-scan-workflow": "node scripts/check_secrets_scan_workflow.js",
     "openclaw:secrets:inject": "node scripts/openclaw_config_secrets.js inject all_live",
     "openclaw:secrets:redact": "node scripts/openclaw_config_secrets.js redact all_live",
     "openclaw:secrets:inject:backup": "node scripts/openclaw_config_secrets.js inject all_backup",
