@@ -1,0 +1,42 @@
+name: Regression Core
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex-clean-main
+
+permissions:
+  contents: read
+
+jobs:
+  core-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Container isolation reference guard
+        run: npm run -s check:container-isolation-refs
+
+      - name: Runtime artifact tracking guard
+        run: npm run -s check:runtime-artifact-tracking
+
+      - name: OpenClaw profile template contract guard
+        run: npm run -s check:openclaw-profile-templates
+
+      - name: Release regression suite
+        run: npm run -s test:v1-release
+
+      - name: Ops regression suite
+        run: npm run -s test:ops

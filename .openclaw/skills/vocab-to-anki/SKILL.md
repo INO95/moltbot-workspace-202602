@@ -22,7 +22,7 @@ This skill generates highly effective vocabulary cards for TOEIC preparation. It
      - **Meaning**: Korean translation (bold/emphasized).
      - **Example**: An English example sentence relevant to TOEIC business context.
      - **Translation**: Korean translation of the example sentence.
-3. **Execute**: Call the bridge script. Use the `TOEIC_AI` deck.
+3. **Execute**: Call the centralized bridge `word` route (quality engine + fallback included).
 
 **Format (Back Content):**
 Use `\n` for line breaks (bridge script will convert to `<br>`).
@@ -30,18 +30,16 @@ Format: `**[뜻]**\n\nExample: *[예문]*\n([예문 해석])`
 
 **Command:**
 ```bash
-node /home/node/.openclaw/workspace/scripts/bridge.js anki add "TOEIC_AI" "<Front>" "<Back>" "toeic,ai"
+node /home/node/.openclaw/workspace/scripts/bridge.js word "<word(s)>"
 ```
 
 **Examples:**
 
 1. **User input:** `/anki epiphany`
-   - **Front**: `epiphany`
-   - **Back**: `**직관적인 통찰, 깨달음**\n\nExample: *It was a moment of sudden epiphany for the marketing team.* \n(그것은 마케팅 팀에게 갑작스러운 통찰의 순간이었다.)`
-   - **Command**: `node /home/node/.openclaw/workspace/scripts/bridge.js anki add "TOEIC_AI" "epiphany" "**직관적인 통찰, 깨달음**\n\nExample: *It was a moment of sudden epiphany for the marketing team.* \n(그것은 마케팅 팀에게 갑작스러운 통찰의 순간이었다.)" "toeic,ai"`
+   - **Command**: `node /home/node/.openclaw/workspace/scripts/bridge.js word "epiphany"`
 
-2. **User input:** `/anki comply with / adhere to` (Multiple items - Handle one by one or ask user. Here, assume separate commands if possible, or distinct cards.)
-   - If User says "comply with", treat as one phrase.
+2. **User input:** `/anki comply with / adhere to`
+   - **Command**: `node /home/node/.openclaw/workspace/scripts/bridge.js word "comply with / adhere to"`
 
 **Response:**
-- "✅ Added to **TOEIC_AI**: **<Front>**\n\n<Back content simplified>"
+- "✅ Added to **TOEIC_AI** via quality pipeline"

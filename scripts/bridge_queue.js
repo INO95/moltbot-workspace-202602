@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_DIR = path.join(__dirname, '../data/bridge');
+const BRIDGE_DIR = process.env.BRIDGE_DIR
+    ? path.resolve(String(process.env.BRIDGE_DIR))
+    : path.join(__dirname, '../data/bridge');
 const INBOX_PATH = path.join(BRIDGE_DIR, 'inbox.json');
 const INBOX_LOG_PATH = path.join(BRIDGE_DIR, 'inbox.jsonl');
 

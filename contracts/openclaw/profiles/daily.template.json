@@ -1,0 +1,19 @@
+{
+  "profile": "daily",
+  "update": { "channel": "dev" },
+  "agents": {
+    "defaults": {
+      "workspace": "/Users/moltbot/Projects/Moltbot_Workspace",
+      "sandbox": { "mode": "off" }
+    }
+  },
+  "commands": { "restart": true },
+  "tools": {
+    "exec": {
+      "host": "node",
+      "security": "allowlist",
+      "ask": "on-miss"
+    }
+  },
+  "gateway": { "mode": "local" }
+}

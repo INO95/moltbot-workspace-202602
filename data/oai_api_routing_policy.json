@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "lanes": {
+    "oauth-codex": {
+      "authMode": "oauth",
+      "capabilities": [
+        "complex_reasoning",
+        "code_review",
+        "translation"
+      ]
+    },
+    "api-key-openai": {
+      "authMode": "api-key",
+      "capabilities": [
+        "responses_api",
+        "realtime_api",
+        "batch_jobs",
+        "webhooks"
+      ]
+    },
+    "local-only": {
+      "authMode": "none",
+      "capabilities": [
+        "local_scripts",
+        "system_checks"
+      ]
+    }
+  },
+  "routeDefaults": {
+    "work": "oauth-codex",
+    "inspect": "oauth-codex",
+    "deploy": "oauth-codex",
+    "prompt": "oauth-codex",
+    "report": "oauth-codex",
+    "word": "local-only",
+    "news": "local-only",
+    "status": "local-only",
+    "link": "local-only",
+    "ops": "local-only",
+    "anki": "local-only",
+    "none": "local-only"
+  },
+  "featureOverrides": [
+    {
+      "id": "api-key-required-keywords",
+      "enabled": false,
+      "targetLane": "api-key-openai",
+      "routes": [
+        "work",
+        "inspect",
+        "deploy",
+        "prompt"
+      ],
+      "keywords": [
+        "realtime",
+        "webhook",
+        "batch",
+        "client_secret",
+        "client secret",
+        "responses api",
+        "response api",
+        "api key"
+      ],
+      "match": "any"
+    },
+    {
+      "id": "simple-report-local",
+      "targetLane": "local-only",
+      "routes": [
+        "report"
+      ],
+      "keywords": [
+        "daily",
+        "일일",
+        "요약",
+        "summary",
+        "집계",
+        "통계",
+        "status"
+      ],
+      "match": "any",
+      "allowEmptyCommand": true
+    }
+  ],
+  "guards": {
+    "enableApiKeyLane": false,
+    "requirePaidApproval": true,
+    "blockWhenRateLimitSafeMode": true
+  }
+}

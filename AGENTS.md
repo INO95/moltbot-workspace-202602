@@ -119,11 +119,36 @@ Skills provide your tools. When you need one, check its `SKILL.md`. Keep local n
 
 ### Telegram Command Router (Critical)
 
-- If a user message starts with any command prefix (`메모/기록/학습/단어/실행/작업/검토/점검/출시/배포/요약/리포트/프롬프트/질문/운영/상태/링크`) including spaced variants like `링크 :`, always process it through:
-  - `node scripts/bridge.js auto "<original message>"`
-- Do not answer command-prefixed messages from model memory alone.
+- Prefix/운영 명령(`메모/기록/학습/단어/실행/작업/검토/점검/출시/배포/프로젝트/요약/리포트/프롬프트/질문/운영/상태/링크`)은 `sh scripts/bridge_cmd.sh auto "<original message>"`를 우선 시도한다.
+- 일반 대화/페르소나 문의는 bridge 호출 없이 로컬 규칙으로 처리할 수 있다.
+- For exec tool calls, set the working directory to the active runtime workspace root:
+  - Sandbox runtime default: `/workspace`
+  - Gateway runtime fallback: `/home/node/.openclaw/workspace`
+- If channel metadata wraps the text (example: `[Telegram ...] 작업: ... [message_id: ...]`), strip wrapper metadata first, then run the same bridge command with the cleaned text when bridge routing is needed.
+- If bridge output includes `telegramReply`, return that text verbatim as the user-facing response.
+- If bridge execution fails with runtime constraints, use sandbox telemetry mirrors instead of stopping:
+  - `ops/state/leader_snapshot_latest.json`
+  - `ops/state/state.json`
+  - `ops/state/issues.json`
+  - `logs/bot-*/latest.json`
+  - `logs/bot-*/heartbeat.json`
+  - `logs/nightly_autopilot_latest.json`
+  - `logs/cron_guard_latest.json`
+  - `logs/notion_sync_dashboard_latest.json`
+  - `logs/model_cost_latency_dashboard_latest.json`
+- Never expose internal execution traces to users:
+  - do not send `Exec: ...`, `sh scripts/...`, raw JSON error payloads, host/sandbox mismatch details.
+  - on failure, send a short user-safe fallback only.
+- Persona canonical set (do not invent temporary personas):
+  - 에일리 (`ailey`, `ab`)
+  - 베일리 (`bailey`, `b`)
+  - 문학소녀 (`literary_girl`, `문소녀`, `미유`)
+  - T_Ray (`t_ray`, `t-ray`, `tray`, `ray`, `레이`, `너의친구`)
+- Persona query handling (tool-free):
+  - If user asks persona lineup/list (`다른 페르소나`, `페르소나 뭐 있어`, `캐릭터 뭐 있어`), do not call tools; reply with the exact canonical 4-persona list above.
+  - If user requests persona switch with one of canonical names/aliases, do not invent new names; acknowledge switch only to that canonical persona.
 - For `링크:` requests, return only externally reachable URLs. Never return guessed/local-only URLs.
-- If bridge output includes `telegramReply`, prioritize that text verbatim as the user-facing response.
+- Do not use `sessions_list` to infer "other bot" runtime health; it only reports chat sessions, not Docker bot/container status.
 
 ### External Link Rule (Critical)
 

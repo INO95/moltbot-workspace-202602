@@ -32,9 +32,18 @@
             "toeic_ai"
         ]
     },
+    "ankiQualityPolicy": {
+        "enableHybridFallback": true,
+        "qualityThreshold": 0.82,
+        "dedupeMode": "skip",
+        "tipStyle": "part-focused",
+        "llmFallbackMode": "always"
+    },
     "commandPrefixes": {
         "word": "단어:",
         "learn": "학습:",
+        "memo": "메모:",
+        "record": "기록:",
         "news": "소식:",
         "report": "리포트:",
         "summary": "요약:",
@@ -44,15 +53,363 @@
         "check": "검토:",
         "deploy": "배포:",
         "ship": "출시:",
+        "project": "프로젝트:",
         "prompt": "프롬프트:",
         "ask": "질문:",
         "link": "링크:",
         "status": "상태:",
-        "ops": "운영:"
+        "ops": "운영:",
+        "finance": "가계:",
+        "ledger": "가계부:",
+        "todo": "투두:",
+        "task": "할일:",
+        "routine": "루틴:",
+        "workout": "운동:",
+        "media": "콘텐츠:",
+        "place": "식당:",
+        "restaurant": "맛집:"
+    },
+    "commandAllowlist": {
+        "enabled": true,
+        "directCommands": [
+            "auto",
+            "work",
+            "inspect",
+            "deploy",
+            "project",
+            "ops",
+            "word",
+            "news",
+            "prompt",
+            "finance",
+            "todo",
+            "routine",
+            "workout",
+            "media",
+            "place"
+        ],
+        "autoRoutes": [
+            "word",
+            "memo",
+            "news",
+            "report",
+            "work",
+            "inspect",
+            "deploy",
+            "project",
+            "prompt",
+            "link",
+            "status",
+            "ops",
+            "finance",
+            "todo",
+            "routine",
+            "workout",
+            "media",
+            "place"
+        ]
+    },
+    "hubDelegation": {
+        "enabled": true,
+        "fallbackPolicy": "local",
+        "routeToProfile": {
+            "work": "dev",
+            "inspect": "dev",
+            "deploy": "dev",
+            "project": "dev",
+            "prompt": "dev",
+            "word": "anki",
+            "news": "research",
+            "report": "research",
+            "ops": "daily",
+            "status": "daily",
+            "link": "daily",
+            "memo": "daily",
+            "finance": "daily",
+            "todo": "daily",
+            "routine": "daily",
+            "workout": "daily",
+            "media": "daily",
+            "place": "daily"
+        }
+    },
+    "naturalLanguageRouting": {
+        "enabled": true,
+        "hubOnly": true,
+        "inferMemo": true,
+        "inferFinance": true,
+        "inferTodo": true,
+        "inferRoutine": true,
+        "inferWorkout": true,
+        "inferStatus": true,
+        "inferLink": true,
+        "inferReport": true
+    },
+    "dailyPersona": {
+        "enabled": true,
+        "defaultProfileId": "ailey",
+        "statePath": "data/runtime/daily_persona_state.json",
+        "profiles": [
+            {
+                "id": "ailey",
+                "name": "에일리",
+                "tag": "에일리",
+                "aliases": [
+                    "에일리",
+                    "ailey",
+                    "ab"
+                ],
+                "sourcePath": "/Users/moltbot/Downloads/Ailey & Bailey X_251023(Stable)_신.txt"
+            },
+            {
+                "id": "bailey",
+                "name": "베일리",
+                "tag": "베일리",
+                "aliases": [
+                    "베일리",
+                    "bailey",
+                    "b"
+                ],
+                "sourcePath": "/Users/moltbot/Downloads/Ailey & Bailey X_251023(Stable)_신.txt"
+            },
+            {
+                "id": "literary_girl",
+                "name": "문학소녀",
+                "tag": "문학소녀",
+                "aliases": [
+                    "문학소녀",
+                    "문소녀",
+                    "미유",
+                    "miyu"
+                ],
+                "sourcePath": "/Users/moltbot/Downloads/[GPT-Add-on]fewweekslater_260216/에드온모음/Persona/[NEW] 문학소녀.txt"
+            },
+            {
+                "id": "t_ray",
+                "name": "T_Ray",
+                "tag": "T_Ray",
+                "aliases": [
+                    "t_ray",
+                    "t-ray",
+                    "tray",
+                    "ray",
+                    "레이",
+                    "너의친구"
+                ],
+                "sourcePath": "/Users/moltbot/Downloads/[GPT-Add-on]fewweekslater_260216/에드온모음/Persona/너의친구T_Ray.txt"
+            }
+        ]
+    },
+    "telegramFinalizer": {
+        "enabled": true,
+        "reportModeDefault": "ko",
+        "promptPackPath": "data/policy/finalizer_prompts.min.yaml",
+        "personaMapPath": "data/policy/bot_persona_map.json",
+        "prefsPath": "data/state/user_prefs.json",
+        "models": [
+            "gpt-5.3-high",
+            "gpt-5.2-high"
+        ],
+        "fallbackModelAlias": "gpt"
+    },
+    "telegramGuard": {
+        "enabled": true,
+        "requireContext": true,
+        "allowedUserIds": [
+            "7704103236"
+        ],
+        "allowedGroupIds": []
+    },
+    "opsUnifiedApprovals": {
+        "enabled": true,
+        "pendingStatePath": "data/state/pending_approvals.json",
+        "auditLogDir": "logs/approvals",
+        "ttlPolicy": {
+            "defaultTtlSeconds": 600,
+            "minTtlSeconds": 120,
+            "maxTtlSeconds": 1800
+        },
+        "allowlistPath": "data/policy/exec_allowlist.json",
+        "denylistMode": "approval_required"
+    },
+    "opsFileControlPolicy": {
+        "enabled": true,
+        "allowedRoots": [
+            "~",
+            "/Volumes",
+            "/"
+        ],
+        "mediumRoots": [
+            "~/Downloads",
+            "~/Desktop"
+        ],
+        "highRoots": [
+            "~/Documents",
+            "~/Library/Mobile Documents/com~apple~CloudDocs",
+            "/"
+        ],
+        "externalRoot": "/Volumes",
+        "gitAllowedRoots": [
+            "~/Projects",
+            "/"
+        ],
+        "trashRoot": "~/.assistant_trash",
+        "hashMaxBytes": 33554432,
+        "minFreeBytes": 1073741824,
+        "ttlPolicy": {
+            "defaultTtlSeconds": 180,
+            "minTtlSeconds": 120,
+            "maxTtlSeconds": 300
+        },
+        "approvalGrantPolicy": {
+            "enabled": true,
+            "grant_on_approval": true,
+            "scope": "all",
+            "defaultTtlSeconds": 1800,
+            "minTtlSeconds": 300,
+            "maxTtlSeconds": 7200
+        },
+        "telegramGuard": {
+            "enabled": true,
+            "requireContext": true,
+            "allowedUserIds": [
+                "7704103236"
+            ],
+            "allowedGroupIds": []
+        },
+        "actionRiskPolicy": {
+            "file": {
+                "default": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "move": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "archive": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "restore": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "git_mv": {
+                    "risk_tier": "GIT_AWARE",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "git_add": {
+                    "risk_tier": "GIT_AWARE",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "git_commit": {
+                    "risk_tier": "GIT_AWARE",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "git_push": {
+                    "risk_tier": "GIT_AWARE",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force",
+                        "push"
+                    ]
+                },
+                "trash": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "rename": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                }
+            },
+            "capability": {
+                "mail:send": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "photo:cleanup": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "schedule:delete": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "browser:checkout": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "browser:post": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                },
+                "browser:send": {
+                    "risk_tier": "HIGH",
+                    "requires_approval": true,
+                    "required_flags": [
+                        "force"
+                    ]
+                }
+            }
+        }
     },
     "budgetPolicy": {
         "monthlyApiBudgetYen": 0,
         "paidApiRequiresApproval": true
+    },
+    "governance": {
+        "requireApprovalForAllNotionWrites": true,
+        "allowDbMetaMutation": false,
+        "conversationSyncWindowTimes": [
+            "09:00",
+            "21:00"
+        ],
+        "timezone": "Asia/Tokyo",
+        "notionConversationDatabaseId": "307ccdc5-2b91-8169-8566-ea61aacbb0ce"
     },
     "sheets": {
         "checklist": "체크리스트_V2"

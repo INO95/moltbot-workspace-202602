@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "defaultDecision": "approval_required",
+  "ttlSeconds": 600,
+  "allow": [
+    {
+      "id": "read_ls",
+      "pattern": "^\\s*ls(?:\\s|$)"
+    },
+    {
+      "id": "read_pwd",
+      "pattern": "^\\s*pwd(?:\\s|$)"
+    },
+    {
+      "id": "read_cat",
+      "pattern": "^\\s*cat(?:\\s|$)"
+    },
+    {
+      "id": "read_rg",
+      "pattern": "^\\s*rg(?:\\s|$)"
+    },
+    {
+      "id": "read_find",
+      "pattern": "^\\s*find(?:\\s|$)"
+    },
+    {
+      "id": "read_head",
+      "pattern": "^\\s*head(?:\\s|$)"
+    },
+    {
+      "id": "read_tail",
+      "pattern": "^\\s*tail(?:\\s|$)"
+    },
+    {
+      "id": "read_jq",
+      "pattern": "^\\s*jq(?:\\s|$)"
+    },
+    {
+      "id": "git_status",
+      "pattern": "^\\s*git\\s+status(?:\\s|$)"
+    },
+    {
+      "id": "git_diff",
+      "pattern": "^\\s*git\\s+diff(?:\\s|$)"
+    },
+    {
+      "id": "git_log",
+      "pattern": "^\\s*git\\s+log(?:\\s|$)"
+    },
+    {
+      "id": "git_show",
+      "pattern": "^\\s*git\\s+show(?:\\s|$)"
+    },
+    {
+      "id": "git_fetch",
+      "pattern": "^\\s*git\\s+fetch(?:\\s|$)"
+    },
+    {
+      "id": "git_pull",
+      "pattern": "^\\s*git\\s+pull(?:\\s|$)"
+    },
+    {
+      "id": "node_version",
+      "pattern": "^\\s*node\\s+-v(?:\\s|$)"
+    },
+    {
+      "id": "npm_ci",
+      "pattern": "^\\s*npm\\s+ci(?:\\s|$)"
+    },
+    {
+      "id": "npm_test",
+      "pattern": "^\\s*npm\\s+test(?:\\s|$)"
+    },
+    {
+      "id": "npm_run_build",
+      "pattern": "^\\s*npm\\s+run\\s+build(?:\\s|$)"
+    },
+    {
+      "id": "docker_ps",
+      "pattern": "^\\s*docker\\s+ps(?:\\s|$)"
+    },
+    {
+      "id": "docker_logs",
+      "pattern": "^\\s*docker\\s+logs(?:\\s|$)"
+    },
+    {
+      "id": "docker_restart",
+      "pattern": "^\\s*docker\\s+restart(?:\\s|$)"
+    },
+    {
+      "id": "cron_list",
+      "pattern": "^\\s*crontab\\s+-l(?:\\s|$)"
+    }
+  ],
+  "requireApproval": [
+    {
+      "id": "git_commit",
+      "pattern": "^\\s*git\\s+commit(?:\\s|$)"
+    },
+    {
+      "id": "git_push",
+      "pattern": "^\\s*git\\s+push(?:\\s|$)"
+    },
+    {
+      "id": "git_tag",
+      "pattern": "^\\s*git\\s+tag(?:\\s|$)"
+    },
+    {
+      "id": "npm_publish",
+      "pattern": "^\\s*npm\\s+publish(?:\\s|$)"
+    },
+    {
+      "id": "docker_rm",
+      "pattern": "^\\s*docker\\s+rm(?:\\s|$)"
+    },
+    {
+      "id": "docker_system_prune",
+      "pattern": "^\\s*docker\\s+system\\s+prune(?:\\s|$)"
+    },
+    {
+      "id": "docker_volume_prune",
+      "pattern": "^\\s*docker\\s+volume\\s+prune(?:\\s|$)"
+    },
+    {
+      "id": "cron_modify",
+      "pattern": "^\\s*crontab\\s+(?!-l)(?:\\S+.*)?$"
+    }
+  ],
+  "denylist": [
+    {
+      "id": "rm_rf",
+      "pattern": "\\brm\\s+-rf\\b",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: rm -rf"
+    },
+    {
+      "id": "mkfs",
+      "pattern": "\\bmkfs(?:\\.[A-Za-z0-9_]+)?\\b",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: mkfs"
+    },
+    {
+      "id": "dd",
+      "pattern": "\\bdd\\s+if=",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: dd if="
+    },
+    {
+      "id": "fork_bomb",
+      "pattern": ":\\(\\)\\s*\\{\\s*:\\|:\\s*&\\s*\\};:",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: fork bomb"
+    },
+    {
+      "id": "sudo",
+      "pattern": "\\bsudo\\b",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: sudo"
+    },
+    {
+      "id": "chmod_recursive",
+      "pattern": "\\bchmod\\s+-R\\b",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: chmod -R"
+    },
+    {
+      "id": "chown_recursive",
+      "pattern": "\\bchown\\s+-R\\b",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: chown -R"
+    },
+    {
+      "id": "curl_pipe_bash",
+      "pattern": "\\bcurl\\b[^\\n|]*\\|\\s*(?:bash|sh)\\b",
+      "mode": "approval_required",
+      "warning": "dangerous pattern matched: curl | bash"
+    }
+  ]
+}

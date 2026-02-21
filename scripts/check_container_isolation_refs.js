@@ -5,14 +5,25 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const SCRIPTS_DIR = path.join(ROOT, 'scripts');
 const FORBIDDEN = [
+  'configs/dev/openclaw.json',
+  'configs/anki/openclaw.json',
   'configs/main/openclaw.json',
   'configs/sub1/openclaw.json',
+  'configs/research/openclaw.json',
+  'configs/daily/openclaw.json',
+  'configs/dev_bak/openclaw.json',
+  'configs/anki_bak/openclaw.json',
+  'configs/main_bak/openclaw.json',
+  'configs/sub1_bak/openclaw.json',
+  'configs/research_bak/openclaw.json',
+  'configs/daily_bak/openclaw.json',
 ];
 
 const ALLOWLIST = new Set([
   'scripts/check_container_isolation_refs.js',
   'scripts/openclaw_backup_sync.sh',
   'scripts/openclaw_backup_verify.sh',
+  'scripts/openclaw_sync_runtime_config.sh',
 ]);
 
 function walk(dirPath, out = []) {

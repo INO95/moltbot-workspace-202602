@@ -1,39 +1,24 @@
 /**
  * Codex OpenAI Proxy Server
- * 로컬 OpenAI-호환 요청을 실제 API로 전달하는 프록시
+ * OpenAI API-Key lane executor (chat/responses/realtime client secrets)
  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { evaluateApiKeyLaneAccess } = require('./oai_api_router');
 
 const CONFIG_PATH = path.join(__dirname, '../data/secure/proxy_config.json');
 const POLICY_PATH = path.join(__dirname, '../data/config.json');
-const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-const runtimePolicy = fs.existsSync(POLICY_PATH)
-    ? JSON.parse(fs.readFileSync(POLICY_PATH, 'utf8'))
-    : {};
-const proxyCfg = (config.proxies && config.proxies.codex) || {};
-const budgetPolicy = runtimePolicy.budgetPolicy || {};
 
-const PORT = Number(proxyCfg.port || process.env.CODEX_PROXY_PORT || 3000);
-const UPSTREAM_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com';
-const UPSTREAM_MODEL =
-    process.env.OPENAI_MODEL ||
-    (proxyCfg.model && proxyCfg.model.default) ||
-    'gpt-4o-mini';
-const ALLOW_FILE_TOKEN = String(process.env.CODEX_PROXY_ALLOW_FILE_TOKEN || '').toLowerCase() === 'true';
-const API_KEY =
-    process.env.OPENAI_API_KEY ||
-    (ALLOW_FILE_TOKEN ? (proxyCfg.auth && proxyCfg.auth.accessToken) : '') ||
-    '';
-const ALLOW_LOCAL_ONLY = !!(proxyCfg.security && proxyCfg.security.allowLocalOnly);
-const RATE_LIMIT_SAFE = String(process.env.RATE_LIMIT_SAFE_MODE || '').toLowerCase() === 'true';
-const ALLOW_PAID_API =
-    !RATE_LIMIT_SAFE &&
-    (String(process.env.MOLTBOT_ALLOW_PAID_API || '').toLowerCase() === 'true' ||
-        !(budgetPolicy.monthlyApiBudgetYen === 0 && budgetPolicy.paidApiRequiresApproval === true));
+function readJson(filePath, fallback) {
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (_) {
+        return fallback;
+    }
+}
 
 function isLocalAddress(address) {
     if (!address) return false;
@@ -49,74 +34,177 @@ function sendJson(res, statusCode, body) {
     res.end(JSON.stringify(body));
 }
 
-const server = http.createServer(async (req, res) => {
-    if (ALLOW_LOCAL_ONLY && !isLocalAddress(req.socket.remoteAddress)) {
-        sendJson(res, 403, { error: 'Access denied: local requests only' });
-        return;
+function parseJsonBody(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return {};
+    return JSON.parse(text);
+}
+
+function resolveEndpoint(urlPath) {
+    const pathname = String(urlPath || '').split('?')[0];
+    if (pathname === '/v1/chat/completions') {
+        return { key: 'chat', upstreamPath: '/v1/chat/completions', setDefaultModel: true };
+    }
+    if (pathname === '/v1/responses') {
+        return { key: 'responses', upstreamPath: '/v1/responses', setDefaultModel: true };
+    }
+    if (pathname === '/v1/realtime/client_secrets' || pathname === '/v1/realtime/sessions') {
+        return { key: 'realtime', upstreamPath: '/v1/realtime/client_secrets', setDefaultModel: true, realtime: true };
+    }
+    return null;
+}
+
+function applyDefaultModel(payload, endpoint, runtime) {
+    const out = { ...(payload || {}) };
+    if (!endpoint || !endpoint.setDefaultModel) return out;
+    if (out.model) return out;
+
+    if (endpoint.realtime) {
+        out.model = runtime.realtimeModel || runtime.defaultModel;
+        return out;
     }
 
-    if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
-        sendJson(res, 404, { error: 'Not Found' });
-        return;
-    }
+    out.model = runtime.defaultModel;
+    return out;
+}
 
-    let body = '';
-    req.on('data', chunk => {
-        body += chunk.toString();
-    });
+function resolveRuntime(env = process.env) {
+    const config = readJson(CONFIG_PATH, {});
+    const runtimePolicy = readJson(POLICY_PATH, {});
+    const proxyCfg = (config.proxies && config.proxies.codex) || {};
+    const budgetPolicy = runtimePolicy.budgetPolicy || {};
 
-    req.on('end', async () => {
-        try {
-            if (!API_KEY) {
-                sendJson(res, 500, {
-                    error: 'Missing OPENAI_API_KEY (or proxy auth accessToken)',
-                });
-                return;
-            }
-            if (!ALLOW_PAID_API) {
-                sendJson(res, 402, {
-                    error: 'Paid API is blocked by budget policy (monthly budget = 0 JPY).',
-                });
-                return;
-            }
+    const allowFileToken = String(env.CODEX_PROXY_ALLOW_FILE_TOKEN || '').toLowerCase() === 'true';
+    const apiKey =
+        env.OPENAI_API_KEY ||
+        env.OPENCLAW_OPENAI_API_KEY ||
+        (allowFileToken ? (proxyCfg.auth && proxyCfg.auth.accessToken) : '') ||
+        '';
 
-            const requestData = JSON.parse(body || '{}');
-            if (requestData.stream) {
-                sendJson(res, 501, { error: 'stream=true is not supported by this proxy yet' });
-                return;
-            }
+    const port = Number(env.CODEX_PROXY_PORT || proxyCfg.port || 3000);
+    return {
+        port,
+        upstreamBaseUrl: String(env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/$/, ''),
+        defaultModel:
+            env.OPENAI_MODEL ||
+            (proxyCfg.model && proxyCfg.model.default) ||
+            'gpt-4o-mini',
+        realtimeModel:
+            env.OPENAI_REALTIME_MODEL ||
+            (proxyCfg.model && proxyCfg.model.realtime) ||
+            '',
+        allowLocalOnly: !!(proxyCfg.security && proxyCfg.security.allowLocalOnly),
+        allowFileToken,
+        apiKey: String(apiKey || '').trim(),
+        budgetPolicy,
+        env,
+    };
+}
 
-            const payload = {
-                ...requestData,
-                model: requestData.model || UPSTREAM_MODEL,
-            };
+function createProxyServer(options = {}) {
+    const runtime = resolveRuntime(options.env || process.env);
 
-            const upstream = await axios.post(
-                `${UPSTREAM_BASE_URL.replace(/\/$/, '')}/v1/chat/completions`,
-                payload,
-                {
-                    headers: {
-                        Authorization: `Bearer ${API_KEY}`,
-                        'Content-Type': 'application/json',
-                    },
-                    timeout: 60000,
-                },
-            );
-
-            sendJson(res, 200, upstream.data);
-        } catch (error) {
-            const statusCode = error.response?.status || 500;
-            const detail = error.response?.data || { message: error.message };
-            console.error('[Proxy] Error:', detail);
-            sendJson(res, statusCode, { error: detail });
+    return http.createServer(async (req, res) => {
+        if (runtime.allowLocalOnly && !isLocalAddress(req.socket.remoteAddress)) {
+            sendJson(res, 403, { error: 'Access denied: local requests only' });
+            return;
         }
-    });
-});
 
-server.listen(PORT, '127.0.0.1', () => {
-    console.log(`Codex Proxy listening on http://127.0.0.1:${PORT}`);
-    console.log(`Upstream: ${UPSTREAM_BASE_URL} (model default: ${UPSTREAM_MODEL})`);
-    console.log(`Local-only mode: ${ALLOW_LOCAL_ONLY ? 'enabled' : 'disabled'}`);
-    console.log(`File token fallback: ${ALLOW_FILE_TOKEN ? 'enabled' : 'disabled'}`);
-    console.log(`Budget guard (paid API): ${ALLOW_PAID_API ? 'allowed' : 'blocked'}`);
-});
+        if (req.method !== 'POST') {
+            sendJson(res, 404, { error: 'Not Found' });
+            return;
+        }
+
+        const endpoint = resolveEndpoint(req.url || '');
+        if (!endpoint) {
+            sendJson(res, 404, { error: 'Not Found' });
+            return;
+        }
+
+        let rawBody = '';
+        req.on('data', (chunk) => {
+            rawBody += chunk.toString();
+        });
+
+        req.on('end', async () => {
+            try {
+                const guardEnv = {
+                    ...runtime.env,
+                    OPENAI_API_KEY: runtime.apiKey || runtime.env.OPENAI_API_KEY || '',
+                    OPENCLAW_OPENAI_API_KEY: runtime.apiKey || runtime.env.OPENCLAW_OPENAI_API_KEY || '',
+                };
+                const access = evaluateApiKeyLaneAccess({
+                    env: guardEnv,
+                    budgetPolicy: runtime.budgetPolicy,
+                });
+                if (access.blocked) {
+                    sendJson(res, 402, {
+                        error: `Paid API lane is blocked (${access.blockReason || 'policy'}).`,
+                        blockReason: access.blockReason || 'policy',
+                    });
+                    return;
+                }
+
+                if (!runtime.apiKey) {
+                    sendJson(res, 500, {
+                        error: 'Missing OPENAI_API_KEY (or OPENCLAW_OPENAI_API_KEY / proxy accessToken)',
+                    });
+                    return;
+                }
+
+                const requestData = parseJsonBody(rawBody);
+                if (requestData.stream) {
+                    sendJson(res, 501, { error: 'stream=true is not supported by this proxy yet' });
+                    return;
+                }
+
+                const payload = applyDefaultModel(requestData, endpoint, runtime);
+                const upstream = await axios.post(
+                    `${runtime.upstreamBaseUrl}${endpoint.upstreamPath}`,
+                    payload,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${runtime.apiKey}`,
+                            'Content-Type': 'application/json',
+                        },
+                        timeout: 60000,
+                    },
+                );
+
+                sendJson(res, 200, upstream.data);
+            } catch (error) {
+                if (error instanceof SyntaxError) {
+                    sendJson(res, 400, { error: 'Invalid JSON body' });
+                    return;
+                }
+                const statusCode = error.response?.status || 500;
+                const detail = error.response?.data || { message: error.message };
+                console.error('[Proxy] Error:', detail);
+                sendJson(res, statusCode, { error: detail });
+            }
+        });
+    });
+}
+
+function main() {
+    const runtime = resolveRuntime(process.env);
+    const server = createProxyServer({ env: process.env });
+    server.listen(runtime.port, '127.0.0.1', () => {
+        console.log(`Codex Proxy listening on http://127.0.0.1:${runtime.port}`);
+        console.log(`Upstream: ${runtime.upstreamBaseUrl} (default model: ${runtime.defaultModel})`);
+        console.log(`Realtime model default: ${runtime.realtimeModel || runtime.defaultModel}`);
+        console.log(`Local-only mode: ${runtime.allowLocalOnly ? 'enabled' : 'disabled'}`);
+        console.log(`File token fallback: ${runtime.allowFileToken ? 'enabled' : 'disabled'}`);
+    });
+}
+
+if (require.main === module) {
+    main();
+}
+
+module.exports = {
+    resolveEndpoint,
+    applyDefaultModel,
+    resolveRuntime,
+    createProxyServer,
+};

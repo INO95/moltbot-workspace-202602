@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "mode": "low_risk_auto",
+  "defaults": {
+    "cooldown_minutes": 30,
+    "max_attempts": 1,
+    "rearm_on_recovery": true
+  },
+  "rules": [
+    {
+      "issue_pattern": ":heartbeat_stall$",
+      "enabled": true,
+      "auto_actions": [
+        {
+          "capability": "bot",
+          "action": "restart",
+          "target": "worker_container"
+        }
+      ],
+      "cooldown_minutes": 30,
+      "max_attempts": 1,
+      "escalation_rule": "alert_if_repeated"
+    },
+    {
+      "issue_pattern": ":bot_down$",
+      "enabled": true,
+      "auto_actions": [
+        {
+          "capability": "bot",
+          "action": "restart",
+          "target": "worker_container"
+        },
+        {
+          "capability": "bot",
+          "action": "status",
+          "target": "worker_container"
+        }
+      ],
+      "cooldown_minutes": 15,
+      "max_attempts": 2,
+      "escalation_rule": "immediate_alert"
+    },
+    {
+      "issue_pattern": ":telegram_auth_invalid$",
+      "enabled": true,
+      "auto_actions": [
+        {
+          "capability": "bot",
+          "action": "restart",
+          "target": "worker_container"
+        },
+        {
+          "capability": "bot",
+          "action": "status",
+          "target": "worker_container"
+        }
+      ],
+      "cooldown_minutes": 15,
+      "max_attempts": 2,
+      "escalation_rule": "immediate_alert"
+    },
+    {
+      "issue_pattern": ":telegram_channel_exited$",
+      "enabled": true,
+      "auto_actions": [
+        {
+          "capability": "bot",
+          "action": "restart",
+          "target": "worker_container"
+        }
+      ],
+      "cooldown_minutes": 20,
+      "max_attempts": 2,
+      "escalation_rule": "alert_if_repeated"
+    },
+    {
+      "issue_pattern": ":schema_violation$",
+      "enabled": true,
+      "auto_actions": [],
+      "cooldown_minutes": 60,
+      "max_attempts": 0,
+      "escalation_rule": "alert_only"
+    }
+  ]
+}

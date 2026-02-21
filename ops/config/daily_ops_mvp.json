@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "timezone": "Asia/Tokyo",
+  "scan_interval_minutes": 30,
+  "alerting": {
+    "enabled": true,
+    "transport": "bridge_queue",
+    "p2_consecutive_failures_threshold": 3,
+    "cooldown_hours": 2,
+    "quiet_hours": {
+      "start": "23:00",
+      "end": "07:00"
+    }
+  },
+  "briefings": {
+    "morning_time": "08:30",
+    "evening_time": "18:30",
+    "send": true
+  },
+  "health_policy": {
+    "heartbeat_stall_minutes": 15,
+    "stale_warn_minutes": 45,
+    "down_heartbeat_minutes": 360,
+    "down_requires_telegram_failure_when_container_running": true,
+    "no_signal_status": "UNKNOWN",
+    "idle_stale_status": "WARN"
+  },
+  "workers": {
+    "bot-dev": {
+      "active": true,
+      "logical_bot_id": "bot-a",
+      "profile": "dev",
+      "container": "moltbot-dev"
+    },
+    "bot-anki": {
+      "active": true,
+      "logical_bot_id": "bot-b",
+      "profile": "anki",
+      "container": "moltbot-anki",
+      "allow_telegram_signal_fallback": true
+    },
+    "bot-research": {
+      "active": true,
+      "logical_bot_id": "bot-c",
+      "profile": "research",
+      "container": "moltbot-research",
+      "allow_telegram_signal_fallback": true
+    },
+    "bot-d": {
+      "active": false,
+      "logical_bot_id": "bot-d",
+      "profile": "reserved",
+      "container": ""
+    }
+  }
+}
