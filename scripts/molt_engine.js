@@ -2,27 +2,59 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const fs = require('fs');
 const path = require('path');
-const creds = require('../data/secure/google_creds.json');
 const config = require('../data/config.json');
 const { sendCommand } = require('./ag_bridge_client');
 
+function loadGoogleCreds() {
+    const candidates = [
+        process.env.MOLTBOT_GOOGLE_CREDS_PATH,
+        path.join(__dirname, '../data/secure/google_creds.json'),
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        try {
+            if (!fs.existsSync(candidate)) continue;
+            const raw = fs.readFileSync(candidate, 'utf8');
+            const parsed = JSON.parse(raw || '{}');
+            if (parsed && parsed.client_email && parsed.private_key) {
+                return parsed;
+            }
+        } catch (_) {
+            // try next candidate
+        }
+    }
+
+    return null;
+}
+
+const creds = loadGoogleCreds();
+
 class MoltEngine {
     constructor() {
-        const auth = new JWT({
-            email: creds.client_email,
-            key: creds.private_key,
-            scopes: [
-                'https://www.googleapis.com/auth/spreadsheets',
-                'https://www.googleapis.com/auth/drive',
-            ],
-        });
-        this.doc = new GoogleSpreadsheet(config.spreadsheetId, auth);
         this.config = config;
         this.initialized = false;
+        this.doc = null;
+        this.remoteReady = false;
+
+        if (creds && creds.client_email && creds.private_key && this.config.spreadsheetId) {
+            const auth = new JWT({
+                email: creds.client_email,
+                key: creds.private_key,
+                scopes: [
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive',
+                ],
+            });
+            this.doc = new GoogleSpreadsheet(config.spreadsheetId, auth);
+            this.remoteReady = true;
+        }
     }
 
     async init() {
         if (this.initialized) return;
+        if (!this.remoteReady || !this.doc) {
+            throw new Error('Google credentials are unavailable. Set MOLTBOT_GOOGLE_CREDS_PATH or provide data/secure/google_creds.json');
+        }
         await this.doc.loadInfo();
         console.log(`✅ Connected to: ${this.doc.title}`);
         this.initialized = true;
