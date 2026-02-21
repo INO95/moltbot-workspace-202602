@@ -7,6 +7,7 @@ const {
     inferLinkIntentPayload,
     inferWorkIntentPayload,
     inferInspectIntentPayload,
+    inferWorkoutIntentPayload,
     extractPreferredProjectBasePath,
     inferProjectIntentPayload,
     inferNaturalLanguageRoute,
@@ -47,6 +48,11 @@ function main() {
     const inspectPayload = inferInspectIntentPayload('테스트 실패 원인 점검해줘');
     assert.ok(/대상:\s*\/Users\/moltbot\/Projects\/Moltbot_Workspace/.test(String(inspectPayload || '')));
     assert.ok(/체크항목:\s*테스트 실패 원인/.test(String(inspectPayload || '')));
+
+    const workoutFalsePositive = inferWorkoutIntentPayload(
+        '/Users/moltbot/Projects 여기로 설치해. 없으면 /home/runner/work/moltbot-workspace로 fallback해서 설치해.',
+    );
+    assert.strictEqual(workoutFalsePositive, null);
 
     const preferredPath = extractPreferredProjectBasePath(
         '/home/node/.openclaw/workspace/Projects 와 /tmp 중에 첫 번째로',

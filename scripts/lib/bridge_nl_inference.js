@@ -130,7 +130,9 @@ function inferWorkoutIntentPayload(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
 
-  const hasWorkoutKeyword = /(운동|헬스|러닝|달리기|런닝|조깅|걷기|산책|웨이트|스쿼트|벤치|푸쉬업|요가|필라테스|수영|사이클|자전거|workout|run|running|gym|walk|swim|cycle)/i.test(raw);
+  const hasWorkoutKoreanKeyword = /(운동|헬스|러닝|달리기|런닝|조깅|걷기|산책|웨이트|스쿼트|벤치|푸쉬업|요가|필라테스|수영|사이클|자전거)/i.test(raw);
+  const hasWorkoutEnglishKeyword = /\b(workout|run|running|gym|walk|swim|cycle)\b/i.test(raw);
+  const hasWorkoutKeyword = hasWorkoutKoreanKeyword || hasWorkoutEnglishKeyword;
   const hasWorkoutMetric = /(\d{1,4}\s*(분|min)|\d+(?:\.\d+)?\s*(km|킬로)|\d{2,5}\s*(kcal|칼로리))/i.test(raw);
   const hasFinanceOnlyToken = /(¥|￥|\$)\s*\d+|(?:\d[\d,]*(?:\.\d+)?)\s*(?:만엔|엔|円|jpy|원|krw|달러|usd|eur|유로)(?:\s|$)/i.test(raw);
 
