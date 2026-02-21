@@ -41,6 +41,30 @@ function main() {
     const report = runRouteWithEnv('요즘 테크 트렌드 리포트 한번 줘', inferEnv);
     assert.strictEqual(report.route, 'report');
 
+    const googleCalendarLookup = runRouteWithEnv('구글 캘린더 확인', inferEnv);
+    assert.strictEqual(googleCalendarLookup.route, 'ops');
+    assert.ok(
+        /액션:\s*일정/.test(String(googleCalendarLookup.payload || '')),
+        `expected schedule lookup payload, got: ${googleCalendarLookup.payload}`,
+    );
+
+    const googleMailLookup = runRouteWithEnv('구글 메일 최근 내역 보여줘', inferEnv);
+    assert.strictEqual(googleMailLookup.route, 'ops');
+    assert.ok(
+        /액션:\s*메일/.test(String(googleMailLookup.payload || '')),
+        `expected mail lookup payload, got: ${googleMailLookup.payload}`,
+    );
+
+    const googleDriveLookup = runRouteWithEnv('구글 드라이브 목록 확인', inferEnv);
+    assert.strictEqual(googleDriveLookup.route, 'ops');
+    assert.ok(
+        /액션:\s*브라우저/.test(String(googleDriveLookup.payload || '')),
+        `expected drive lookup payload, got: ${googleDriveLookup.payload}`,
+    );
+
+    const rawGogCommand = runRouteWithEnv('gog drive ls -a inhoins@gmail.com --no-input', inferEnv);
+    assert.strictEqual(rawGogCommand.route, 'none');
+
     const finance = runRouteWithEnv('점심 1200엔 가계에 기록해줘', inferEnv);
     assert.strictEqual(finance.route, 'finance');
 
@@ -83,11 +107,29 @@ function main() {
     });
     assert.strictEqual(gatedHub.route, 'status');
 
+    const gatedMainAlias = runRouteWithEnv('데일리 봇 상태 알려줘', {
+        BRIDGE_NL_ROUTING_ENABLED: 'true',
+        BRIDGE_NL_ROUTING_HUB_ONLY: 'true',
+        MOLTBOT_BOT_ROLE: 'worker',
+        MOLTBOT_BOT_ID: 'bot-main',
+    });
+    assert.strictEqual(gatedMainAlias.route, 'status');
+
     const disabled = runRouteWithEnv('웹앱 주소 좀 보내줘', {
         BRIDGE_NL_ROUTING_ENABLED: 'false',
         BRIDGE_NL_ROUTING_HUB_ONLY: 'false',
     });
     assert.strictEqual(disabled.route, 'none');
+
+    const projectExplicitPath = runRouteWithEnv(
+        '/Users/moltbot/Projects 여기로 설치해. 없으면 /home/node/.openclaw/workspace/Projects로 fallback해서 설치해.',
+        inferEnv,
+    );
+    assert.strictEqual(projectExplicitPath.route, 'project');
+    assert.ok(
+        /경로:\s*\/Users\/moltbot\/Projects\b/.test(String(projectExplicitPath.payload || '')),
+        `expected explicit /Users path in payload, got: ${projectExplicitPath.payload}`,
+    );
 
     console.log('test_bridge_natural_language_routing: ok');
 }

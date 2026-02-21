@@ -32,6 +32,47 @@ const { handleTodoCommand } = require('./personal_todo');
 const { handleRoutineCommand } = require('./personal_routine');
 const { handleWorkoutCommand } = require('./personal_workout');
 const { handleMediaPlaceCommand } = require('./personal_media_place');
+const { finalizeTelegramBoundary: finalizeTelegramBoundaryCore } = require('./lib/bridge_output_boundary');
+const {
+    parseReportModeCommand: parseReportModeCommandCore,
+    parsePersonaInfoCommand: parsePersonaInfoCommandCore,
+} = require('./lib/bridge_route_parsers');
+const { handleAutoRoutedCommand } = require('./lib/bridge_auto_routes');
+const { routeByPrefix: routeByPrefixCore } = require('./lib/bridge_route_dispatch');
+const {
+    buildNoPrefixGuide: buildNoPrefixGuideCore,
+    inferPathListReply: inferPathListReplyCore,
+    isLegacyPersonaSwitchAttempt: isLegacyPersonaSwitchAttemptCore,
+    buildDailyCasualNoPrefixReply: buildDailyCasualNoPrefixReplyCore,
+    buildNoPrefixReply: buildNoPrefixReplyCore,
+} = require('./lib/bridge_no_prefix_reply');
+const {
+    normalizeMonthToken: normalizeMonthTokenCore,
+    extractMemoStatsPayload: extractMemoStatsPayloadCore,
+    isLikelyMemoJournalBlock: isLikelyMemoJournalBlockCore,
+    stripNaturalMemoLead: stripNaturalMemoLeadCore,
+    inferMemoIntentPayload: inferMemoIntentPayloadCore,
+    inferFinanceIntentPayload: inferFinanceIntentPayloadCore,
+    inferTodoIntentPayload: inferTodoIntentPayloadCore,
+    inferRoutineIntentPayload: inferRoutineIntentPayloadCore,
+    inferWorkoutIntentPayload: inferWorkoutIntentPayloadCore,
+    inferBrowserIntentPayload: inferBrowserIntentPayloadCore,
+    inferScheduleIntentPayload: inferScheduleIntentPayloadCore,
+    inferGogLookupIntentPayload: inferGogLookupIntentPayloadCore,
+    inferStatusIntentPayload: inferStatusIntentPayloadCore,
+    inferLinkIntentPayload: inferLinkIntentPayloadCore,
+    inferReportIntentPayload: inferReportIntentPayloadCore,
+    extractPreferredProjectBasePath: extractPreferredProjectBasePathCore,
+    inferProjectIntentPayload: inferProjectIntentPayloadCore,
+    inferNaturalLanguageRoute: inferNaturalLanguageRouteCore,
+} = require('./lib/bridge_nl_inference');
+const {
+    normalizeDailyPersonaConfig,
+    applyPersonaToSystemReply,
+    enforcePersonaReply,
+    buildDailyPersonaStatusReply,
+    isDailyPersonaRuntime,
+} = require('./daily_persona');
 const {
     DEFAULT_COMMAND_ALLOWLIST,
     DEFAULT_HUB_DELEGATION,
@@ -222,6 +263,7 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
     let inferRoutine = pickBool('inferRoutine', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferRoutine);
     let inferWorkout = pickBool('inferWorkout', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferWorkout);
     let inferBrowser = pickBool('inferBrowser', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferBrowser);
+    let inferSchedule = pickBool('inferSchedule', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferSchedule);
     let inferStatus = pickBool('inferStatus', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferStatus);
     let inferLink = pickBool('inferLink', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferLink);
     let inferReport = pickBool('inferReport', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferReport);
@@ -259,6 +301,10 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
         const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_BROWSER);
         if (parsed != null) inferBrowser = parsed;
     }
+    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_SCHEDULE')) {
+        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_SCHEDULE);
+        if (parsed != null) inferSchedule = parsed;
+    }
     if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_STATUS')) {
         const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_STATUS);
         if (parsed != null) inferStatus = parsed;
@@ -285,6 +331,7 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
         inferRoutine,
         inferWorkout,
         inferBrowser,
+        inferSchedule,
         inferStatus,
         inferLink,
         inferReport,
@@ -295,9 +342,14 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
 function isHubRuntime(env = process.env) {
     const role = String(env.MOLTBOT_BOT_ROLE || '').trim().toLowerCase();
     const botId = String(env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
+    const profile = String(env.MOLTBOT_PROFILE || env.OPENCLAW_PROFILE || '').trim().toLowerCase();
     return role === 'supervisor'
         || botId === 'bot-daily'
-        || botId === 'daily';
+        || botId === 'daily'
+        || botId === 'bot-main'
+        || botId === 'main'
+        || profile === 'daily'
+        || profile === 'main';
 }
 
 function isResearchRuntime(env = process.env) {
@@ -316,15 +368,29 @@ const HUB_DELEGATION = normalizeHubDelegationConfig(config.hubDelegation);
 const HUB_DELEGATION_ACTIVE = HUB_DELEGATION.enabled && isHubRuntime(process.env);
 const BRIDGE_BLOCK_HINT = String(process.env.BRIDGE_BLOCK_HINT || '').trim();
 const NATURAL_LANGUAGE_ROUTING = normalizeNaturalLanguageRoutingConfig(config.naturalLanguageRouting, process.env);
+const DAILY_PERSONA_CONFIG = normalizeDailyPersonaConfig(config.dailyPersona);
 
 function applyDailyPersonaToOutput(base, metaInput = {}) {
     if (!base || typeof base !== 'object') return base;
     if (typeof base.telegramReply !== 'string' || !String(base.telegramReply).trim()) return base;
-    const telegramReply = rewriteLocalLinks(base.telegramReply, getPublicBases());
-    if (telegramReply === base.telegramReply) return base;
+
+    const route = String(metaInput.route || base.route || '').trim().toLowerCase();
+    const runtimeBotId = String(metaInput.botId || process.env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
+    const runtimeProfile = String(metaInput.profile || process.env.MOLTBOT_PROFILE || process.env.OPENCLAW_PROFILE || '').trim().toLowerCase();
+    const rewritten = rewriteLocalLinks(base.telegramReply, getPublicBases());
+    const personaApplied = isDailyPersonaRuntime(DAILY_PERSONA_CONFIG, runtimeBotId, { profile: runtimeProfile })
+        ? applyPersonaToSystemReply(rewritten, {
+            route,
+            botId: runtimeBotId,
+            profile: runtimeProfile,
+            config: DAILY_PERSONA_CONFIG,
+        })
+        : rewritten;
+
+    if (personaApplied === base.telegramReply) return base;
     return {
         ...base,
-        telegramReply,
+        telegramReply: personaApplied,
     };
 }
 
@@ -928,10 +994,13 @@ const OPS_PERSONA_TARGET_TO_BOT = Object.freeze({
     anki: 'bot-anki',
     research: 'bot-research',
     daily: 'bot-daily',
+    main: 'bot-daily',
     dev_bak: 'bot-dev-bak',
     anki_bak: 'bot-anki-bak',
     research_bak: 'bot-research-bak',
     daily_bak: 'bot-daily-bak',
+    'bot-main': 'bot-daily',
+    'moltbot-main': 'bot-daily',
     'moltbot-dev': 'bot-dev',
     'moltbot-anki': 'bot-anki',
     'moltbot-research': 'bot-research',
@@ -2492,66 +2561,44 @@ function appendExternalLinks(reply) {
 }
 
 function parseReportModeCommand(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return { matched: false, valid: false, mode: '' };
-    const matched = raw.match(/^\/report\s+(.+)$/i);
-    if (!matched) return { matched: false, valid: false, mode: '' };
-    const modeRaw = String(matched[1] || '').trim().toLowerCase();
-    if (modeRaw === 'ko' || modeRaw === 'ko+en') {
-        return { matched: true, valid: true, mode: modeRaw };
-    }
-    return { matched: true, valid: false, mode: modeRaw };
+    return parseReportModeCommandCore(text);
 }
 
 function parsePersonaInfoCommand(text) {
-    return { matched: false };
+    return parsePersonaInfoCommandCore(text, { normalizeIncomingCommandText });
 }
 
 function buildPersonaStatusReply(context = {}) {
-    return '페르소나 기능은 제거되었습니다.';
-}
-
-function sanitizeUserFacingReply(text) {
-    if (telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function') {
-        return telegramFinalizer.sanitizeForUser(text);
-    }
-    const raw = String(text || '').trim();
-    return raw || '실패\n원인: 내부 실행 오류가 발생했어.\n다음 조치: 잠시 후 다시 시도해줘.';
+    const runtimeBotId = String(context.botId || process.env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
+    const runtimeProfile = String(context.profile || process.env.MOLTBOT_PROFILE || process.env.OPENCLAW_PROFILE || '').trim().toLowerCase();
+    const botPersonaMap = readBotPersonaMap();
+    return buildDailyPersonaStatusReply({
+        config: DAILY_PERSONA_CONFIG,
+        botId: runtimeBotId,
+        profile: runtimeProfile,
+        route: String(context.route || '').trim().toLowerCase(),
+        botPersonaMap,
+    });
 }
 
 function finalizeTelegramBoundary(base, metaInput = {}) {
-    const prepared = applyDailyPersonaToOutput(base, metaInput);
-    if (!prepared || typeof prepared !== 'object') return prepared;
-    if (prepared.finalizerApplied) return prepared;
-    if (typeof prepared.telegramReply !== 'string' || !String(prepared.telegramReply).trim()) return prepared;
-
-    const sanitizedReply = sanitizeUserFacingReply(prepared.telegramReply);
-    const appended = appendExternalLinks(sanitizedReply);
-    const commandText = String(metaInput.commandText || '').trim();
-    const telegramContext = metaInput.telegramContext
-        || prepared.telegramContext
-        || parseTransportEnvelopeContext(commandText);
-    const requestedBy = String(
-        metaInput.requestedBy
-        || prepared.requestedBy
-        || opsFileControl.normalizeRequester(telegramContext, 'bridge:auto'),
-    ).trim();
-    const finalized = telegramFinalizer.finalizeTelegramReply(appended, {
-        botId: process.env.MOLTBOT_BOT_ID,
-        botRole: process.env.MOLTBOT_BOT_ROLE,
-        telegramContext,
-        requestedBy,
-        route: String(metaInput.route || prepared.route || '').trim().toLowerCase(),
-        finalizerApplied: false,
+    return finalizeTelegramBoundaryCore(base, metaInput, {
+        applyDailyPersonaToOutput,
+        appendExternalLinks,
+        parseTransportEnvelopeContext,
+        normalizeRequester: opsFileControl.normalizeRequester,
+        finalizeTelegramReply: (text, context) => telegramFinalizer.finalizeTelegramReply(text, context),
+        sanitizeForUser: (text) => {
+            if (telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function') {
+                return telegramFinalizer.sanitizeForUser(text);
+            }
+            const raw = String(text || '').trim();
+            return raw || '실패\n원인: 내부 실행 오류가 발생했어.\n다음 조치: 잠시 후 다시 시도해줘.';
+        },
+        enforcePersonaReply,
+        dailyPersonaConfig: DAILY_PERSONA_CONFIG,
+        env: process.env,
     });
-
-    return {
-        ...prepared,
-        telegramReply: String(finalized || appended).trim() || String(appended || '').trim(),
-        telegramContext: telegramContext || null,
-        requestedBy: requestedBy || undefined,
-        finalizerApplied: true,
-    };
 }
 
 function isExternalLinkRequest(text) {
@@ -2696,60 +2743,27 @@ function buildTemplateGuide(route) {
 }
 
 function buildNoPrefixGuide() {
-    return [
-        '명령 프리픽스를 붙여주세요.',
-        '',
-        '자주 쓰는 형식:',
-        '- 메모: 오늘 회고',
-        '- 가계: 점심 1200엔',
-        '- 투두: 추가 장보기',
-        '- 루틴: 체크 물 2L',
-        '- 운동: 러닝 30분 5km',
-        '- 콘텐츠: 듄2 봤음 4.5점 #SF',
-        '- 식당: 라멘집 가고싶음 #도쿄',
-        '- 링크: 프롬프트',
-        '- 상태: [옵션]',
-        '- 운영: 액션: 페르소나; 대상: daily; 이름: analyst; 톤: 간결',
-        '- 운영: 액션: 승인',
-        '- 운영: 액션: 거부',
-        '- 단어: 단어1',
-        '- 작업: 요청: ...; 대상: ...; 완료기준: ...',
-        '- 점검: 대상: ...; 체크항목: ...',
-        '- 배포: 대상: ...; 환경: ...; 검증: ...',
-        '- 프로젝트: 프로젝트명: ...; 목표: ...; 스택: ...; 경로: ...; 완료기준: ...',
-    ].join('\n');
+    return buildNoPrefixGuideCore();
 }
 
 function inferPathListReply(inputText) {
-    const raw = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
-    if (!raw) return '';
-    const asksList = /(뭐\s*있|뭐있|무엇|내용|파일|폴더|목록|list|ls|show)/i.test(raw);
-    if (!asksList) return '';
-    const targetPath = extractPreferredProjectBasePath(raw);
-    if (!targetPath) return '';
-    const preview = readDirectoryListPreview(targetPath);
-    if (!preview) return '';
-    return [
-        `${targetPath} 안에는 지금 이게 있어:`,
-        '',
-        preview,
-    ].join('\n');
+    return inferPathListReplyCore(inputText, {
+        normalizeIncomingCommandText,
+        extractPreferredProjectBasePath,
+        readDirectoryListPreview,
+    });
 }
 
 function isLegacyPersonaSwitchAttempt(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return false;
-    return /(페르소나|캐릭터|인격|persona|character|모드)/i.test(raw);
+    return isLegacyPersonaSwitchAttemptCore(text);
 }
 
 function buildDailyCasualNoPrefixReply(inputText) {
-    const normalized = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
-    if (isLegacyPersonaSwitchAttempt(normalized)) {
-        return '페르소나 기능은 제거되었습니다.';
-    }
-    const pathReply = inferPathListReply(normalized);
-    if (pathReply) return pathReply;
-    return buildNoPrefixGuide();
+    return buildDailyCasualNoPrefixReplyCore(inputText, {
+        normalizeIncomingCommandText,
+        buildPersonaStatusReply,
+        inferPathListReply,
+    });
 }
 
 function buildDuelModeMeta() {
@@ -3016,6 +3030,9 @@ function normalizeIncomingCommandText(text) {
         .replace(/\~\/\.openclaw\/workspace/gi, workspaceRoot)
         .replace(/\/home\/node\/\.openclaw\/workspace/gi, workspaceRoot);
 
+    // Some Telegram relays prepend "$" before command prefixes (e.g. "$운영: ...").
+    out = out.replace(/^\s*\$(?=\S)/, '').trim();
+
     return out;
 }
 
@@ -3050,452 +3067,134 @@ function normalizeReportNewsPayload(text) {
 }
 
 function normalizeMonthToken(rawValue) {
-    const token = String(rawValue || '').trim();
-    if (!token) return '';
-    if (/^\d{4}-\d{2}$/.test(token)) return token;
-    if (/^\d{6}$/.test(token)) return `${token.slice(0, 4)}-${token.slice(4, 6)}`;
-    return '';
+    return normalizeMonthTokenCore(rawValue);
 }
 
 function extractMemoStatsPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-    const memoKeyword = /(메모장|메모|기록|일지|회고|저널|다이어리)/i.test(raw);
-    const statsKeyword = /(통계|요약|summary|status)/i.test(raw);
-    if (!memoKeyword || !statsKeyword) return null;
-
-    const monthMatch = raw.match(/(20\d{2}-\d{2}|\d{6})/);
-    const month = normalizeMonthToken(monthMatch ? monthMatch[1] : '');
-    return month ? `통계 ${month}` : '통계';
+    return extractMemoStatsPayloadCore(text, { normalizeMonthToken });
 }
 
 function isLikelyMemoJournalBlock(text) {
-    const raw = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-    if (!raw) return false;
-    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
-    if (lines.length < 4) return false;
-    const hasRangeHint = /(?:^|\n)\s*\d{2}\d{2}\d{1,2}\s*[~\-]\s*\d{1,2}\s*(?:\n|$)/.test(raw);
-    const dayHeaderCount = (raw.match(/(?:^|\n)\s*\d{1,2}\s*(월|화|수|목|금|토|일)(?:요일)?\s*(?:\n|$)/g) || []).length;
-    if (hasRangeHint && dayHeaderCount >= 1) return true;
-    if (dayHeaderCount >= 2) return true;
-    return false;
+    return isLikelyMemoJournalBlockCore(text);
 }
 
 function stripNaturalMemoLead(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return raw;
-    const stripped = raw
-        .replace(/^(메모장|메모|기록|일지|회고|저널|다이어리)\s*(?:[:：]|으로|로|를|은|는)?\s*/i, '')
-        .trim();
-    return stripped || raw;
+    return stripNaturalMemoLeadCore(text);
 }
 
 function inferMemoIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const statsPayload = extractMemoStatsPayload(raw);
-    if (statsPayload) return statsPayload;
-    if (isLikelyMemoJournalBlock(raw)) return raw;
-
-    const memoKeyword = /(메모장|메모|기록|일지|회고|저널|다이어리)/i.test(raw);
-    const memoAction = /(저장|정리|집계|통계|분석|추가|남겨|반영|업데이트|던져|올려)/i.test(raw);
-    if (memoKeyword && memoAction) {
-        return stripNaturalMemoLead(raw);
-    }
-    return null;
+    return inferMemoIntentPayloadCore(text, {
+        extractMemoStatsPayload,
+        isLikelyMemoJournalBlock,
+        stripNaturalMemoLead,
+    });
 }
 
 function inferFinanceIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const hasFinanceKeyword = /(가계|가계부|지출|수입|환급|정산|이체|소비|입금|출금|결제|용돈|식비|교통비|월세|생활비|finance|expense|income|refund|budget)/i.test(raw);
-    const hasMoneyToken = /(¥|￥|\$)\s*\d+|(?:\d[\d,]*(?:\.\d+)?)\s*(?:만엔|엔|円|jpy|원|krw|달러|usd|eur|유로)(?:\s|$)/i.test(raw);
-    const hasFinanceVerb = /(기록|저장|추가|정리|요약|통계|내역|조회|보여|알려)/i.test(raw);
-    const hasWorkoutSignal = /(운동|러닝|달리기|헬스|요가|수영|사이클|걷기)/i.test(raw);
-
-    if (hasWorkoutSignal && !hasFinanceKeyword) return null;
-    if (!hasFinanceKeyword && !hasMoneyToken) return null;
-    if (!hasMoneyToken && !/(통계|요약|내역|목록|summary|list|status)/i.test(raw)) return null;
-    if (!hasFinanceKeyword && !hasFinanceVerb && !hasMoneyToken) return null;
-
-    return raw
-        .replace(/^(가계부?|finance)\s*(?:로|에|를|는|은)?\s*/i, '')
-        .trim() || raw;
+    return inferFinanceIntentPayloadCore(text);
 }
 
 function inferTodoIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const hasTodoKeyword = /(투두|todo|to-do|할일|할 일|task|체크리스트)/i.test(raw);
-    const hasTodoAction = /(추가|등록|완료|끝|체크|재개|다시|삭제|지움|목록|리스트|요약|통계|status|list|done|remove|open|add)/i.test(raw);
-
-    if (hasTodoKeyword && hasTodoAction) {
-        return raw
-            .replace(/^(투두|todo|to-do|할일|할 일)\s*(?:로|에|를|는|은)?\s*/i, '')
-            .trim() || raw;
-    }
-
-    if (/^(오늘\s*)?(할\s*일|해야\s*할\s*일)/i.test(raw)) {
-        return raw;
-    }
-
-    return null;
+    return inferTodoIntentPayloadCore(text);
 }
 
 function inferRoutineIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const hasRoutineKeyword = /(루틴|습관|habit|routine|체크인)/i.test(raw);
-    const hasRoutineAction = /(등록|추가|활성|비활성|켜|끄|체크|완료|오늘|목록|리스트|요약|통계|summary|status|check)/i.test(raw);
-
-    if (!hasRoutineKeyword) return null;
-    if (!hasRoutineAction && raw.length > 40) return null;
-
-    return raw
-        .replace(/^(루틴|습관)\s*(?:으로|로|에|를|는|은)?\s*/i, '')
-        .trim() || raw;
+    return inferRoutineIntentPayloadCore(text);
 }
 
 function inferWorkoutIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const hasWorkoutKeyword = /(운동|헬스|러닝|달리기|런닝|조깅|걷기|산책|웨이트|스쿼트|벤치|푸쉬업|요가|필라테스|수영|사이클|자전거|workout|run|running|gym|walk|swim|cycle)/i.test(raw);
-    const hasWorkoutMetric = /(\d{1,4}\s*(분|min)|\d+(?:\.\d+)?\s*(km|킬로)|\d{2,5}\s*(kcal|칼로리))/i.test(raw);
-    const hasFinanceOnlyToken = /(¥|￥|\$)\s*\d+|(?:\d[\d,]*(?:\.\d+)?)\s*(?:만엔|엔|円|jpy|원|krw|달러|usd|eur|유로)(?:\s|$)/i.test(raw);
-
-    if (!hasWorkoutKeyword && !hasWorkoutMetric) return null;
-    if (!hasWorkoutKeyword && !/(기록|완료|했다|했어|함|로그)/i.test(raw)) return null;
-    if (hasFinanceOnlyToken && !hasWorkoutKeyword) return null;
-
-    return raw
-        .replace(/^(운동|workout)\s*(?:으로|로|을|를|은|는)?\s*/i, '')
-        .trim() || raw;
+    return inferWorkoutIntentPayloadCore(text);
 }
 
 function inferBrowserIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
+    return inferBrowserIntentPayloadCore(text);
+}
 
-    const hasBrowserKeyword = /(브라우저|browser|웹자동화|web automation|openclaw browser|오픈클로 브라우저)/i.test(raw);
-    const hasLookupIntent = /(찾아|검색|search|열어|접속|이동|보여|조회|확인|뭐\s*있|뭐있|추천|최신|인기|베스트|포텐)/i.test(raw);
-    const hasLibraryIntent = /(라이브러리|library|스킬|skill|문서|docs?|도큐먼트)/i.test(raw);
-    const hasCommunityIntent = /(펨코|fmkorea|포텐|디시|dcinside|갤러리|레딧|reddit|커뮤니티)/i.test(raw);
-    if (!hasBrowserKeyword && !(hasLibraryIntent && hasLookupIntent) && !(hasCommunityIntent && hasLookupIntent)) return null;
+function inferScheduleIntentPayload(text) {
+    return inferScheduleIntentPayloadCore(text);
+}
 
-    const urlMatch = raw.match(/https?:\/\/[^\s<>'"`]+/i);
-    const keywordMatch = raw.match(/(?:키워드|keyword)\s*[:：]\s*([^\n;]+)/i);
-    const keyword = String(keywordMatch && keywordMatch[1] ? keywordMatch[1] : '').trim();
-    const wantsDocs = /(공식문서|문서|docs?)/i.test(raw);
-
-    let targetUrl = String(urlMatch && urlMatch[0] ? urlMatch[0] : '').trim();
-    if (!targetUrl) {
-        if (/(펨코|fmkorea|포텐)/i.test(raw)) {
-            targetUrl = 'https://www.fmkorea.com/best';
-        } else if (/(디시|dcinside|갤러리)/i.test(raw) && /(특이점이\s*온다|thesingularity)/i.test(raw)) {
-            targetUrl = 'https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity';
-        } else if (/(디시|dcinside|갤러리)/i.test(raw)) {
-            targetUrl = 'https://gall.dcinside.com/';
-        } else if (wantsDocs) {
-            targetUrl = 'https://docs.openclaw.ai/';
-        } else if (keyword) {
-            targetUrl = `https://clawhub.com/search?q=${encodeURIComponent(keyword)}`;
-        } else {
-            targetUrl = 'https://clawhub.com/';
-        }
-    }
-
-    return `액션: 브라우저; 작업: open; URL: ${targetUrl}`;
+function inferGogLookupIntentPayload(text) {
+    return inferGogLookupIntentPayloadCore(text);
 }
 
 function inferStatusIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const hasStatusKeyword = /(상태|현황|헬스|health|status|업타임|다운|장애|에러|오류|살아있|죽었|정상)/i.test(raw);
-    if (!hasStatusKeyword) return null;
-
-    const isDirectStatusQuery = /^(상태|현황|헬스|health|status)\b/i.test(raw);
-    const hasOpsScope = /(봇|bot|서버|컨테이너|daily|데일리|dev|개발봇|anki|리서치|research|트렌드봇|오픈클로|openclaw|시스템|운영|서비스|프롬프트|prompt)/i.test(raw);
-    if (!isDirectStatusQuery && !hasOpsScope) return null;
-
-    if (/(전체|all|모든|봇들|bot들)/i.test(raw)) return 'all';
-    if (/(데일리|daily)/i.test(raw)) return 'daily';
-    if (/(리서치|research|트렌드봇)/i.test(raw)) return 'research';
-    if (/(안키|anki)/i.test(raw)) return 'anki';
-    if (/(개발봇|개발|dev)/i.test(raw)) return 'dev';
-    if (/(프롬프트|prompt|웹앱|webapp|웹)/i.test(raw)) return 'prompt';
-    if (/(터널|tunnel)/i.test(raw)) return 'tunnel';
-    return '';
+    return inferStatusIntentPayloadCore(text);
 }
 
 function inferLinkIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-    if (/링크드인|linkedin/i.test(raw)) return null;
-    if (isExternalLinkRequest(raw)) return raw;
-
-    const hasLinkKeyword = /(링크|url|주소|접속|도메인)/i.test(raw);
-    if (!hasLinkKeyword) return null;
-    const hasDeliveryVerb = /(줘|보내|알려|열어|확인|어디|뭐야|찾아)/i.test(raw);
-    const hasOpsTarget = /(프롬프트|prompt|오픈클로|openclaw|웹앱|webapp|웹|web|대시보드|터널|tunnel|상태페이지|페이지)/i.test(raw);
-    if (!(hasDeliveryVerb || hasOpsTarget)) return null;
-    return raw;
+    return inferLinkIntentPayloadCore(text, { isExternalLinkRequest });
 }
 
 function inferReportIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const hasReportKeyword = /(리포트|report|보고서|브리핑|트렌드|동향|뉴스|소식|digest)/i.test(raw);
-    if (!hasReportKeyword) return null;
-    if (/(메모|기록|일지|회고|저널|다이어리)/i.test(raw) && /(통계|요약|summary|status)/i.test(raw)) {
-        return null;
-    }
-
-    const hasActionVerb = /(줘|보내|작성|정리|만들|업데이트|발행|올려|요약)/i.test(raw);
-    if (!hasActionVerb && raw.length > 40) return null;
-    return raw;
+    return inferReportIntentPayloadCore(text);
 }
 
 function extractPreferredProjectBasePath(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return '';
-
-    const workspaceRoot = resolveWorkspaceRootHint();
-    const candidates = [];
-    const seen = new Set();
-    const pathMatches = raw.match(/(?:~\/|\/)[A-Za-z0-9._\-/]+/g) || [];
-    for (const match of pathMatches) {
-        let value = String(match || '').trim();
-        if (!value) continue;
-        value = value
-            .replace(/^~\/\.openclaw\/workspace/i, workspaceRoot)
-            .replace(/^\/home\/node\/\.openclaw\/workspace/i, workspaceRoot)
-            .replace(/[),.;:]+$/g, '')
-            .trim();
-        if (!value || !path.isAbsolute(value)) continue;
-        const resolved = path.resolve(value);
-        if (seen.has(resolved)) continue;
-        seen.add(resolved);
-        candidates.push(resolved);
-    }
-
-    if (candidates.length === 0) return '';
-
-    const preferred = candidates.find((value) => /\/users\/moltbot\/projects(?:\/|$)/i.test(value));
-    if (preferred) return preferred;
-
-    const projectsLike = candidates.find((value) => /\/projects(?:\/|$)/i.test(value));
-    if (projectsLike) return projectsLike;
-
-    return candidates[0];
+    return extractPreferredProjectBasePathCore(text, { resolveWorkspaceRootHint, pathModule: path });
 }
 
 function inferProjectIntentPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-
-    const explicitBasePath = extractPreferredProjectBasePath(raw);
-
-    const installHereOnly = /^(여기에?\s*)?(설치해|설치|만들어|만들어봐|생성해|세팅해|초기화해)(줘)?$/i.test(raw)
-        || /(여기에|여기|현재\s*경로|지금\s*경로).*(설치|생성|만들|초기화|세팅|setup|bootstrap)/i.test(raw);
-    if (installHereOnly) {
-        const last = loadLastProjectBootstrap();
-        if (last && last.fields) {
-            const fields = {
-                ...last.fields,
-                경로: explicitBasePath || resolveDefaultProjectBasePath(),
-            };
-            return toProjectTemplatePayload(fields, { forceExecute: true });
-        }
-        return toProjectTemplatePayload({
-            프로젝트명: 'rust-tap-game',
-            목표: '모바일에서 실행 가능한 Rust 웹게임 템플릿 생성',
-            스택: 'rust wasm web game',
-            경로: explicitBasePath || resolveDefaultProjectBasePath(),
-            완료기준: '프로젝트 폴더와 기본 Rust/WASM 파일 생성',
-            초기화: 'execute',
-        }, { forceExecute: true });
-    }
-
-    const hasProjectNoun = /(프로젝트|앱|app|웹앱|webapp|web app|게임|템플릿|boilerplate|scaffold)/i.test(raw);
-    const hasBuildVerb = /(만들|생성|초기화|세팅|setup|bootstrap|설치|깔아|구축)/i.test(raw);
-    if (!hasProjectNoun || !hasBuildVerb) return null;
-
-    const rawNameMatch = raw.match(/(?:프로젝트명|이름|projectname|name)\s*[:：]?\s*([a-zA-Z0-9._-]{2,64})/i);
-    const explicitName = rawNameMatch ? String(rawNameMatch[1] || '').trim() : '';
-    const rustHint = /(rust|cargo|wasm|webassembly)/i.test(raw);
-    const gameHint = /(게임|game|tap|터치)/i.test(raw);
-    const defaultName = rustHint
-        ? (gameHint ? 'rust-mobile-tap-game' : 'rust-wasm-app')
-        : 'new-project';
-
-    const fields = {
-        프로젝트명: explicitName || defaultName,
-        목표: raw.replace(/\s+/g, ' ').trim().slice(0, 220),
-        스택: rustHint ? 'rust wasm web game' : 'web app',
-        경로: explicitBasePath || resolveDefaultProjectBasePath(),
-        완료기준: '프로젝트 폴더와 기본 실행 파일 생성',
-        초기화: 'execute',
-    };
-    return toProjectTemplatePayload(fields, { forceExecute: true });
+    return inferProjectIntentPayloadCore(text, {
+        extractPreferredProjectBasePath,
+        loadLastProjectBootstrap,
+        resolveDefaultProjectBasePath,
+        toProjectTemplatePayload,
+    });
 }
 
 function inferNaturalLanguageRoute(text, options = {}) {
-    const env = options.env && typeof options.env === 'object' ? options.env : process.env;
-    if (!NATURAL_LANGUAGE_ROUTING.enabled) return null;
-    if (NATURAL_LANGUAGE_ROUTING.hubOnly && !isHubRuntime(env) && !isResearchRuntime(env)) return null;
-
-    const normalized = normalizeIncomingCommandText(text) || String(text || '').trim();
-    if (!normalized) return null;
-
-    if (NATURAL_LANGUAGE_ROUTING.inferMemo) {
-        const payload = inferMemoIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'memo', payload, inferred: true, inferredBy: 'natural-language:memo' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferFinance) {
-        const payload = inferFinanceIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'finance', payload, inferred: true, inferredBy: 'natural-language:finance' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferTodo) {
-        const payload = inferTodoIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'todo', payload, inferred: true, inferredBy: 'natural-language:todo' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferRoutine) {
-        const payload = inferRoutineIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'routine', payload, inferred: true, inferredBy: 'natural-language:routine' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferWorkout) {
-        const payload = inferWorkoutIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'workout', payload, inferred: true, inferredBy: 'natural-language:workout' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferBrowser) {
-        const payload = inferBrowserIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'ops', payload, inferred: true, inferredBy: 'natural-language:browser' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferStatus) {
-        const payload = inferStatusIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'status', payload, inferred: true, inferredBy: 'natural-language:status' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferLink) {
-        const payload = inferLinkIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'link', payload, inferred: true, inferredBy: 'natural-language:link' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferProject) {
-        const payload = inferProjectIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'project', payload, inferred: true, inferredBy: 'natural-language:project' };
-        }
-    }
-    if (NATURAL_LANGUAGE_ROUTING.inferReport) {
-        const payload = inferReportIntentPayload(normalized);
-        if (payload != null) {
-            return { route: 'report', payload, inferred: true, inferredBy: 'natural-language:report' };
-        }
-    }
-    return null;
+    return inferNaturalLanguageRouteCore(text, options, {
+        NATURAL_LANGUAGE_ROUTING,
+        isHubRuntime,
+        isResearchRuntime,
+        normalizeIncomingCommandText,
+        inferMemoIntentPayload,
+        inferFinanceIntentPayload,
+        inferTodoIntentPayload,
+        inferRoutineIntentPayload,
+        inferWorkoutIntentPayload,
+        inferBrowserIntentPayload,
+        inferScheduleIntentPayload,
+        inferGogLookupIntentPayload,
+        inferStatusIntentPayload,
+        inferLinkIntentPayload,
+        inferProjectIntentPayload,
+        inferReportIntentPayload,
+    });
 }
 
 function routeByPrefix(text) {
-    const rawInput = String(text || '').trim();
-    const input = normalizeIncomingCommandText(rawInput) || rawInput;
-    const prefixes = config.commandPrefixes || {};
-    const list = (v) => Array.isArray(v) ? v.filter(Boolean) : [v].filter(Boolean);
-    const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const matchPrefix = (rawInput, rawPrefix) => {
-        const p = String(rawPrefix || '').trim();
-        if (!p) return null;
-        // Support variants like "링크: ...", "링크 : ...", "링크：...", and optionally no-colon form.
-        const colonMatch = p.match(/^(.*?)[：:]$/);
-        if (colonMatch) {
-            const stem = colonMatch[1].trim();
-            if (!stem) return null;
-            const re = new RegExp(`^\\s*${escapeRegExp(stem)}\\s*(?:[:：])?\\s*`, 'i');
-            const m = rawInput.match(re);
-            return m ? m[0].length : null;
-        }
-        const re = new RegExp(`^\\s*${escapeRegExp(p)}\\s+`, 'i');
-        const m = rawInput.match(re);
-        return m ? m[0].length : null;
-    };
+    return routeByPrefixCore(text, {
+        commandPrefixes: config.commandPrefixes || {},
+        normalizeIncomingCommandText,
+        parseApproveShorthand,
+        parseDenyShorthand,
+        parseNaturalApprovalShorthand,
+        readPendingApprovalsState,
+        hasAnyApprovalHint,
+        inferNaturalLanguageRoute,
+        env: process.env,
+    });
+}
 
-    const routingRules = [
-        { route: 'word', prefixes: list(prefixes.word || '단어:').concat(list(prefixes.learn || '학습:')) },
-        { route: 'memo', prefixes: list(prefixes.memo || '메모:').concat(list(prefixes.record || '기록:')) },
-        { route: 'finance', prefixes: list(prefixes.finance || '가계:').concat(list(prefixes.ledger || '가계부:')) },
-        { route: 'todo', prefixes: list(prefixes.todo || '투두:').concat(list(prefixes.task || '할일:')) },
-        { route: 'routine', prefixes: list(prefixes.routine || '루틴:') },
-        { route: 'workout', prefixes: list(prefixes.workout || '운동:') },
-        { route: 'media', prefixes: list(prefixes.media || '콘텐츠:') },
-        { route: 'place', prefixes: list(prefixes.place || '식당:').concat(list(prefixes.restaurant || '맛집:')) },
-        { route: 'news', prefixes: list(prefixes.news || '소식:') },
-        { route: 'report', prefixes: list(prefixes.report || '리포트:').concat(list(prefixes.summary || '요약:')) },
-        { route: 'work', prefixes: list(prefixes.work || '작업:').concat(list(prefixes.do || '실행:')) },
-        { route: 'inspect', prefixes: list(prefixes.inspect || '점검:').concat(list(prefixes.check || '검토:')) },
-        { route: 'deploy', prefixes: list(prefixes.deploy || '배포:').concat(list(prefixes.ship || '출시:')) },
-        { route: 'project', prefixes: list(prefixes.project || '프로젝트:') },
-        { route: 'prompt', prefixes: list(prefixes.prompt || '프롬프트:').concat(list(prefixes.ask || '질문:')) },
-        { route: 'link', prefixes: list(prefixes.link || '링크:') },
-        { route: 'status', prefixes: list(prefixes.status || '상태:') },
-        { route: 'ops', prefixes: list(prefixes.ops || '운영:') },
-    ];
+function buildGogNoPrefixGuide(inputText) {
+    const raw = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
+    if (!raw) return '';
 
-    for (const rule of routingRules) {
-        for (const prefix of rule.prefixes) {
-            const offset = matchPrefix(input, prefix);
-            if (offset != null) {
-                return { route: rule.route, payload: input.slice(offset).trim() };
-            }
-        }
-    }
-    const approve = parseApproveShorthand(input);
-    if (approve) {
-        return {
-            route: 'ops',
-            payload: approve.normalizedPayload,
-        };
-    }
-    const deny = parseDenyShorthand(input);
-    if (deny) {
-        return {
-            route: 'ops',
-            payload: deny.normalizedPayload,
-        };
-    }
-    const naturalApproval = parseNaturalApprovalShorthand(input);
-    if (naturalApproval) {
-        const hasPending = readPendingApprovalsState().length > 0;
-        if (hasPending || hasAnyApprovalHint()) {
-            return {
-                route: 'ops',
-                payload: naturalApproval.normalizedPayload,
-            };
-        }
-    }
-    const inferred = inferNaturalLanguageRoute(input, { env: process.env });
-    if (inferred) return inferred;
-    return { route: 'none', payload: input }; // no prefix fallback
+    const hasGoogleSignal = /(구글|google|\bgog\b)/i.test(raw);
+    if (!hasGoogleSignal) return '';
+
+    const looksRawGogCommand = /^\s*gog\b/i.test(raw);
+    const hasSkillKeyword = /(스킬|skill)/i.test(raw);
+    const hasGoogleDomain = /(캘린더|calendar|메일|gmail|email|지메일|드라이브|drive)/i.test(raw);
+    if (!looksRawGogCommand && !hasSkillKeyword && !hasGoogleDomain) return '';
+
+    return [
+        'GOG/구글 요청은 유형에 따라 처리됩니다.',
+        '- 조회형은 자동 라우팅됩니다: `구글 캘린더 확인`, `구글 메일 최근 내역 보여줘`, `구글 드라이브 목록 확인`',
+        '- 실행형은 보안상 자동 실행되지 않습니다: `운영: 액션: 실행; 작업: gog ...` 형식을 사용해 주세요.',
+    ].join('\n');
 }
 
 function handlePromptPayload(payloadText) {
@@ -4417,368 +4116,60 @@ async function main() {
                     })));
                     break;
                 }
-                if (routed.route === 'memo') {
-                    try {
-                        const memoJournal = require('./memo_journal');
-                        const memoResult = await memoJournal.handleMemoCommand(routed.payload || fullText);
-                        const legacyLogged = typeof memoResult.logged === 'boolean'
-                            ? memoResult.logged
-                            : Boolean(memoResult && memoResult.success);
-                        console.log(JSON.stringify(withApiMeta({
-                            route: 'memo',
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                            logged: legacyLogged,
-                            ...memoResult,
-                        }, {
-                            route: 'memo',
-                            routeHint: 'memo-journal',
-                            commandText: routed.payload || fullText,
-                        })));
-                    } catch (error) {
-                        console.log(JSON.stringify(withApiMeta({
-                            route: 'memo',
-                            success: false,
-                            errorCode: error && error.code ? error.code : 'MEMO_ROUTE_LOAD_FAILED',
-                            error: String(error && error.message ? error.message : error),
-                            telegramReply: `메모 처리 실패: ${error && error.message ? error.message : error}`,
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                            logged: false,
-                        }, {
-                            route: 'memo',
-                            routeHint: 'memo-journal',
-                            commandText: routed.payload || fullText,
-                        })));
-                    }
-                    break;
-                }
-                if (['finance', 'todo', 'routine', 'workout', 'media', 'place'].includes(routed.route)) {
-                    const out = await handlePersonalRoute(routed.route, routed.payload || fullText, {
-                        source: 'telegram',
-                    });
-                    console.log(JSON.stringify(withApiMeta(out, {
-                        route: routed.route,
-                        commandText: routed.payload || fullText,
-                    })));
-                    break;
-                }
-                if (routed.route === 'word') {
-                    const wordResult = await processWordTokens(routed.payload, toeicDeck, toeicTags, {
-                        source: 'telegram',
-                        rawText: fullText,
-                    });
-                    console.log(JSON.stringify(withApiMeta({
-                        route: routed.route,
-                        preferredModelAlias: 'gpt',
-                        preferredReasoning: 'high',
-                        ...wordResult,
-                    }, {
-                        route: routed.route,
-                        commandText: routed.payload,
-                    })));
-                    break;
-                }
-                if (routed.route === 'news') {
-                    try {
-                        const newsDigest = require('./news_digest');
-                        const normalizedPayload = normalizeNewsCommandPayload(routed.payload);
-                        const result = await newsDigest.handleNewsCommand(normalizedPayload);
-                        const modelMeta = pickPreferredModelMeta(result, 'fast', 'low');
-                        console.log(JSON.stringify(withApiMeta({
-                            route: routed.route,
-                            ...result,
-                            ...modelMeta,
-                        }, {
-                            route: routed.route,
-                            commandText: normalizedPayload,
-                        })));
-                    } catch (error) {
-                        console.log(JSON.stringify(withApiMeta({
-                            route: routed.route,
-                            success: false,
-                            errorCode: error && error.code ? error.code : 'NEWS_ROUTE_LOAD_FAILED',
-                            error: String(error && error.message ? error.message : error),
-                            telegramReply: `소식 모듈 로드 실패: ${error && error.message ? error.message : error}`,
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                        }, {
-                            route: routed.route,
-                            commandText: routed.payload,
-                        })));
-                    }
-                    break;
-                }
-                if (routed.route === 'report') {
-                    const payloadRaw = String(routed.payload || '').trim();
-                    const payload = payloadRaw.toLowerCase();
-                    const forceTrendOnResearch = isResearchRuntime(process.env);
-                    if (payload.includes('블로그')) {
-                        const blog = require('./blog_publish_from_reports');
-                        const res = await blog.publishFromReports();
-                        console.log(JSON.stringify(withApiMeta({
-                            route: 'report',
-                            action: 'blog-publish',
-                            ...res,
-                            telegramReply: appendExternalLinks('리포트 완료'),
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                            routeHint: 'report-blog-publish',
-                        }, {
-                            route: 'report',
-                            routeHint: 'report-blog-publish',
-                            commandText: routed.payload,
-                        })));
-                        break;
-                    }
-                    if (payload.includes('주간')) {
-                        const weekly = require('./weekly_report');
-                        const res = await weekly.buildWeeklyReport();
-                        console.log(JSON.stringify(withApiMeta({
-                            route: 'report',
-                            action: 'weekly',
-                            ...res,
-                            telegramReply: appendExternalLinks('리포트 완료'),
-                            preferredModelAlias: 'fast',
-                            preferredReasoning: 'low',
-                            routeHint: 'report-weekly',
-                        }, {
-                            route: 'report',
-                            routeHint: 'report-weekly',
-                            commandText: routed.payload,
-                        })));
-                        break;
-                    }
-                    if (
-                        forceTrendOnResearch ||
-                        !payload ||
-                        payload.includes('지금요약') ||
-                        payload.includes('요약') ||
-                        payload.includes('상태') ||
-                        payload.includes('이벤트') ||
-                        payload.includes('키워드') ||
-                        payload.includes('소스') ||
-                        payload.includes('트렌드') ||
-                        payload.includes('테크')
-                    ) {
-                        try {
-                            const newsDigest = require('./news_digest');
-                            const normalizedPayload = normalizeReportNewsPayload(payloadRaw || '지금요약');
-                            const result = await newsDigest.handleNewsCommand(normalizedPayload);
-                            const modelMeta = pickPreferredModelMeta(result, 'fast', 'low');
-                            console.log(JSON.stringify(withApiMeta({
-                                route: 'report',
-                                action: 'tech-trend',
-                                ...result,
-                                ...modelMeta,
-                                routeHint: 'report-tech-trend',
-                            }, {
-                                route: 'report',
-                                routeHint: 'report-tech-trend',
-                                commandText: normalizedPayload,
-                            })));
-                        } catch (error) {
-                            console.log(JSON.stringify(withApiMeta({
-                                route: 'report',
-                                success: false,
-                                errorCode: error && error.code ? error.code : 'REPORT_TREND_ROUTE_LOAD_FAILED',
-                                error: String(error && error.message ? error.message : error),
-                                telegramReply: `리포트(테크 트렌드) 처리 실패: ${error && error.message ? error.message : error}`,
-                                preferredModelAlias: 'fast',
-                                preferredReasoning: 'low',
-                                routeHint: 'report-tech-trend',
-                            }, {
-                                route: 'report',
-                                routeHint: 'report-tech-trend',
-                                commandText: routed.payload,
-                            })));
-                        }
-                        break;
-                    }
-                    const daily = require('./daily_summary');
-                    const res = await daily.buildDailySummary();
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'report',
-                        action: 'daily',
-                        ...res,
-                        telegramReply: appendExternalLinks('리포트 완료'),
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        routeHint: 'report-daily',
-                    }, {
-                        route: 'report',
-                        routeHint: 'report-daily',
-                        commandText: routed.payload,
-                    })));
-                    break;
-                }
-                if (routed.route === 'work') {
-                    const parsed = parseStructuredCommand('work', routed.payload);
-                    const telegramReply = appendExternalLinks(parsed.telegramReply || '');
-                    const degradedMode = buildCodexDegradedMeta();
-                    const routeHint = 'complex-workload';
-                    console.log(JSON.stringify(withApiMeta({
-                        route: routed.route,
-                        templateValid: parsed.ok,
-                        ...parsed,
-                        telegramReply,
-                        duelMode: buildDuelModeMeta(),
-                        degradedMode,
-                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                        preferredReasoning: 'high',
-                        routeHint,
-                    }, {
-                        route: routed.route,
-                        routeHint,
-                        commandText: routed.payload,
-                        templateFields: parsed.fields || {},
-                    })));
-                    break;
-                }
-                if (routed.route === 'inspect') {
-                    const parsed = parseStructuredCommand('inspect', routed.payload);
-                    const telegramReply = appendExternalLinks(parsed.telegramReply || '');
-                    const degradedMode = buildCodexDegradedMeta();
-                    const routeHint = 'inspection';
-                    console.log(JSON.stringify(withApiMeta({
-                        route: routed.route,
-                        templateValid: parsed.ok,
-                        ...parsed,
-                        telegramReply,
-                        degradedMode,
-                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                        preferredReasoning: 'medium',
-                        routeHint,
-                    }, {
-                        route: routed.route,
-                        routeHint,
-                        commandText: routed.payload,
-                        templateFields: parsed.fields || {},
-                    })));
-                    break;
-                }
-                if (routed.route === 'deploy') {
-                    const parsed = parseStructuredCommand('deploy', routed.payload);
-                    const telegramReply = appendExternalLinks(parsed.telegramReply || '');
-                    const degradedMode = buildCodexDegradedMeta();
-                    const routeHint = 'deployment';
-                    console.log(JSON.stringify(withApiMeta({
-                        route: routed.route,
-                        templateValid: parsed.ok,
-                        ...parsed,
-                        telegramReply,
-                        degradedMode,
-                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                        preferredReasoning: 'high',
-                        routeHint,
-                    }, {
-                        route: routed.route,
-                        routeHint,
-                        commandText: routed.payload,
-                        templateFields: parsed.fields || {},
-                    })));
-                    break;
-                }
-                if (routed.route === 'project') {
-                    const parsed = parseStructuredCommand('project', routed.payload);
-                    const payload = buildProjectRoutePayload(parsed);
-                    const degradedMode = buildCodexDegradedMeta();
-                    const routeHint = 'project-bootstrap';
-                    console.log(JSON.stringify(withApiMeta({
-                        ...payload,
-                        route: routed.route,
-                        degradedMode,
-                        preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                        preferredReasoning: 'high',
-                        routeHint,
-                    }, {
-                        route: routed.route,
-                        routeHint,
-                        commandText: routed.payload,
-                        templateFields: parsed.fields || {},
-                    })));
-                    break;
-                }
-                if (routed.route === 'prompt') {
-                    const out = handlePromptPayload(routed.payload);
-                    if (out && out.telegramReply) {
-                        out.telegramReply = appendExternalLinks(out.telegramReply);
-                    }
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'prompt',
-                        ...out,
-                    }, {
-                        route: 'prompt',
-                        commandText: routed.payload,
-                    })));
-                    break;
-                }
-                if (routed.route === 'link') {
-                    const reply = buildLinkOnlyReply(routed.payload || '링크');
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'link',
-                        success: true,
-                        telegramReply: reply,
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                    }, {
-                        route: 'link',
-                        commandText: routed.payload,
-                    })));
-                    break;
-                }
-                if (routed.route === 'status') {
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'status',
-                        success: true,
-                        telegramReply: buildQuickStatusReply(routed.payload),
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                    }, {
-                        route: 'status',
-                        commandText: routed.payload,
-                    })));
-                    break;
-                }
-                if (routed.route === 'ops') {
-                    const telegramContext = parseTransportEnvelopeContext(fullText);
-                    const out = runOpsCommand(routed.payload, {
-                        rawText: fullText,
-                        telegramContext,
-                    });
-                    if (out && out.telegramReply) {
-                        out.telegramReply = appendExternalLinks(out.telegramReply);
-                    }
-                    console.log(JSON.stringify(withApiMeta(out, {
-                        route: 'ops',
-                        commandText: routed.payload,
-                    })));
-                    break;
-                }
-                if (routed.route === 'none') {
-                    const pathReply = inferPathListReply(routed.payload || fullText);
-                    const noPrefixReply = pathReply || (isHubRuntime(process.env)
-                        ? buildDailyCasualNoPrefixReply(routed.payload || fullText)
-                        : buildNoPrefixGuide());
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'none',
-                        skipped: fullText,
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                        telegramReply: appendExternalLinks(noPrefixReply),
-                    }, {
-                        route: 'none',
-                        commandText: fullText,
-                    })));
-                    break;
-                }
-                console.log(JSON.stringify(withApiMeta({
-                    route: 'none',
-                    skipped: fullText,
+                const autoRouteResult = await handleAutoRoutedCommand({
+                    routed,
+                    fullText,
+                    toeicDeck,
+                    toeicTags,
+                    env: process.env,
                 }, {
-                    route: 'none',
-                    commandText: fullText,
-                })));
+                    withApiMeta,
+                    appendExternalLinks,
+                    pickPreferredModelMeta,
+                    normalizeNewsCommandPayload,
+                    normalizeReportNewsPayload,
+                    isResearchRuntime,
+                    parseStructuredCommand,
+                    buildCodexDegradedMeta,
+                    buildDuelModeMeta,
+                    buildProjectRoutePayload,
+                    handlePromptPayload,
+                    buildLinkOnlyReply,
+                    buildQuickStatusReply,
+                    parseTransportEnvelopeContext,
+                    runOpsCommand,
+                    inferPathListReply,
+                    buildGogNoPrefixGuide,
+                    buildNoPrefixReply: (text) => buildNoPrefixReplyCore(text, {
+                        isHubRuntime: isHubRuntime(process.env),
+                    }, {
+                        buildDailyCasualNoPrefixReply,
+                        buildNoPrefixGuide,
+                    }),
+                    handlePersonalRoute,
+                    processWordTokens,
+                    handleMemoCommand: async (text) => {
+                        const memoJournal = require('./memo_journal');
+                        return memoJournal.handleMemoCommand(text);
+                    },
+                    handleNewsCommand: async (text) => {
+                        const newsDigest = require('./news_digest');
+                        return newsDigest.handleNewsCommand(text);
+                    },
+                    publishFromReports: async () => {
+                        const blog = require('./blog_publish_from_reports');
+                        return blog.publishFromReports();
+                    },
+                    buildWeeklyReport: async () => {
+                        const weekly = require('./weekly_report');
+                        return weekly.buildWeeklyReport();
+                    },
+                    buildDailySummary: async () => {
+                        const daily = require('./daily_summary');
+                        return daily.buildDailySummary();
+                    },
+                });
+                console.log(JSON.stringify(autoRouteResult));
                 break;
             }
 

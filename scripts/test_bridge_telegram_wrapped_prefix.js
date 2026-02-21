@@ -20,6 +20,13 @@ function main() {
     const normalizedReply = normalizeIncomingCommandText(wrappedReply);
     assert.strictEqual(normalizedReply, '단어: apple');
 
+    const wrappedDollarOps = '$운영: 액션: 실행; 작업: pwd';
+    const normalizedDollarOps = normalizeIncomingCommandText(wrappedDollarOps);
+    assert.strictEqual(normalizedDollarOps, '운영: 액션: 실행; 작업: pwd');
+    const dollarOps = routeByPrefix(wrappedDollarOps);
+    assert.strictEqual(dollarOps.route, 'ops');
+    assert.strictEqual(dollarOps.payload, '액션: 실행; 작업: pwd');
+
     assert.strictEqual(normalizeNewsCommandPayload('테크 트렌드 요약'), '지금요약');
     assert.strictEqual(normalizeNewsCommandPayload('요약'), '지금요약');
     assert.strictEqual(normalizeNewsCommandPayload('상태'), '상태');
