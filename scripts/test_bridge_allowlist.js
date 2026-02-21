@@ -56,7 +56,7 @@ function main() {
 
     const noPrefixGuide = runBridge(['auto', '오늘 뭐 먹지']);
     assert.strictEqual(noPrefixGuide.route, 'none');
-    assert.ok(String(noPrefixGuide.telegramReply || '').includes('명령 프리픽스를 붙여주세요.'));
+    assert.ok(String(noPrefixGuide.telegramReply || '').includes('자연어로 바로 요청하셔도 됩니다.'));
 
     console.log('test_bridge_allowlist: ok');
 }

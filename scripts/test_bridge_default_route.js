@@ -15,7 +15,10 @@ function run() {
   assert.strictEqual(out.apiLane, 'local-only', `expected local-only lane, got ${out.apiLane}`);
   assert.strictEqual(out.apiAuthMode, 'none', `expected none auth mode, got ${out.apiAuthMode}`);
   assert.strictEqual(out.apiBlocked, false, 'none route should not be blocked');
-  assert.ok(typeof out.telegramReply === 'string' && out.telegramReply.includes('프리픽스'), 'missing guidance reply');
+  assert.ok(
+    typeof out.telegramReply === 'string' && out.telegramReply.includes('자연어로 바로 요청하셔도 됩니다.'),
+    'missing guidance reply',
+  );
 
   console.log('test_bridge_default_route: ok');
 }

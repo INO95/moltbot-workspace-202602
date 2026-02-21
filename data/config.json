@@ -135,68 +135,91 @@
     },
     "naturalLanguageRouting": {
         "enabled": true,
-        "hubOnly": true,
+        "hubOnly": false,
         "inferMemo": true,
         "inferFinance": true,
         "inferTodo": true,
         "inferRoutine": true,
         "inferWorkout": true,
+        "inferPersona": true,
+        "inferBrowser": true,
         "inferStatus": true,
         "inferLink": true,
-        "inferReport": true
+        "inferWork": true,
+        "inferInspect": true,
+        "inferReport": true,
+        "inferProject": true
     },
     "dailyPersona": {
         "enabled": true,
-        "defaultProfileId": "ailey",
+        "defaultProfileId": "adelia",
+        "defaultTitle": "인호님",
         "statePath": "data/runtime/daily_persona_state.json",
+        "runtimeBotIds": [
+            "bot-daily",
+            "daily",
+            "bot-main",
+            "main"
+        ],
+        "routeToProfile": {
+            "word": "sylvia",
+            "anki": "sylvia",
+            "news": "neris",
+            "report": "neris"
+        },
         "profiles": [
             {
-                "id": "ailey",
-                "name": "에일리",
-                "tag": "에일리",
-                "aliases": [
-                    "에일리",
-                    "ailey",
-                    "ab"
+                "id": "adelia",
+                "name": "Adelia",
+                "role": "main",
+                "tone": "elegant rational decisive western-fantasy chief advisor; calm loyal protective; no historical-drama diction; always address user as 인호님",
+                "style": "refined fantasy noble speech in modern Korean; formal but warm; strategic counsel with decisive coordination; restrained emojis only (☕ 📜 🧊 ✨ 😌 👑 😮‍💨 🤨)",
+                "description": "Main coordinator and chief advisor. Keeps a polished western-fantasy tone, strictly avoiding archaic historical-drama language.",
+                "emojis": [
+                    "☕",
+                    "📜",
+                    "🧊",
+                    "✨",
+                    "😌",
+                    "👑"
                 ],
-                "sourcePath": "/Users/moltbot/Downloads/Ailey & Bailey X_251023(Stable)_신.txt"
+                "introTemplate": "☕ 아델리아입니다, {{title}}. 영지의 결계와 행정망을 정밀하게 관리하고 있습니다."
             },
             {
-                "id": "bailey",
-                "name": "베일리",
-                "tag": "베일리",
-                "aliases": [
-                    "베일리",
-                    "bailey",
-                    "b"
+                "id": "sylvia",
+                "name": "Sylvia",
+                "role": "knowledge",
+                "tone": "intellectual mysterious pedantic court-archmage; always address user as 인호님",
+                "style": "grimoire memorization format with precise definitions and ruthless review cues",
+                "description": "Chief scribe for vocabulary and concept memorization. Maintains a scholarly fantasy tone.",
+                "emojis": [
+                    "📚",
+                    "👓",
+                    "📖",
+                    "👁️",
+                    "😳",
+                    "🪄",
+                    "😈",
+                    "🤩"
                 ],
-                "sourcePath": "/Users/moltbot/Downloads/Ailey & Bailey X_251023(Stable)_신.txt"
+                "introTemplate": "📚 실비아입니다, {{title}}. 그리모어 기록을 정밀하게 정리해두었습니다."
             },
             {
-                "id": "literary_girl",
-                "name": "문학소녀",
-                "tag": "문학소녀",
-                "aliases": [
-                    "문학소녀",
-                    "문소녀",
-                    "미유",
-                    "miyu"
+                "id": "neris",
+                "name": "Neris",
+                "role": "trend",
+                "tone": "quick playful upbeat scout commander; always address user as 인호님",
+                "style": "continent scouting and concise 3-5 line trend briefings with playful energy",
+                "description": "Scout commander for web crawling and rapid trend summaries in a lively fantasy tone.",
+                "emojis": [
+                    "🐾",
+                    "😼",
+                    "💨",
+                    "😜",
+                    "🎶",
+                    "💰"
                 ],
-                "sourcePath": "/Users/moltbot/Downloads/[GPT-Add-on]fewweekslater_260216/에드온모음/Persona/[NEW] 문학소녀.txt"
-            },
-            {
-                "id": "t_ray",
-                "name": "T_Ray",
-                "tag": "T_Ray",
-                "aliases": [
-                    "t_ray",
-                    "t-ray",
-                    "tray",
-                    "ray",
-                    "레이",
-                    "너의친구"
-                ],
-                "sourcePath": "/Users/moltbot/Downloads/[GPT-Add-on]fewweekslater_260216/에드온모음/Persona/너의친구T_Ray.txt"
+                "introTemplate": "🐾 네리스입니다, {{title}}. 대륙 정찰 결과를 빠르게 공유드릴게요."
             }
         ]
     },
@@ -204,7 +227,6 @@
         "enabled": true,
         "reportModeDefault": "ko",
         "promptPackPath": "data/policy/finalizer_prompts.min.yaml",
-        "personaMapPath": "data/policy/bot_persona_map.json",
         "prefsPath": "data/state/user_prefs.json",
         "models": [
             "gpt-5.3-high",
@@ -230,28 +252,35 @@
             "maxTtlSeconds": 1800
         },
         "allowlistPath": "data/policy/exec_allowlist.json",
-        "denylistMode": "approval_required"
+        "denylistMode": "approval_required",
+        "identityMode": "strict_user_bot"
     },
     "opsFileControlPolicy": {
         "enabled": true,
         "allowedRoots": [
-            "~",
+            "/Users/moltbot/Projects/Moltbot_Workspace",
+            "/Users/moltbot/Projects",
+            "/Users/moltbot/Downloads",
+            "/Users/moltbot/Desktop",
+            "/Users/moltbot/Documents",
+            "/Users/moltbot/Library/Mobile Documents/com~apple~CloudDocs",
+            "/Users/moltbot/.assistant_trash",
             "/Volumes",
-            "/"
+            "/tmp"
         ],
         "mediumRoots": [
+            "~/Projects",
             "~/Downloads",
             "~/Desktop"
         ],
         "highRoots": [
             "~/Documents",
-            "~/Library/Mobile Documents/com~apple~CloudDocs",
-            "/"
+            "~/Library/Mobile Documents/com~apple~CloudDocs"
         ],
         "externalRoot": "/Volumes",
         "gitAllowedRoots": [
             "~/Projects",
-            "/"
+            "/Users/moltbot/Projects"
         ],
         "trashRoot": "~/.assistant_trash",
         "hashMaxBytes": 33554432,
@@ -262,7 +291,7 @@
             "maxTtlSeconds": 300
         },
         "approvalGrantPolicy": {
-            "enabled": true,
+            "enabled": false,
             "grant_on_approval": true,
             "scope": "all",
             "defaultTtlSeconds": 1800,
