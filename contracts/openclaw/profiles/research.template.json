@@ -1,0 +1,19 @@
+{
+  "profile": "research",
+  "update": { "channel": "dev" },
+  "agents": {
+    "defaults": {
+      "workspace": "/Users/moltbot/Projects/Moltbot_Workspace",
+      "sandbox": { "mode": "off" }
+    }
+  },
+  "commands": { "restart": true },
+  "tools": {
+    "exec": {
+      "host": "gateway",
+      "security": "full",
+      "ask": "off"
+    }
+  },
+  "gateway": { "mode": "local" }
+}
