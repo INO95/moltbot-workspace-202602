@@ -26,6 +26,21 @@ function runRouteWithEnv(message, env = {}) {
     return JSON.parse(raw);
 }
 
+function runAutoWithEnv(message, env = {}) {
+    const res = spawnSync('node', ['scripts/bridge.js', 'auto', message], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: {
+            ...process.env,
+            ...env,
+        },
+    });
+    assert.strictEqual(res.status, 0, `bridge auto failed: ${res.stderr || res.stdout}`);
+    const raw = String(res.stdout || '').trim();
+    assert.ok(raw, 'empty auto output');
+    return JSON.parse(raw);
+}
+
 function main() {
     const inferEnv = {
         BRIDGE_NL_ROUTING_ENABLED: 'true',
@@ -76,6 +91,16 @@ function main() {
 
     const workout = runRouteWithEnv('러닝 30분 5km 운동 기록해줘', inferEnv);
     assert.strictEqual(workout.route, 'workout');
+
+    const work = runRouteWithEnv('브릿지 라우터 리팩터링해줘', inferEnv);
+    assert.strictEqual(work.route, 'work');
+    assert.strictEqual(work.inferredBy, 'natural-language:work');
+    assert.ok(/요청:\s*브릿지 라우터 리팩터링해줘/.test(String(work.payload || '')));
+
+    const inspect = runRouteWithEnv('테스트 실패 원인 점검해줘', inferEnv);
+    assert.strictEqual(inspect.route, 'inspect');
+    assert.strictEqual(inspect.inferredBy, 'natural-language:inspect');
+    assert.ok(/체크항목:\s*테스트 실패 원인/.test(String(inspect.payload || '')));
 
     const memoBlock = [
         '260210~15',
@@ -130,6 +155,10 @@ function main() {
         /경로:\s*\/Users\/moltbot\/Projects\b/.test(String(projectExplicitPath.payload || '')),
         `expected explicit /Users path in payload, got: ${projectExplicitPath.payload}`,
     );
+
+    const projectPrefixedLike = runAutoWithEnv('프로젝트 rust wasm 게임 템플릿 만들어줘', inferEnv);
+    assert.strictEqual(projectPrefixedLike.route, 'project');
+    assert.strictEqual(projectPrefixedLike.templateValid, true);
 
     console.log('test_bridge_natural_language_routing: ok');
 }

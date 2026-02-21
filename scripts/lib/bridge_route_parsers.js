@@ -21,7 +21,17 @@ function parsePersonaInfoCommand(text, options = {}) {
   if (/^\/?persona(?:\s+status)?$/i.test(raw)) {
     return { matched: true, route: '' };
   }
-  if (/^(페르소나|캐릭터)\s*(상태|조회|정보|info|설정)?$/i.test(raw)) {
+  if (/^\/?persona\s+(status|info|state)$/i.test(raw)) {
+    return { matched: true, route: '' };
+  }
+  if (/^(페르소나|캐릭터)\s*(상태|조회|정보|info|설정|확인)?$/i.test(raw)) {
+    return { matched: true, route: '' };
+  }
+  if (
+    /(페르소나|캐릭터)/i.test(raw)
+    && /(상태|조회|정보|확인|뭐야|뭐지|어때|알려)/i.test(raw)
+    && !/(바꿔|변경|전환|switch|set|맞춰|설정해|모드로)/i.test(raw)
+  ) {
     return { matched: true, route: '' };
   }
   return { matched: false };
@@ -31,4 +41,3 @@ module.exports = {
   parseReportModeCommand,
   parsePersonaInfoCommand,
 };
-

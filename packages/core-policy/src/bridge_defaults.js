@@ -26,10 +26,13 @@ const DEFAULT_NATURAL_LANGUAGE_ROUTING = Object.freeze({
   inferTodo: true,
   inferRoutine: true,
   inferWorkout: true,
+  inferPersona: true,
   inferBrowser: true,
   inferSchedule: true,
   inferStatus: true,
   inferLink: true,
+  inferWork: true,
+  inferInspect: true,
   inferReport: true,
   inferProject: true,
 });

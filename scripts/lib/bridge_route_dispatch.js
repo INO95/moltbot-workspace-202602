@@ -16,7 +16,8 @@ function matchPrefix(rawInput, rawPrefix) {
   if (colonMatch) {
     const stem = String(colonMatch[1] || '').trim();
     if (!stem) return null;
-    const re = new RegExp(`^\\s*${escapeRegExp(stem)}\\s*(?:[:：])?\\s*`, 'i');
+    // No-colon form must keep a word boundary so "메모장", "작업으로" don't match "메모:", "작업:".
+    const re = new RegExp(`^\\s*${escapeRegExp(stem)}(?:\\s*[:：]\\s*|(?=\\s|$)\\s*)`, 'i');
     const m = input.match(re);
     return m ? m[0].length : null;
   }
@@ -46,6 +47,18 @@ function buildRoutingRules(prefixes = {}) {
     { route: 'status', prefixes: listPrefixes(prefixes.status || '상태:') },
     { route: 'ops', prefixes: listPrefixes(prefixes.ops || '운영:') },
   ];
+}
+
+function isStructuredTemplatePayload(payload) {
+  const raw = String(payload || '').trim();
+  if (!raw) return false;
+  return /(?:^|[;\n])\s*[^:：\n]{1,40}\s*[:：]\s*\S+/.test(raw);
+}
+
+function shouldRetryNaturalInference(route, payload) {
+  const key = String(route || '').trim().toLowerCase();
+  if (!['work', 'inspect', 'project'].includes(key)) return false;
+  return !isStructuredTemplatePayload(payload);
 }
 
 function routeByPrefix(text, deps = {}) {
@@ -82,7 +95,20 @@ function routeByPrefix(text, deps = {}) {
     for (const prefix of rule.prefixes) {
       const offset = matchPrefix(input, prefix);
       if (offset != null) {
-        return { route: rule.route, payload: input.slice(offset).trim() };
+        const payload = input.slice(offset).trim();
+        if (shouldRetryNaturalInference(rule.route, payload)) {
+          const inferred = inferNaturalLanguageRoute(input, {
+            env: deps.env && typeof deps.env === 'object' ? deps.env : process.env,
+          });
+          if (
+            inferred
+            && String(inferred.route || '').trim().toLowerCase() === String(rule.route || '').trim().toLowerCase()
+            && String(inferred.payload || '').trim()
+          ) {
+            return inferred;
+          }
+        }
+        return { route: rule.route, payload };
       }
     }
   }

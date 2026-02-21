@@ -91,8 +91,6 @@ function main() {
         OPS_WORKSPACE_ROOT: tmpRoot,
         OPS_COMMANDS_ROOT: path.join(tmpRoot, 'ops', 'commands'),
         BRIDGE_DIR: path.join(tmpRoot, 'data', 'bridge'),
-        BRIDGE_NL_ROUTING_ENABLED: 'true',
-        BRIDGE_NL_ROUTING_HUB_ONLY: 'false',
     });
     assert.strictEqual(googleCalendarLookup.route, 'ops');
     assert.strictEqual(googleCalendarLookup.templateValid, true);
@@ -106,8 +104,6 @@ function main() {
         OPS_COMMANDS_ROOT: path.join(tmpRoot, 'ops', 'commands'),
         BRIDGE_DIR: path.join(tmpRoot, 'data', 'bridge'),
         BRIDGE_ALLOWLIST_AUTO_ROUTES: 'ops,status,report,link,none',
-        BRIDGE_NL_ROUTING_ENABLED: 'true',
-        BRIDGE_NL_ROUTING_HUB_ONLY: 'false',
     });
     assert.strictEqual(rawGogCommand.route, 'none');
     assert.ok(

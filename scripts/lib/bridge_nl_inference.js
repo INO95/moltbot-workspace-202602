@@ -1,4 +1,6 @@
 const path = require('path');
+const DEFAULT_WORK_TARGET_PATH = '/Users/moltbot/Projects/Moltbot_Workspace';
+const DEFAULT_WORK_DONE_CRITERIA = '요청사항 반영 + 관련 검증 통과 + 변경 요약';
 
 function normalizeMonthToken(rawValue) {
   const token = String(rawValue || '').trim();
@@ -39,7 +41,7 @@ function stripNaturalMemoLead(text) {
   const raw = String(text || '').trim();
   if (!raw) return raw;
   const stripped = raw
-    .replace(/^(메모장|메모|기록|일지|회고|저널|다이어리)\s*(?:[:：]|으로|로|를|은|는)?\s*/i, '')
+    .replace(/^(메모장|메모|기록|일지|회고|저널|다이어리)\s*(?:[:：]|으로|로|에|에게|에서|를|을|은|는)?\s*/i, '')
     .trim();
   return stripped || raw;
 }
@@ -128,7 +130,9 @@ function inferWorkoutIntentPayload(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
 
-  const hasWorkoutKeyword = /(운동|헬스|러닝|달리기|런닝|조깅|걷기|산책|웨이트|스쿼트|벤치|푸쉬업|요가|필라테스|수영|사이클|자전거|workout|run|running|gym|walk|swim|cycle)/i.test(raw);
+  const hasWorkoutKoreanKeyword = /(운동|헬스|러닝|달리기|런닝|조깅|걷기|산책|웨이트|스쿼트|벤치|푸쉬업|요가|필라테스|수영|사이클|자전거)/i.test(raw);
+  const hasWorkoutEnglishKeyword = /\b(workout|run|running|gym|walk|swim|cycle)\b/i.test(raw);
+  const hasWorkoutKeyword = hasWorkoutKoreanKeyword || hasWorkoutEnglishKeyword;
   const hasWorkoutMetric = /(\d{1,4}\s*(분|min)|\d+(?:\.\d+)?\s*(km|킬로)|\d{2,5}\s*(kcal|칼로리))/i.test(raw);
   const hasFinanceOnlyToken = /(¥|￥|\$)\s*\d+|(?:\d[\d,]*(?:\.\d+)?)\s*(?:만엔|엔|円|jpy|원|krw|달러|usd|eur|유로)(?:\s|$)/i.test(raw);
 
@@ -139,6 +143,48 @@ function inferWorkoutIntentPayload(text) {
   return raw
     .replace(/^(운동|workout)\s*(?:으로|로|을|를|은|는)?\s*/i, '')
     .trim() || raw;
+}
+
+function inferPersonaIntentPayload(text, deps = {}) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+  const target = String(deps.defaultTarget || 'daily').trim() || 'daily';
+
+  const hasPersonaKeyword = /(페르소나|캐릭터|persona|character)/i.test(raw);
+  const hasStatusWord = /(상태|조회|확인|정보|뭐야|뭐지|알려|어때)/i.test(raw);
+  const hasChangeWord = /(바꿔|변경|전환|switch|set|설정|모드|맞춰)/i.test(raw);
+  const hasResetWord = /(기본|초기|원복|복귀|자동|해제|리셋|reset|auto)/i.test(raw);
+
+  if (hasPersonaKeyword && hasStatusWord && !hasChangeWord) {
+    return `액션: 페르소나; 대상: ${target}; 작업: 조회`;
+  }
+  if (/^현재\s*(페르소나|캐릭터)\s*(뭐야|뭐지|어때)?$/i.test(raw)) {
+    return `액션: 페르소나; 대상: ${target}; 작업: 조회`;
+  }
+
+  if (hasPersonaKeyword && hasResetWord) {
+    return `액션: 페르소나; 대상: ${target}; 작업: 자동`;
+  }
+
+  const presetName = (() => {
+    if (/(아델리아|adelia)\b/i.test(raw)) return 'Adelia';
+    if (/(실비아|sylvia)\b/i.test(raw)) return 'Sylvia';
+    if (/(네리스|neris)\b/i.test(raw)) return 'Neris';
+    return '';
+  })();
+  const looksPresetSwitch = Boolean(
+    presetName
+    && (
+      hasPersonaKeyword
+      || /(아델리아|실비아|네리스|adelia|sylvia|neris).*(바꿔|변경|전환|switch|set|모드|맞춰)/i.test(raw)
+      || /(바꿔|변경|전환|switch|set|모드|맞춰).*(아델리아|실비아|네리스|adelia|sylvia|neris)/i.test(raw)
+    ),
+  );
+  if (looksPresetSwitch) {
+    return `액션: 페르소나; 대상: ${target}; 프리셋: ${presetName}`;
+  }
+
+  return null;
 }
 
 function inferBrowserIntentPayload(text) {
@@ -249,6 +295,58 @@ function inferLinkIntentPayload(text, deps = {}) {
   const hasOpsTarget = /(프롬프트|prompt|오픈클로|openclaw|웹앱|webapp|웹|web|대시보드|터널|tunnel|상태페이지|페이지)/i.test(raw);
   if (!(hasDeliveryVerb || hasOpsTarget)) return null;
   return raw;
+}
+
+function inferWorkIntentPayload(text, deps = {}) {
+  const defaultTargetPath = String(deps.defaultTargetPath || DEFAULT_WORK_TARGET_PATH).trim() || DEFAULT_WORK_TARGET_PATH;
+  const defaultDoneCriteria = String(deps.defaultDoneCriteria || DEFAULT_WORK_DONE_CRITERIA).trim() || DEFAULT_WORK_DONE_CRITERIA;
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+
+  const hasWorkKeyword = /(작업|work|리팩터링|리팩토링|구현|개발|코드|패치|버그|수정)/i.test(raw);
+  const hasEngineeringNoun = /(브릿지|bridge|라우터|router|테스트|test|모듈|module|스크립트|script|파일|file|함수|function|repo|리포지토리)/i.test(raw);
+  const hasActionVerb = /(해줘|해주세요|진행|수정|개선|적용|반영|작성|구현|리팩터링|리팩토링|정리)/i.test(raw);
+
+  if (!(hasWorkKeyword || hasEngineeringNoun)) return null;
+  if (!hasActionVerb && raw.length > 140) return null;
+  if (/(점검|검토|inspect|review)/i.test(raw)) return null;
+  if (/(배포|출시|deploy|ship)/i.test(raw)) return null;
+  if (/(프로젝트|템플릿|bootstrap|scaffold|초기화)/i.test(raw)) return null;
+
+  const targetMatch = raw.match(/(?:대상|범위|target|scope|파일|경로)\s*[:：]\s*([^\n;]+)/i);
+  const explicitTarget = String(targetMatch && targetMatch[1] ? targetMatch[1] : '').trim();
+  const request = raw.replace(/^(작업|work)\s*(?:으로|로|을|를|은|는)?\s*/i, '').trim() || raw;
+
+  return [
+    `요청: ${request}`,
+    `대상: ${explicitTarget || defaultTargetPath}`,
+    `완료기준: ${defaultDoneCriteria}`,
+  ].join('; ');
+}
+
+function inferInspectIntentPayload(text, deps = {}) {
+  const defaultTargetPath = String(deps.defaultTargetPath || DEFAULT_WORK_TARGET_PATH).trim() || DEFAULT_WORK_TARGET_PATH;
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+
+  const hasInspectKeyword = /(점검|검토|inspect|review)/i.test(raw);
+  const hasCheckKeyword = /(체크|check)/i.test(raw);
+  const hasTechnicalContext = /(테스트|test|실패|오류|에러|error|bug|버그|로그|원인|성능|커버리지|lint|빌드|build|ci|파이프라인|코드|모듈|함수|서비스)/i.test(raw);
+  if (!hasInspectKeyword && !(hasCheckKeyword && hasTechnicalContext)) return null;
+
+  const targetMatch = raw.match(/(?:대상|범위|target|scope|파일|경로)\s*[:：]\s*([^\n;]+)/i);
+  const explicitTarget = String(targetMatch && targetMatch[1] ? targetMatch[1] : '').trim();
+
+  const checklistRaw = raw
+    .replace(/^(점검|검토|inspect|review)\s*(?:으로|로|을|를|은|는)?\s*/i, '')
+    .replace(/(?:점검|검토|inspect|review|체크|check)\s*(?:해줘|해주세요|해|부탁해|부탁)\s*$/i, '')
+    .trim();
+  const checklist = (checklistRaw || raw).slice(0, 220);
+
+  return [
+    `대상: ${explicitTarget || defaultTargetPath}`,
+    `체크항목: ${checklist}`,
+  ].join('; ');
 }
 
 function inferReportIntentPayload(text) {
@@ -396,6 +494,9 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
   const inferGogLookup = typeof deps.inferGogLookupIntentPayload === 'function' ? deps.inferGogLookupIntentPayload : inferGogLookupIntentPayload;
   const inferStatus = typeof deps.inferStatusIntentPayload === 'function' ? deps.inferStatusIntentPayload : inferStatusIntentPayload;
   const inferLink = typeof deps.inferLinkIntentPayload === 'function' ? deps.inferLinkIntentPayload : inferLinkIntentPayload;
+  const inferPersona = typeof deps.inferPersonaIntentPayload === 'function' ? deps.inferPersonaIntentPayload : inferPersonaIntentPayload;
+  const inferWork = typeof deps.inferWorkIntentPayload === 'function' ? deps.inferWorkIntentPayload : inferWorkIntentPayload;
+  const inferInspect = typeof deps.inferInspectIntentPayload === 'function' ? deps.inferInspectIntentPayload : inferInspectIntentPayload;
   const inferProject = typeof deps.inferProjectIntentPayload === 'function' ? deps.inferProjectIntentPayload : inferProjectIntentPayload;
   const inferReport = typeof deps.inferReportIntentPayload === 'function' ? deps.inferReportIntentPayload : inferReportIntentPayload;
 
@@ -423,14 +524,6 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
       return { route: 'routine', payload, inferred: true, inferredBy: 'natural-language:routine' };
     }
   }
-  // Prefer explicit project bootstrap/install intent before workout to avoid
-  // false-positives on path-heavy installation sentences.
-  if (routing.inferProject) {
-    const payload = inferProject(normalized);
-    if (payload != null) {
-      return { route: 'project', payload, inferred: true, inferredBy: 'natural-language:project' };
-    }
-  }
   if (routing.inferWorkout) {
     const payload = inferWorkout(normalized);
     if (payload != null) {
@@ -455,6 +548,12 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
       return { route: 'ops', payload, inferred: true, inferredBy: 'natural-language:gog-lookup' };
     }
   }
+  if (routing.inferPersona) {
+    const payload = inferPersona(normalized);
+    if (payload != null) {
+      return { route: 'ops', payload, inferred: true, inferredBy: 'natural-language:persona' };
+    }
+  }
   if (routing.inferStatus) {
     const payload = inferStatus(normalized);
     if (payload != null) {
@@ -465,6 +564,24 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
     const payload = inferLink(normalized);
     if (payload != null) {
       return { route: 'link', payload, inferred: true, inferredBy: 'natural-language:link' };
+    }
+  }
+  if (routing.inferProject) {
+    const payload = inferProject(normalized);
+    if (payload != null) {
+      return { route: 'project', payload, inferred: true, inferredBy: 'natural-language:project' };
+    }
+  }
+  if (routing.inferWork) {
+    const payload = inferWork(normalized);
+    if (payload != null) {
+      return { route: 'work', payload, inferred: true, inferredBy: 'natural-language:work' };
+    }
+  }
+  if (routing.inferInspect) {
+    const payload = inferInspect(normalized);
+    if (payload != null) {
+      return { route: 'inspect', payload, inferred: true, inferredBy: 'natural-language:inspect' };
     }
   }
   if (routing.inferReport) {
@@ -489,8 +606,11 @@ module.exports = {
   inferBrowserIntentPayload,
   inferScheduleIntentPayload,
   inferGogLookupIntentPayload,
+  inferPersonaIntentPayload,
   inferStatusIntentPayload,
   inferLinkIntentPayload,
+  inferWorkIntentPayload,
+  inferInspectIntentPayload,
   inferReportIntentPayload,
   extractPreferredProjectBasePath,
   inferProjectIntentPayload,
