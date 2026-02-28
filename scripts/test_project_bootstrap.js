@@ -6,19 +6,19 @@ function main() {
         프로젝트명: 'My New App',
         목표: '테스트',
         스택: 'next.js typescript pnpm',
-        경로: '/Users/moltbot/Projects',
+        경로: '/Users/inho-baek/Projects',
         완료기준: 'dev server 실행',
         초기화: '실행',
     });
 
     assert.strictEqual(nextPlan.projectName, 'my-new-app');
     assert.strictEqual(nextPlan.template, 'next-ts');
-    assert.strictEqual(nextPlan.targetPath, '/Users/moltbot/Projects/my-new-app');
+    assert.strictEqual(nextPlan.targetPath, '/Users/inho-baek/Projects/my-new-app');
     assert.strictEqual(nextPlan.packageManager, 'pnpm');
     assert.strictEqual(nextPlan.initMode, 'execute');
-    assert.strictEqual(nextPlan.requiresApproval, true);
+    assert.strictEqual(nextPlan.requiresApproval, false);
     assert.ok(Array.isArray(nextPlan.approvalReasons));
-    assert.ok(nextPlan.approvalReasons.includes('init_mode_execute'));
+    assert.ok(!nextPlan.approvalReasons.includes('init_mode_execute'));
     assert.ok(Array.isArray(nextPlan.commands) && nextPlan.commands.length > 0);
     assert.ok(nextPlan.commands.some((cmd) => cmd.includes('create next-app')));
     assert.ok(Array.isArray(nextPlan.qualityGates) && nextPlan.qualityGates.length >= 3);
@@ -28,7 +28,7 @@ function main() {
     const nodePlan = buildProjectBootstrapPlan({
         프로젝트명: 'api-server',
         스택: 'node express yarn',
-        경로: '/Users/moltbot/Projects/services',
+        경로: '/Users/inho-baek/Projects/services',
     });
     assert.strictEqual(nodePlan.template, 'node-express');
     assert.strictEqual(nodePlan.packageManager, 'yarn');
@@ -49,7 +49,7 @@ function main() {
         프로젝트명: 'outside-app',
         스택: 'vite react',
         경로: '/tmp/outside',
-        허용경로: '/Users/moltbot/Projects',
+        허용경로: '/Users/inho-baek/Projects',
     });
     assert.strictEqual(blockedPathPlan.pathPolicy.allowed, false);
     assert.strictEqual(blockedPathPlan.requiresApproval, true);

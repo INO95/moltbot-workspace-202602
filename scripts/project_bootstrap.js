@@ -1,7 +1,18 @@
+const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_PROJECTS_ROOT = String(process.env.OPENCLAW_PROJECTS_ROOT || '/Users/moltbot/Projects').trim();
-const DEFAULT_ALLOWED_ROOTS = [DEFAULT_PROJECTS_ROOT];
+const FIXED_PROJECTS_ROOT = '/Users/inho-baek/Projects';
+const ROOT_CANDIDATES = [FIXED_PROJECTS_ROOT];
+
+function pickDefaultProjectsRoot() {
+  return path.resolve(FIXED_PROJECTS_ROOT);
+}
+
+const DEFAULT_PROJECTS_ROOT = pickDefaultProjectsRoot();
+const DEFAULT_ALLOWED_ROOTS = Array.from(new Set([
+  DEFAULT_PROJECTS_ROOT,
+  ...ROOT_CANDIDATES,
+].map((value) => path.resolve(String(value || '').trim()))));
 
 function sanitizeProjectName(raw) {
   const base = String(raw || '').trim().toLowerCase();
@@ -65,6 +76,9 @@ function normalizeTargetPath(basePath, projectName, options = {}) {
 
 function detectTemplate(stackText) {
   const stack = String(stackText || '').trim().toLowerCase();
+  if (/(rust|cargo|wasm|webassembly)/.test(stack)) {
+    return { id: 'rust-wasm-web', label: 'Rust + WASM Web' };
+  }
   if (/(next|next\.js|nextjs)/.test(stack)) {
     return { id: 'next-ts', label: 'Next.js + TypeScript' };
   }
@@ -112,6 +126,33 @@ function addDependencyCommand(packageManager, name, { dev = false } = {}) {
 function buildBootstrapCommands({ template, projectName, targetPath, packageManager }) {
   const parentPath = path.dirname(targetPath);
   switch (template.id) {
+    case 'rust-wasm-web':
+      return [
+        `mkdir -p "${parentPath}"`,
+        `cd "${parentPath}"`,
+        `if [ -d "${projectName}" ]; then mkdir -p "${projectName}/src"; elif command -v cargo >/dev/null 2>&1; then cargo new "${projectName}" --lib; else mkdir -p "${projectName}/src"; fi`,
+        `cd "${targetPath}"`,
+        `if [ ! -f Cargo.toml ]; then cat > Cargo.toml <<'EOF'
+[package]
+name = "${projectName}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+EOF
+fi`,
+        `if [ ! -f src/lib.rs ]; then cat > src/lib.rs <<'EOF'
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(start)]
+pub fn start() {}
+EOF
+fi`,
+      ];
     case 'next-ts':
       return [
         `mkdir -p "${parentPath}"`,
@@ -188,6 +229,12 @@ function buildQualityGates({ template, packageManager }) {
       'python -m pytest -q',
     ];
   }
+  if (template.id === 'rust-wasm-web') {
+    return [
+      'cargo check',
+      'cargo test',
+    ];
+  }
   const gates = [
     cmd('lint'),
     cmd('typecheck'),
@@ -241,13 +288,14 @@ function buildProjectBootstrapPlan(fields = {}) {
   const qualityGates = buildQualityGates({ template, packageManager });
   const runCommand = template.id === 'fastapi'
     ? 'source .venv/bin/activate && uvicorn main:app --reload'
-    : devCommand(packageManager);
+    : template.id === 'rust-wasm-web'
+      ? 'wasm-pack build --target web'
+      : devCommand(packageManager);
   const warnings = [...pathPlan.warnings];
   if (!policy.allowed) {
     warnings.push(`생성 경로가 허용 루트 밖입니다: ${targetPath}`);
   }
   const approvalReasons = [];
-  if (initMode === 'execute') approvalReasons.push('init_mode_execute');
   if (!policy.allowed) approvalReasons.push('path_outside_allowed_root');
 
   return {

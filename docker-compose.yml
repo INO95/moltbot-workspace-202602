@@ -8,14 +8,15 @@ services:
       - openclaw_anki_state:/state-anki:rw
       - openclaw_research_state:/state-research:rw
       - openclaw_daily_state:/state-daily:rw
+      - openclaw_codex_state:/state-codex:rw
       - openclaw_dev_bak_state:/state-dev-bak:rw
       - openclaw_anki_bak_state:/state-anki-bak:rw
       - openclaw_research_bak_state:/state-research-bak:rw
       - openclaw_daily_bak_state:/state-daily-bak:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace/configs/dev:/seed-dev:ro
-      - /Users/moltbot/Projects/Moltbot_Workspace/configs/anki:/seed-anki:ro
-      - /Users/moltbot/Projects/Moltbot_Workspace/configs/research:/seed-research:ro
-      - /Users/moltbot/Projects/Moltbot_Workspace/configs/daily:/seed-daily:ro
+      - /Users/inho-baek/Projects/Moltbot_Workspace/configs/dev:/seed-dev:ro
+      - /Users/inho-baek/Projects/Moltbot_Workspace/configs/anki:/seed-anki:ro
+      - /Users/inho-baek/Projects/Moltbot_Workspace/configs/research:/seed-research:ro
+      - /Users/inho-baek/Projects/Moltbot_Workspace/configs/daily:/seed-daily:ro
     command:
       - /bin/sh
       - -lc
@@ -33,6 +34,9 @@ services:
         if [ ! -f /state-daily/openclaw.json ] && [ -f /seed-daily/openclaw.json ]; then
           cp -r /seed-daily/. /state-daily/
         fi
+        if [ ! -f /state-codex/openclaw.json ] && [ -f /seed-dev/openclaw.json ]; then
+          cp -r /seed-dev/. /state-codex/
+        fi
 
         if [ ! -f /state-dev-bak/openclaw.json ] && [ -f /seed-dev/openclaw.json ]; then
           cp -r /seed-dev/. /state-dev-bak/
@@ -48,7 +52,7 @@ services:
         fi
 
         chown -R 1000:1000 \
-          /state-dev /state-anki /state-research /state-daily \
+          /state-dev /state-anki /state-research /state-daily /state-codex \
           /state-dev-bak /state-anki-bak /state-research-bak /state-daily-bak
     restart: "no"
 
@@ -127,6 +131,9 @@ services:
         condition: service_started
     environment:
       HOME: /home/node
+      XDG_CONFIG_HOME: /home/node/.openclaw/xdg
+      GOG_KEYRING_BACKEND: file
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD:-}
       TERM: xterm-256color
       DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_DEV:-${OPENCLAW_GATEWAY_TOKEN:-}}
@@ -153,8 +160,8 @@ services:
       BRIDGE_BLOCK_HINT: "개발 전용 봇입니다. 안키/리서쳐/일상 봇으로 요청을 보내주세요."
     volumes:
       - openclaw_dev_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:18789:18789"
@@ -212,6 +219,9 @@ services:
         condition: service_started
     environment:
       HOME: /home/node
+      XDG_CONFIG_HOME: /home/node/.openclaw/xdg
+      GOG_KEYRING_BACKEND: file
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD:-}
       TERM: xterm-256color
       DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_ANKI:-${OPENCLAW_GATEWAY_TOKEN_SUB1:-${OPENCLAW_GATEWAY_TOKEN:-}}}
@@ -238,8 +248,8 @@ services:
       BRIDGE_BLOCK_HINT: "안키 전용 봇입니다. 개발/리서쳐/일상 봇으로 요청을 보내주세요."
     volumes:
       - openclaw_anki_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:18889:18789"
@@ -298,6 +308,9 @@ services:
         condition: service_started
     environment:
       HOME: /home/node
+      XDG_CONFIG_HOME: /home/node/.openclaw/xdg
+      GOG_KEYRING_BACKEND: file
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD:-}
       TERM: xterm-256color
       DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_RESEARCH:-${OPENCLAW_GATEWAY_TOKEN:-}}
@@ -320,12 +333,12 @@ services:
       MOLTBOT_BOT_ROLE: worker
       BRIDGE_ALLOWLIST_ENABLED: "true"
       BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
-      BRIDGE_ALLOWLIST_AUTO_ROUTES: "news,report,prompt"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "news,report,prompt,ops,link,status"
       BRIDGE_BLOCK_HINT: "리서쳐 전용 봇입니다. 개발/안키/일상 봇으로 요청을 보내주세요."
     volumes:
       - openclaw_research_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:18989:18789"
@@ -383,6 +396,9 @@ services:
         condition: service_started
     environment:
       HOME: /home/node
+      XDG_CONFIG_HOME: /home/node/.openclaw/xdg
+      GOG_KEYRING_BACKEND: file
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD:-}
       TERM: xterm-256color
       DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_DAILY:-${OPENCLAW_GATEWAY_TOKEN:-}}
@@ -409,8 +425,8 @@ services:
       BRIDGE_BLOCK_HINT: "데일리 허브에서 처리할 수 없는 명령입니다. 템플릿/프리픽스를 확인해주세요."
     volumes:
       - openclaw_daily_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:19089:18789"
@@ -432,6 +448,95 @@ services:
       - |
         if [ -f /home/node/.openclaw/workspace/.env ]; then
           echo "[openclaw-daily] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
+          exit 1
+        fi
+        AUTH_ROOT="/home/node/.openclaw"
+        chmod 700 "$$AUTH_ROOT" || true
+        AUTH_FILE="$$AUTH_ROOT/auth-profiles.json"
+        AUTH_AGENT_DIR="$$AUTH_ROOT/agents/main/agent"
+        AUTH_AGENT_FILE="$$AUTH_AGENT_DIR/auth-profiles.json"
+        mkdir -p "$$AUTH_AGENT_DIR"
+        if [ ! -f "$$AUTH_FILE" ]; then
+          printf '{"profiles":{}}\n' > "$$AUTH_FILE"
+        fi
+        if [ -L "$$AUTH_AGENT_FILE" ]; then
+          rm -f "$$AUTH_AGENT_FILE"
+        fi
+        if [ -f "$$AUTH_AGENT_FILE" ]; then
+          cp "$$AUTH_AGENT_FILE" "$$AUTH_FILE"
+        fi
+        cp "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        chmod 600 "$$AUTH_FILE" "$$AUTH_AGENT_FILE"
+        exec node dist/index.js gateway --bind loopback --port 18789
+    profiles:
+      - live
+
+  openclaw-codex:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-dockercli
+    image: openclaw:local-dockercli
+    container_name: moltbot-codex
+    depends_on:
+      openclaw-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    environment:
+      HOME: /home/node
+      XDG_CONFIG_HOME: /home/node/.openclaw/xdg
+      GOG_KEYRING_BACKEND: file
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD:-}
+      TERM: xterm-256color
+      DOCKER_HOST: unix:///var/run/docker-proxy/docker.sock
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN_CODEX:-${OPENCLAW_GATEWAY_TOKEN_DEV:-${OPENCLAW_GATEWAY_TOKEN:-}}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENCLAW_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ""
+      OPENCLAW_GEMINI_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      OPENCLAW_GOOGLE_API_KEY: ""
+      TRELLO_API_KEY: ${TRELLO_API_KEY:-}
+      TRELLO_TOKEN: ${TRELLO_TOKEN:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEV_TUNNEL_TARGET: ${DEV_TUNNEL_TARGET:-http://host.docker.internal:18787}
+      DEV_TUNNEL_PUBLIC_BASE_URL: ${DEV_TUNNEL_PUBLIC_BASE_URL:-}
+      PROMPT_PUBLIC_BASE_URL: ${PROMPT_PUBLIC_BASE_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_CODEX:-${TELEGRAM_BOT_TOKEN_DEV:-${TELEGRAM_BOT_TOKEN:-}}}
+      TELEGRAM_USER_ID: ${TELEGRAM_USER_ID_CODEX:-${TELEGRAM_USER_ID:-}}
+      MOLTBOT_BOT_ID: bot-codex
+      MOLTBOT_BOT_ROLE: worker
+      CODEX_CAPABILITY_TIMEOUT_MS: "300000"
+      BRIDGE_ALLOWLIST_ENABLED: "true"
+      BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "none,status,ops"
+      BRIDGE_BLOCK_HINT: "코덱스 전용 봇입니다. 작업 요청/답변 또는 /status,/cancel 명령을 사용해 주세요."
+    volumes:
+      - openclaw_codex_state:/home/node/.openclaw:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
+      - docker_proxy_sock:/var/run/docker-proxy
+    ports:
+      - "127.0.0.1:19489:18789"
+      - "127.0.0.1:19490:18790"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moltbot-network
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -f /home/node/.openclaw/workspace/.env ]; then
+          echo "[openclaw-codex] workspace/.env must not exist. move secrets to MOLTBOT_ENV_FILE." >&2
           exit 1
         fi
         AUTH_ROOT="/home/node/.openclaw"
@@ -494,8 +599,8 @@ services:
       BRIDGE_BLOCK_HINT: "개발 백업 봇입니다. 평시에는 사용하지 않습니다."
     volumes:
       - openclaw_dev_bak_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:19189:18789"
@@ -579,8 +684,8 @@ services:
       BRIDGE_BLOCK_HINT: "안키 백업 봇입니다. 평시에는 사용하지 않습니다."
     volumes:
       - openclaw_anki_bak_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:19289:18789"
@@ -660,12 +765,12 @@ services:
       MOLTBOT_BOT_ROLE: worker
       BRIDGE_ALLOWLIST_ENABLED: "true"
       BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
-      BRIDGE_ALLOWLIST_AUTO_ROUTES: "news,report,prompt"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "news,report,prompt,ops,link,status"
       BRIDGE_BLOCK_HINT: "리서쳐 백업 봇입니다. 평시에는 사용하지 않습니다."
     volumes:
       - openclaw_research_bak_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:19389:18789"
@@ -749,8 +854,9 @@ services:
       BRIDGE_BLOCK_HINT: "데일리(백업) 허브에서 처리할 수 없는 명령입니다. 템플릿/프리픽스를 확인해주세요."
     volumes:
       - openclaw_daily_bak_state:/home/node/.openclaw:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
-      - /Users/moltbot/Projects/Moltbot_Workspace:/Users/moltbot/Projects/Moltbot_Workspace:rw
+      - /Users/inho-baek/Projects/Moltbot_Workspace:/home/node/.openclaw/workspace:rw
+      - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
+      - /Users/inho-baek/.codex:/home/node/.codex:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
       - "127.0.0.1:19489:18789"
@@ -766,6 +872,9 @@ services:
       - no-new-privileges:true
     networks:
       - moltbot-network
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     command:
       - /bin/sh
       - -lc
@@ -805,6 +914,7 @@ volumes:
   openclaw_anki_state:
   openclaw_research_state:
   openclaw_daily_state:
+  openclaw_codex_state:
   openclaw_dev_bak_state:
   openclaw_anki_bak_state:
   openclaw_research_bak_state:

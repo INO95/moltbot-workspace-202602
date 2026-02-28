@@ -1,5 +1,5 @@
 const path = require('path');
-const DEFAULT_WORK_TARGET_PATH = '/Users/moltbot/Projects/Moltbot_Workspace';
+const DEFAULT_WORK_TARGET_PATH = '/Users/inho-baek/Projects/Moltbot_Workspace';
 const DEFAULT_WORK_DONE_CRITERIA = '요청사항 반영 + 관련 검증 통과 + 변경 요약';
 
 function normalizeMonthToken(rawValue) {
@@ -91,12 +91,154 @@ function inferFinanceIntentPayload(text) {
     .trim() || raw;
 }
 
-function inferTodoIntentPayload(text) {
+function normalizeKeywordTokens(values = [], fallback = []) {
+  const source = Array.isArray(values) && values.length > 0
+    ? values
+    : fallback;
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(source) ? source : []) {
+    const token = String(raw || '').trim().toLowerCase();
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+}
+
+function hasAnyKeyword(rawLower = '', keywords = []) {
+  if (!rawLower) return false;
+  for (const token of Array.isArray(keywords) ? keywords : []) {
+    if (!token) continue;
+    if (rawLower.includes(String(token))) return true;
+  }
+  return false;
+}
+
+const SIMPLE_WORD_PHRASE_RE = /^[A-Za-z][A-Za-z\-']*(?:\s+[A-Za-z][A-Za-z\-']*){0,3}$/;
+const COMMAND_HINT_RE = /(해줘|해주세요|하라고|저장|보여|알려|확인|실행|작업|점검|배포|프로젝트|리포트|요약|소식|링크|상태|운영)/i;
+const WORD_CONTROL_TOKEN_SET = new Set([
+  'anki',
+  'bot',
+  'daily',
+  'dev',
+  'research',
+  'openclaw',
+  'prompt',
+  'report',
+  'news',
+  'ops',
+  'memo',
+  'todo',
+  'routine',
+  'workout',
+  'project',
+  'deploy',
+  'inspect',
+  'work',
+  'status',
+  'link',
+]);
+
+function normalizeWordIntentInput(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\\n/g, '\n')
+    .trim();
+}
+
+function isLikelyQuestionLikeEnglishSentence(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (/[?？]$/.test(raw)) return true;
+  const lower = raw.toLowerCase();
+  if (/^(who|what|when|where|why|how)\b/.test(lower)) return true;
+  const words = lower.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+  const hasPronoun = words.some((w) => ['i', 'you', 'we', 'they', 'he', 'she', 'it', 'this', 'that'].includes(w));
+  const hasAux = words.some((w) => [
+    'am', 'is', 'are', 'was', 'were',
+    'do', 'does', 'did',
+    'can', 'could', 'will', 'would', 'should', 'may', 'might',
+  ].includes(w));
+  return hasPronoun && hasAux;
+}
+
+function isWordTemplateOrCommandLike(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return true;
+  if (/\bhttps?:\/\//i.test(text)) return true;
+  if (/^(운영|작업|점검|배포|프로젝트|리포트|요약|소식|링크|상태|메모|가계|투두|루틴|운동)\s*[:：]/i.test(text)) return true;
+  if (/(?:^|[;\n])\s*(요청|대상|완료기준|액션|작업|경로|URL|url)\s*[:：]/i.test(text)) return true;
+  return false;
+}
+
+function isWordLikeLine(rawLine) {
+  const line = String(rawLine || '').trim();
+  if (!line) return false;
+
+  if (SIMPLE_WORD_PHRASE_RE.test(line)) {
+    const lower = line.toLowerCase();
+    if (WORD_CONTROL_TOKEN_SET.has(lower)) return false;
+    if (isLikelyQuestionLikeEnglishSentence(line)) return false;
+    return true;
+  }
+
+  const englishWithHint = line.match(/^([A-Za-z][A-Za-z\-'\s]{0,120})\s+([가-힣][가-힣0-9\s,./()~\-'"“”‘’]+)$/);
+  if (!englishWithHint) return false;
+
+  const word = String(englishWithHint[1] || '').trim().toLowerCase();
+  const hint = String(englishWithHint[2] || '').trim();
+  if (!word || !hint) return false;
+  if (WORD_CONTROL_TOKEN_SET.has(word)) return false;
+  if (COMMAND_HINT_RE.test(hint)) return false;
+  return true;
+}
+
+function inferWordIntentPayload(text, deps = {}) {
+  const normalizeWordInput = typeof deps.normalizeWordIntentInput === 'function'
+    ? deps.normalizeWordIntentInput
+    : normalizeWordIntentInput;
+
+  const raw = normalizeWordInput(text);
+  if (!raw) return null;
+  if (isWordTemplateOrCommandLike(raw)) return null;
+
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  if (lines.length === 1) {
+    return isWordLikeLine(lines[0]) ? raw : null;
+  }
+  return lines.every((line) => isWordLikeLine(line)) ? raw : null;
+}
+
+function inferTodoIntentPayload(text, deps = {}) {
   const raw = String(text || '').trim();
   if (!raw) return null;
+  const lower = raw.toLowerCase();
 
   const hasTodoKeyword = /(투두|todo|to-do|할일|할 일|task|체크리스트)/i.test(raw);
   const hasTodoAction = /(추가|등록|완료|끝|체크|재개|다시|삭제|지움|목록|리스트|요약|통계|status|list|done|remove|open|add)/i.test(raw);
+  const todoStatsKeywords = normalizeKeywordTokens(deps.adaptiveKeywords, [
+    '통계',
+    '요약',
+    '목록',
+    '리스트',
+    'status',
+    'list',
+    '조회',
+    '보여',
+    '알려',
+    '정리',
+  ]);
+  const hasStatsSignal = hasAnyKeyword(lower, todoStatsKeywords)
+    || /(통계|요약|목록|리스트|status|list)/i.test(raw);
+  const hasListVerb = /(조회|보여|알려|정리|확인|체크|show|status|list)/i.test(raw);
+
+  if (hasTodoKeyword && hasStatsSignal && hasListVerb) {
+    return '통계';
+  }
 
   if (hasTodoKeyword && hasTodoAction) {
     return raw
@@ -143,57 +285,18 @@ function inferWorkoutIntentPayload(text) {
     .trim() || raw;
 }
 
-function inferPersonaIntentPayload(text, deps = {}) {
-  const raw = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!raw) return null;
-  const target = String(deps.defaultTarget || 'daily').trim() || 'daily';
-
-  const hasPersonaKeyword = /(페르소나|캐릭터|persona|character)/i.test(raw);
-  const hasStatusWord = /(상태|조회|확인|정보|뭐야|뭐지|알려|어때)/i.test(raw);
-  const hasChangeWord = /(바꿔|변경|전환|switch|set|설정|모드|맞춰)/i.test(raw);
-  const hasResetWord = /(기본|초기|원복|복귀|자동|해제|리셋|reset|auto)/i.test(raw);
-
-  if (hasPersonaKeyword && hasStatusWord && !hasChangeWord) {
-    return `액션: 페르소나; 대상: ${target}; 작업: 조회`;
-  }
-  if (/^현재\s*(페르소나|캐릭터)\s*(뭐야|뭐지|어때)?$/i.test(raw)) {
-    return `액션: 페르소나; 대상: ${target}; 작업: 조회`;
-  }
-
-  if (hasPersonaKeyword && hasResetWord) {
-    return `액션: 페르소나; 대상: ${target}; 작업: 자동`;
-  }
-
-  const presetName = (() => {
-    if (/(아델리아|adelia)\b/i.test(raw)) return 'Adelia';
-    if (/(실비아|sylvia)\b/i.test(raw)) return 'Sylvia';
-    if (/(네리스|neris)\b/i.test(raw)) return 'Neris';
-    return '';
-  })();
-  const looksPresetSwitch = Boolean(
-    presetName
-    && (
-      hasPersonaKeyword
-      || /(아델리아|실비아|네리스|adelia|sylvia|neris).*(바꿔|변경|전환|switch|set|모드|맞춰)/i.test(raw)
-      || /(바꿔|변경|전환|switch|set|모드|맞춰).*(아델리아|실비아|네리스|adelia|sylvia|neris)/i.test(raw)
-    ),
-  );
-  if (looksPresetSwitch) {
-    return `액션: 페르소나; 대상: ${target}; 프리셋: ${presetName}`;
-  }
-
-  return null;
-}
-
 function inferBrowserIntentPayload(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
+  const blockedDomainRegex = /(fmkorea\.com|dcinside\.com)/i;
+  const blockedCommunityIntent = /(펨코|fmkorea|포텐|디시인사이드|dcinside|\b디시\b|특이점이\s*온다|thesingularity)/i.test(raw);
 
   const hasBrowserKeyword = /(브라우저|browser|웹자동화|web automation|openclaw browser|오픈클로 브라우저)/i.test(raw);
   const hasLookupIntent = /(찾아|검색|search|열어|접속|이동|보여|조회|확인|뭐\s*있|뭐있|추천|최신|인기|베스트|포텐)/i.test(raw);
   const hasLibraryIntent = /(라이브러리|library|스킬|skill|문서|docs?|도큐먼트)/i.test(raw);
   const hasCommunityIntent = /(펨코|fmkorea|포텐|디시|dcinside|갤러리|레딧|reddit|커뮤니티)/i.test(raw);
   if (!hasBrowserKeyword && !(hasLibraryIntent && hasLookupIntent) && !(hasCommunityIntent && hasLookupIntent)) return null;
+  if (blockedCommunityIntent) return null;
 
   const urlMatch = raw.match(/https?:\/\/[^\s<>'"`]+/i);
   const keywordMatch = raw.match(/(?:키워드|keyword)\s*[:：]\s*([^\n;]+)/i);
@@ -216,6 +319,7 @@ function inferBrowserIntentPayload(text) {
       targetUrl = 'https://clawhub.com/';
     }
   }
+  if (blockedDomainRegex.test(targetUrl)) return null;
 
   return `액션: 브라우저; 작업: open; URL: ${targetUrl}`;
 }
@@ -301,6 +405,28 @@ function inferWorkIntentPayload(text, deps = {}) {
   const raw = String(text || '').replace(/\s+/g, ' ').trim();
   if (!raw) return null;
 
+  const rootCauseKeywords = normalizeKeywordTokens(deps.inspectRootCauseKeywords, [
+    '왜 이렇게',
+    '원인',
+    '재발',
+    '회귀',
+    '재귀개선',
+    '분석',
+    '파악',
+  ]);
+  const improveKeywords = normalizeKeywordTokens(deps.inspectImproveKeywords, [
+    '개선',
+    '고쳐',
+    '수정',
+    '보완',
+    '대책',
+    '재귀개선',
+  ]);
+  const lower = raw.toLowerCase();
+  const hasRootCauseSignal = hasAnyKeyword(lower, rootCauseKeywords);
+  const hasImproveSignal = hasAnyKeyword(lower, improveKeywords);
+  if (hasRootCauseSignal && hasImproveSignal) return null;
+
   const hasWorkKeyword = /(작업|work|리팩터링|리팩토링|구현|개발|코드|패치|버그|수정)/i.test(raw);
   const hasEngineeringNoun = /(브릿지|bridge|라우터|router|테스트|test|모듈|module|스크립트|script|파일|file|함수|function|repo|리포지토리)/i.test(raw);
   const hasActionVerb = /(해줘|해주세요|진행|수정|개선|적용|반영|작성|구현|리팩터링|리팩토링|정리)/i.test(raw);
@@ -326,11 +452,33 @@ function inferInspectIntentPayload(text, deps = {}) {
   const defaultTargetPath = String(deps.defaultTargetPath || DEFAULT_WORK_TARGET_PATH).trim() || DEFAULT_WORK_TARGET_PATH;
   const raw = String(text || '').replace(/\s+/g, ' ').trim();
   if (!raw) return null;
+  const lower = raw.toLowerCase();
+
+  const rootCauseKeywords = normalizeKeywordTokens(deps.inspectRootCauseKeywords, [
+    '왜 이렇게',
+    '원인',
+    '재발',
+    '회귀',
+    '재귀개선',
+    '분석',
+    '파악',
+  ]);
+  const improveKeywords = normalizeKeywordTokens(deps.inspectImproveKeywords, [
+    '개선',
+    '고쳐',
+    '수정',
+    '보완',
+    '대책',
+    '재귀개선',
+  ]);
+  const hasRootCauseSignal = hasAnyKeyword(lower, rootCauseKeywords);
+  const hasImproveSignal = hasAnyKeyword(lower, improveKeywords);
+  const hasRootCauseImproveCombo = hasRootCauseSignal && hasImproveSignal;
 
   const hasInspectKeyword = /(점검|검토|inspect|review)/i.test(raw);
   const hasCheckKeyword = /(체크|check)/i.test(raw);
   const hasTechnicalContext = /(테스트|test|실패|오류|에러|error|bug|버그|로그|원인|성능|커버리지|lint|빌드|build|ci|파이프라인|코드|모듈|함수|서비스)/i.test(raw);
-  if (!hasInspectKeyword && !(hasCheckKeyword && hasTechnicalContext)) return null;
+  if (!hasInspectKeyword && !(hasCheckKeyword && hasTechnicalContext) && !hasRootCauseImproveCombo) return null;
 
   const targetMatch = raw.match(/(?:대상|범위|target|scope|파일|경로)\s*[:：]\s*([^\n;]+)/i);
   const explicitTarget = String(targetMatch && targetMatch[1] ? targetMatch[1] : '').trim();
@@ -472,6 +620,7 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
   const routing = deps.NATURAL_LANGUAGE_ROUTING || {};
   const isHubRuntime = typeof deps.isHubRuntime === 'function' ? deps.isHubRuntime : () => false;
   const isResearchRuntime = typeof deps.isResearchRuntime === 'function' ? deps.isResearchRuntime : () => false;
+  const isWordRuntime = typeof deps.isWordRuntime === 'function' ? deps.isWordRuntime : () => false;
   const normalizeIncomingCommandText = typeof deps.normalizeIncomingCommandText === 'function'
     ? deps.normalizeIncomingCommandText
     : (value) => String(value || '').trim();
@@ -483,6 +632,7 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
   if (!normalized) return null;
 
   const inferMemo = typeof deps.inferMemoIntentPayload === 'function' ? deps.inferMemoIntentPayload : inferMemoIntentPayload;
+  const inferWord = typeof deps.inferWordIntentPayload === 'function' ? deps.inferWordIntentPayload : inferWordIntentPayload;
   const inferFinance = typeof deps.inferFinanceIntentPayload === 'function' ? deps.inferFinanceIntentPayload : inferFinanceIntentPayload;
   const inferTodo = typeof deps.inferTodoIntentPayload === 'function' ? deps.inferTodoIntentPayload : inferTodoIntentPayload;
   const inferRoutine = typeof deps.inferRoutineIntentPayload === 'function' ? deps.inferRoutineIntentPayload : inferRoutineIntentPayload;
@@ -492,12 +642,17 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
   const inferGogLookup = typeof deps.inferGogLookupIntentPayload === 'function' ? deps.inferGogLookupIntentPayload : inferGogLookupIntentPayload;
   const inferStatus = typeof deps.inferStatusIntentPayload === 'function' ? deps.inferStatusIntentPayload : inferStatusIntentPayload;
   const inferLink = typeof deps.inferLinkIntentPayload === 'function' ? deps.inferLinkIntentPayload : inferLinkIntentPayload;
-  const inferPersona = typeof deps.inferPersonaIntentPayload === 'function' ? deps.inferPersonaIntentPayload : inferPersonaIntentPayload;
   const inferWork = typeof deps.inferWorkIntentPayload === 'function' ? deps.inferWorkIntentPayload : inferWorkIntentPayload;
   const inferInspect = typeof deps.inferInspectIntentPayload === 'function' ? deps.inferInspectIntentPayload : inferInspectIntentPayload;
   const inferProject = typeof deps.inferProjectIntentPayload === 'function' ? deps.inferProjectIntentPayload : inferProjectIntentPayload;
   const inferReport = typeof deps.inferReportIntentPayload === 'function' ? deps.inferReportIntentPayload : inferReportIntentPayload;
 
+  if (routing.inferWord || isWordRuntime(env)) {
+    const payload = inferWord(normalized);
+    if (payload != null) {
+      return { route: 'word', payload, inferred: true, inferredBy: 'natural-language:word' };
+    }
+  }
   if (routing.inferMemo) {
     const payload = inferMemo(normalized);
     if (payload != null) {
@@ -546,12 +701,6 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
       return { route: 'ops', payload, inferred: true, inferredBy: 'natural-language:gog-lookup' };
     }
   }
-  if (routing.inferPersona) {
-    const payload = inferPersona(normalized);
-    if (payload != null) {
-      return { route: 'ops', payload, inferred: true, inferredBy: 'natural-language:persona' };
-    }
-  }
   if (routing.inferStatus) {
     const payload = inferStatus(normalized);
     if (payload != null) {
@@ -596,6 +745,8 @@ module.exports = {
   extractMemoStatsPayload,
   isLikelyMemoJournalBlock,
   stripNaturalMemoLead,
+  normalizeWordIntentInput,
+  inferWordIntentPayload,
   inferMemoIntentPayload,
   inferFinanceIntentPayload,
   inferTodoIntentPayload,
@@ -604,7 +755,6 @@ module.exports = {
   inferBrowserIntentPayload,
   inferScheduleIntentPayload,
   inferGogLookupIntentPayload,
-  inferPersonaIntentPayload,
   inferStatusIntentPayload,
   inferLinkIntentPayload,
   inferWorkIntentPayload,
