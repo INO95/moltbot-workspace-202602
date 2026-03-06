@@ -2,13 +2,15 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const personalBriefing = require('./personal_briefing');
+const personalStorage = require('./personal_storage');
 
 function writeJson(filePath, data) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function run() {
+async function run() {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-briefing-'));
     process.env.OPS_WORKSPACE_ROOT = tmpRoot;
     process.env.BRIDGE_DIR = path.join(tmpRoot, 'data', 'bridge');
@@ -132,7 +134,94 @@ function run() {
     const eveningText = fs.readFileSync(evening.result.reportPath, 'utf8');
     assert.ok(eveningText.includes('Evening Briefing'));
     assert.ok(eveningText.includes('Open Issues Carrying Over'));
+
+    const personalDbPath = path.join(tmpRoot, 'data', 'personal', 'personal.sqlite');
+    personalStorage.ensureStorage({ dbPath: personalDbPath });
+
+    const personalMorningEmpty = personalBriefing.buildMorningText({
+        now: '2026-02-16T08:30:00+09:00',
+        dbPath: personalDbPath,
+    });
+    assert.ok(!personalMorningEmpty.includes('단어 활동:'), 'word section should be hidden when there is no activity');
+
+    const personalEveningEmpty = personalBriefing.buildEveningText({
+        now: '2026-02-16T18:30:00+09:00',
+        dbPath: personalDbPath,
+    });
+    assert.ok(!personalEveningEmpty.includes('단어 활동:'), 'evening word section should be hidden when there is no activity');
+
+    const sameDaySaved = [
+        ['activate', '2026-02-16T01:00:00+09:00'],
+        ['align', '2026-02-16T01:30:00+09:00'],
+        ['brief', '2026-02-16T02:00:00+09:00'],
+        ['compose', '2026-02-16T02:30:00+09:00'],
+        ['dedupe', '2026-02-16T03:00:00+09:00'],
+        ['escalate', '2026-02-16T03:30:00+09:00'],
+    ];
+    sameDaySaved.forEach(([word, createdAt], index) => {
+        personalStorage.recordVocabLog({
+            eventId: `same-day-${index}`,
+            word,
+            deck: 'TOEIC_AI',
+            noteId: index + 1,
+            saveStatus: 'saved',
+            createdAt,
+        }, { dbPath: personalDbPath });
+    });
+    personalStorage.recordVocabLog({
+        eventId: 'same-day-failed',
+        word: 'fragle',
+        deck: 'TOEIC_AI',
+        saveStatus: 'failed',
+        errorText: 'parse_failed',
+        createdAt: '2026-02-16T04:00:00+09:00',
+    }, { dbPath: personalDbPath });
+    personalStorage.recordVocabLog({
+        eventId: 'prev-day-saved',
+        word: 'yesterday',
+        deck: 'TOEIC_AI',
+        noteId: 99,
+        saveStatus: 'saved',
+        createdAt: '2026-02-15T22:00:00+09:00',
+    }, { dbPath: personalDbPath });
+
+    const personalMorning = personalBriefing.buildMorningText({
+        now: '2026-02-16T08:30:00+09:00',
+        dbPath: personalDbPath,
+    });
+    assert.ok(personalMorning.includes('단어 활동:'), 'morning word section should render on active day');
+    assert.ok(personalMorning.includes('저장: 6건'));
+    assert.ok(personalMorning.includes('실패: 1건'));
+    assert.ok(personalMorning.includes('escalate'));
+    assert.ok(!personalMorning.includes('activate'), 'oldest saved word should be excluded from recent list');
+    assert.ok(!personalMorning.includes('yesterday'), 'previous-day word should be excluded');
+
+    const personalEvening = personalBriefing.buildEveningText({
+        now: '2026-02-16T18:30:00+09:00',
+        dbPath: personalDbPath,
+    });
+    assert.ok(personalEvening.includes('단어 활동:'), 'evening word section should render on active day');
+    assert.ok(personalEvening.includes('저장: 6건'));
+    assert.ok(personalEvening.includes('실패: 1건'));
+    assert.ok(personalEvening.includes('escalate'));
+    assert.ok(!personalEvening.includes('activate'));
+    assert.ok(!personalEvening.includes('yesterday'));
+
+    const personalRun = await personalBriefing.run('morning', {
+        enqueue: false,
+        now: '2026-02-16T08:30:00+09:00',
+        dbPath: personalDbPath,
+    });
+    assert.strictEqual(personalRun.ok, true);
+    assert.strictEqual(personalRun.enqueue, false);
+    assert.ok(personalRun.text.includes('단어 활동:'));
 }
 
-run();
-console.log('test_ops_briefing_generation: ok');
+run()
+    .then(() => {
+        console.log('test_ops_briefing_generation: ok');
+    })
+    .catch((error) => {
+        console.error(String(error && error.stack ? error.stack : error));
+        process.exit(1);
+    });
