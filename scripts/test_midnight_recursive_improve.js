@@ -392,6 +392,58 @@ function testScenarioRecoverableRetry() {
   }
 }
 
+function testScenarioManagedBranchConflictRepair() {
+  const tmpRoot = makeTmpRoot();
+  try {
+    initGitRepo(tmpRoot);
+    const managedWorktreePath = path.join(tmpRoot, '.worktrees', 'nightly-recursive-improve');
+    runGit(tmpRoot, ['worktree', 'add', '-b', 'codex/nightly-recursive-improve', managedWorktreePath, 'main']);
+
+    const config = buildConfig({
+      MIDNIGHT_RECURSIVE_MAIN_WORKSPACE: tmpRoot,
+      MIDNIGHT_RECURSIVE_WORKTREE: path.join(tmpRoot, '.tmp', 'nightly-recursive-worktree'),
+      MIDNIGHT_RECURSIVE_BASE_BRANCH: 'main',
+      MIDNIGHT_RECURSIVE_DRY_RUN: '1',
+      MIDNIGHT_RECURSIVE_MAX_ITERATIONS: '1',
+    }, tmpRoot);
+
+    fs.mkdirSync(config.worktreePath, { recursive: true });
+    fs.writeFileSync(
+      path.join(config.worktreePath, '.git'),
+      'gitdir: /Users/moltbot/Projects/Moltbot_Workspace/.git/worktrees/nightly-recursive-worktree\n',
+      'utf8',
+    );
+
+    const report = runMidnightRecursiveImprove(config, {
+      readJson: (_filePath, fallback) => fallback,
+      acquireLock: () => ({ acquired: true, lockPath: '/tmp/lock.json' }),
+      releaseLock: () => {},
+      runRoutingLoopOnce: () => ({ ok: true, totalAdded: 0 }),
+      runSkillFeedbackLoopOnce: () => ({ ok: true, newPendingIds: [], appliedIds: [] }),
+      runCommandsStage: () => ({ stage: 'noop', ok: true, failedCommand: '', rows: [] }),
+      stageAllowedChanges: () => ({
+        ok: true,
+        reason: 'no_changes',
+        changedPaths: [],
+        stagedPaths: [],
+        disallowedPaths: [],
+      }),
+      ensureGhAuth: () => ({ ok: true }),
+      writeJson,
+      makeTempRoot: makeTmpRoot,
+      cleanupTempRoot: (dirPath) => fs.rmSync(dirPath, { recursive: true, force: true }),
+    });
+
+    const worktreeList = runGit(tmpRoot, ['worktree', 'list', '--porcelain']);
+    assert.strictEqual(report.ok, true);
+    assert.strictEqual(report.preflight.repaired, true);
+    assert.strictEqual(worktreeList.includes(config.worktreePath), true);
+    assert.strictEqual(worktreeList.includes(managedWorktreePath), false);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
 function testRepairBlockedOutsideManagedPath() {
   const tmpRoot = makeTmpRoot();
   const outsideRoot = makeTmpRoot();
@@ -434,6 +486,7 @@ function main() {
   testScenarioLockBusy();
   testScenarioBrokenWorktreeAutoRepair();
   testScenarioRecoverableRetry();
+  testScenarioManagedBranchConflictRepair();
   testRepairBlockedOutsideManagedPath();
   console.log('test_midnight_recursive_improve: ok');
 }
