@@ -7,6 +7,7 @@ const LOCK_PATH = path.join(LOCK_DIR, 'codex_model_switch.lock');
 
 const PREFERRED_CODEX_MODELS = [
     'openai-codex/gpt-5.3-codex',
+    'openai-codex/gpt-5.3-codex-spark',
     'openai-codex/gpt-5.2-codex',
     'openai-codex/gpt-5.2',
     'openai-codex/gpt-5.1-codex-max',

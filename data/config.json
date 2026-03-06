@@ -155,8 +155,8 @@
         "promptPackPath": "data/policy/finalizer_prompts.min.yaml",
         "prefsPath": "data/state/user_prefs.json",
         "models": [
-            "gpt-5.3-high",
-            "gpt-5.2-high"
+            "gpt-5.2-pro",
+            "gpt-5.2"
         ],
         "fallbackModelAlias": "gpt"
     },

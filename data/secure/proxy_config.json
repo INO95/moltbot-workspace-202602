@@ -1,0 +1,17 @@
+{
+    "proxies": {
+        "codex": {
+            "port": 3000,
+            "provider": "openai-chatgpt",
+            "auth": {
+                "accessToken": ""
+            },
+            "model": {
+                "default": "gpt-5.2-pro"
+            },
+            "security": {
+                "allowLocalOnly": true
+            }
+        }
+    }
+}

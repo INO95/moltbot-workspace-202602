@@ -68,6 +68,23 @@ const PROFILE_META = {
     defaultTelegramEnabled: false,
     telegramName: 'MoltbotDaily',
   },
+  codex: {
+    container: 'moltbot-codex',
+    service: 'openclaw-codex',
+    composeProfile: 'live',
+    templateProfile: 'dev',
+    gatewayEnv: 'OPENCLAW_GATEWAY_TOKEN_CODEX',
+    gatewayFallbackEnv: 'OPENCLAW_GATEWAY_TOKEN_DEV',
+    gatewayFallbackEnv2: 'OPENCLAW_GATEWAY_TOKEN',
+    botEnv: 'TELEGRAM_BOT_TOKEN_CODEX',
+    botFallbackEnv: 'TELEGRAM_BOT_TOKEN_DEV',
+    userEnv: 'TELEGRAM_USER_ID_CODEX',
+    userFallbackEnv: 'TELEGRAM_USER_ID',
+    enableEnv: 'OPENCLAW_CODEX_TELEGRAM_ENABLED',
+    enableFallbackEnv: 'OPENCLAW_DEV_TELEGRAM_ENABLED',
+    defaultTelegramEnabled: false,
+    telegramName: 'MoltbotCodex',
+  },
   dev_bak: {
     container: 'moltbot-dev-bak',
     service: 'openclaw-dev-bak',
@@ -136,7 +153,7 @@ const PROFILE_META = {
   },
 };
 
-const LIVE_PROFILES = ['dev', 'anki', 'research', 'daily'];
+const LIVE_PROFILES = ['dev', 'anki', 'research', 'daily', 'codex'];
 const BACKUP_PROFILES = ['dev_bak', 'anki_bak', 'research_bak', 'daily_bak'];
 const ALL_PROFILES = [...LIVE_PROFILES, ...BACKUP_PROFILES];
 const PROFILE_ALIASES = {
@@ -186,6 +203,12 @@ function parseBoolean(input, fallback = false) {
   if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
   if (['0', 'false', 'no', 'off'].includes(raw)) return false;
   return fallback;
+}
+
+function execPolicyFor(profile) {
+  // Backup daily bot runs fully inside container; avoid node-pairing requirement.
+  if (profile === 'daily_bak') return { host: 'sandbox', ask: 'off' };
+  return null;
 }
 
 function ensureContainerRunning(profile) {
@@ -324,12 +347,15 @@ if (cfg.plugins.entries.github) {
   }
 }
 
-// Hard-disable Google auth plugins for this workspace policy.
-if (cfg.plugins.entries['google-antigravity-auth']) {
-  cfg.plugins.entries['google-antigravity-auth'].enabled = false;
-}
-if (cfg.plugins.entries['google-gemini-cli-auth']) {
-  cfg.plugins.entries['google-gemini-cli-auth'].enabled = false;
+// Remove stale Google auth plugin entries so OpenClaw stops warning on load.
+delete cfg.plugins.entries['google-antigravity-auth'];
+delete cfg.plugins.entries['google-gemini-cli-auth'];
+
+cfg.tools = cfg.tools || {};
+cfg.tools.exec = cfg.tools.exec || {};
+if (payload.execPolicy && typeof payload.execPolicy === 'object') {
+  if (payload.execPolicy.host) cfg.tools.exec.host = String(payload.execPolicy.host);
+  if (payload.execPolicy.ask) cfg.tools.exec.ask = String(payload.execPolicy.ask);
 }
 
 fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\\n', 'utf8');
@@ -340,6 +366,8 @@ process.stdout.write(JSON.stringify({
   cfgPath,
   gatewayTokenSet: Boolean(cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token),
   telegramEnabled: cfg && cfg.channels && cfg.channels.telegram ? cfg.channels.telegram.enabled === true : false,
+  execHost: cfg && cfg.tools && cfg.tools.exec ? cfg.tools.exec.host || null : null,
+  execAsk: cfg && cfg.tools && cfg.tools.exec ? cfg.tools.exec.ask || null : null,
   githubTokenSet: Boolean(
     (cfg && cfg.skills && cfg.skills.entries && cfg.skills.entries.github &&
       cfg.skills.entries.github.env && cfg.skills.entries.github.env.GITHUB_TOKEN) ||
@@ -384,6 +412,7 @@ function payloadFor(profile, action) {
       botToken: '',
       allowFrom: [],
       telegramName: meta.telegramName,
+      execPolicy: execPolicyFor(profile),
     };
   }
 
@@ -406,11 +435,12 @@ function payloadFor(profile, action) {
     botToken,
     allowFrom: ensureStringArray(allowFromRaw),
     telegramName: meta.telegramName,
+    execPolicy: execPolicyFor(profile),
   };
 }
 
 function usage() {
-  console.error('Usage: node scripts/openclaw_config_secrets.js <inject|redact> <dev|anki|research|daily|dev_bak|anki_bak|research_bak|daily_bak|all_live|all_backup|all>');
+  console.error('Usage: node scripts/openclaw_config_secrets.js <inject|redact> <dev|anki|research|daily|codex|dev_bak|anki_bak|research_bak|daily_bak|all_live|all_backup|all>');
 }
 
 function resolveProfiles(profileArg) {

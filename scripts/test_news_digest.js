@@ -5,6 +5,24 @@ const path = require('path');
 const { ensureNewsSchema, writeJsonFile, runSql, runSqlJson } = require('./news_storage');
 const { handleNewsCommand, buildDigestText } = require('./news_digest');
 
+async function withEnv(overrides, fn) {
+    const keys = Object.keys(overrides);
+    const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    try {
+        for (const k of keys) {
+            const v = overrides[k];
+            if (v == null) delete process.env[k];
+            else process.env[k] = String(v);
+        }
+        return await fn();
+    } finally {
+        for (const k of keys) {
+            if (prev[k] == null) delete process.env[k];
+            else process.env[k] = prev[k];
+        }
+    }
+}
+
 async function main() {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const dbPath = path.join(__dirname, '..', 'data', 'tmp', `news_digest_test_${suffix}.sqlite`);
@@ -18,6 +36,7 @@ async function main() {
         tokenBudget: { maxFetchedBytesPerRun: 180000, maxItemsPerSourcePerRun: 30 },
         thresholds: { windowMinutes: 120, minMentions: 2, velocityThreshold: 1.1, cooldownHours: 2 },
         eventThresholds: { scoreThreshold: 2.3, minMentions: 3, minVelocity: 1.5 },
+        eventAlertsEnabled: false,
         sources: [
             { id: 'hn', enabled: true, pollMinutes: 20 },
             { id: 'forem', enabled: true, pollMinutes: 30 },
@@ -66,17 +85,35 @@ VALUES
     const hn = sourceConfig.sources.find((row) => row.id === 'hn');
     assert.strictEqual(hn.enabled, false);
 
-    const digest = await handleNewsCommand('지금요약', {
+    const digest = await withEnv({ NEWS_DIGEST_MODEL_WRITE: '0' }, async () => handleNewsCommand('지금요약', {
         dbPath,
         sourcesPath,
         statePath,
         collectFn: async () => ({ ok: true, summary: { inserted: 0 }, budget: { usageRatio: 0 } }),
         trendFn: async () => ({ ok: true, createdCount: 0, trends: [] }),
-    });
+    }));
     assert.strictEqual(digest.success, true);
     assert.ok(digest.telegramReply.includes('테크 트렌드 칼럼'));
     assert.strictEqual(digest.preferredModelAlias, 'gpt');
     assert.strictEqual(digest.activeModelStage, 'write');
+
+    const eventDisabled = await handleNewsCommand('이벤트', {
+        dbPath,
+        sourcesPath,
+        statePath,
+        enqueue: true,
+        collectFn: async () => {
+            throw new Error('event_collect_must_not_run');
+        },
+        trendFn: async () => {
+            throw new Error('event_trend_must_not_run');
+        },
+    });
+    assert.strictEqual(eventDisabled.success, true);
+    assert.strictEqual(eventDisabled.triggered, 0);
+    assert.strictEqual(eventDisabled.queued, false);
+    assert.strictEqual(eventDisabled.directSent, false);
+    assert.strictEqual(eventDisabled.delivery.directReason, 'event_alert_disabled');
 
     const digestNoDup = buildDigestText([
         { keyword: 'ai', mention_count: 10, velocity: 2.3, trend_score: 5.2, level: 'high' },

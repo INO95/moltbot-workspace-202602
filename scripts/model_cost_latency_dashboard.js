@@ -13,6 +13,7 @@ const LOCK_DIR = path.join(__dirname, '../data/locks');
 const LOCK_PATH = path.join(LOCK_DIR, 'model_benchmark.lock');
 const CODEX_PREFERRED = [
     'openai-codex/gpt-5.3-codex',
+    'openai-codex/gpt-5.3-codex-spark',
     'openai-codex/gpt-5.2-codex',
     'openai-codex/gpt-5.2',
     'openai-codex/gpt-5.1-codex-max',
