@@ -347,23 +347,69 @@ function isManagedAutomationWorktreePath(config, targetPath = config.worktreePat
   return resolveManagedWorktreePaths(config).includes(candidatePath);
 }
 
+function parseRegisteredWorktreeEntries(stdout) {
+  const entries = [];
+  let current = null;
+  for (const rawLine of String(stdout || '').split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith('worktree ')) {
+      if (current) entries.push(current);
+      current = {
+        worktreePath: canonicalizePath(line.slice('worktree '.length).trim()),
+        branchRef: '',
+      };
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith('branch ')) {
+      current.branchRef = line.slice('branch '.length).trim();
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+
 function listRegisteredWorktrees(mainWorkspace) {
   const res = runProcess('git', ['worktree', 'list', '--porcelain'], { cwd: mainWorkspace });
   if (!res.ok) {
     return {
       ok: false,
       worktreePaths: [],
+      entries: [],
       error: res.stderr || res.error || res.stdout || `exit:${res.code}`,
     };
   }
 
-  const worktreePaths = [];
-  for (const line of String(res.stdout || '').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('worktree ')) continue;
-    worktreePaths.push(canonicalizePath(trimmed.slice('worktree '.length).trim()));
+  const entries = parseRegisteredWorktreeEntries(res.stdout);
+  const worktreePaths = entries.map((entry) => entry.worktreePath);
+  return { ok: true, worktreePaths, entries, error: '' };
+}
+
+function findManagedBranchConflict(config, registry = listRegisteredWorktrees(config.mainWorkspace)) {
+  if (!registry || registry.ok !== true) {
+    return {
+      ok: false,
+      conflictPath: '',
+      branchRef: `refs/heads/${config.branch}`,
+    };
   }
-  return { ok: true, worktreePaths, error: '' };
+
+  const targetPath = canonicalizePath(config.worktreePath);
+  const branchRef = `refs/heads/${config.branch}`;
+  const entries = Array.isArray(registry.entries) ? registry.entries : [];
+  const conflict = entries.find((entry) => (
+    entry
+    && entry.branchRef === branchRef
+    && entry.worktreePath !== targetPath
+    && isManagedAutomationWorktreePath(config, entry.worktreePath)
+  ));
+
+  return {
+    ok: true,
+    conflictPath: conflict ? conflict.worktreePath : '',
+    branchRef,
+  };
 }
 
 function inspectWorktreePreflight(config) {
@@ -507,6 +553,21 @@ function repairWorktree(config, preflight = {}) {
       fs.rmSync(gitdirPath, { recursive: true, force: true });
       steps.push({ step: 'rm_gitdir_path', ok: true, detail: gitdirPath });
       if (repairAction === 'none') repairAction = 'remove_stale_gitdir';
+    }
+  }
+
+  const branchConflict = findManagedBranchConflict(config);
+  if (branchConflict.ok && branchConflict.conflictPath) {
+    const removeConflict = runProcess('git', ['worktree', 'remove', '--force', branchConflict.conflictPath], {
+      cwd: config.mainWorkspace,
+    });
+    steps.push({
+      step: 'git_worktree_remove_conflicting_branch',
+      ok: removeConflict.ok,
+      detail: branchConflict.conflictPath,
+    });
+    if (removeConflict.ok && repairAction === 'none') {
+      repairAction = 'remove_conflicting_branch_worktree';
     }
   }
 
