@@ -46,6 +46,9 @@ function step(name, cmd, args, envAdd = {}) {
   if (name === 'blog-publish-dry-run') {
     return normalizeBlogDryRunStep(out);
   }
+  if (name === 'prompt-web-health') {
+    return normalizePromptWebHealthStep(out);
+  }
   return out;
 }
 
@@ -80,6 +83,22 @@ function normalizeBlogDryRunStep(stepResult) {
   return stepResult;
 }
 
+function normalizePromptWebHealthStep(stepResult) {
+  const parsed = extractJsonPayload(stepResult.stderr) || extractJsonPayload(stepResult.stdout);
+  if (!parsed || typeof parsed !== 'object') return stepResult;
+  const classification = String(parsed.classification || '').trim().toLowerCase();
+  if (classification === 'service_absent') {
+    return {
+      ...stepResult,
+      ok: true,
+      code: 0,
+      normalized: true,
+      normalizedReason: 'service_absent',
+    };
+  }
+  return stepResult;
+}
+
 function summarize(report) {
   const failed = report.steps.filter((s) => !s.ok);
   const ok = report.steps.length - failed.length;
@@ -107,9 +126,11 @@ function toMarkdown(report) {
   }
   lines.push('');
   for (const s of report.steps) {
-    lines.push(`## ${s.ok ? 'OK' : 'FAIL'} - ${s.name}`);
+    const label = s.ok ? (s.normalized ? 'OK (normalized)' : 'OK') : 'FAIL';
+    lines.push(`## ${label} - ${s.name}`);
     lines.push(`- command: \`${s.command}\``);
     lines.push(`- code: ${s.code}`);
+    if (s.normalizedReason) lines.push(`- normalizedReason: ${s.normalizedReason}`);
     if (s.stderr) lines.push(`- stderr: \`${s.stderr.replace(/`/g, "'")}\``);
     lines.push('');
   }
@@ -150,9 +171,21 @@ function main() {
   if (report.summary.failed > 0) process.exit(1);
 }
 
-try {
-  main();
-} catch (e) {
-  console.error(String(e && e.message ? e.message : e));
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (e) {
+    console.error(String(e && e.message ? e.message : e));
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  run,
+  step,
+  extractJsonPayload,
+  normalizeBlogDryRunStep,
+  normalizePromptWebHealthStep,
+  summarize,
+  toMarkdown,
+};
