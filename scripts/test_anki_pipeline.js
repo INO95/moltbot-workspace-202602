@@ -1,4 +1,28 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+function ensureStubGoogleCreds() {
+    const secureDir = path.join(__dirname, '../data/secure');
+    const credsPath = path.join(secureDir, 'google_creds.json');
+    if (fs.existsSync(credsPath)) return null;
+    fs.mkdirSync(secureDir, { recursive: true });
+    fs.writeFileSync(credsPath, JSON.stringify({
+        client_email: 'test@example.com',
+        private_key: '-----BEGIN PRIVATE KEY-----\\nTEST\\n-----END PRIVATE KEY-----\\n',
+    }, null, 2));
+    return credsPath;
+}
+
+const createdStubCredsPath = ensureStubGoogleCreds();
+if (createdStubCredsPath) {
+    process.on('exit', () => {
+        try {
+            fs.unlinkSync(createdStubCredsPath);
+        } catch {}
+    });
+}
+
 const { processWordTokens, QUALITY_STYLE_VERSION } = require('./bridge');
 
 function makeQuality(word, overrides = {}) {
@@ -83,6 +107,8 @@ async function testDuplicateMetaPropagation() {
     assert.strictEqual(out.saved, 1);
     assert.strictEqual(out.results[0].duplicate, true);
     assert.strictEqual(out.results[0].quality.sourceMode, 'hybrid');
+    assert.strictEqual(out.duplicateCount, 1);
+    assert.ok(String(out.summary || '').includes('중복 1건'));
 }
 
 async function testDegradedCardRejected() {
@@ -126,6 +152,8 @@ async function testTypoSuspicionAutoCorrectsAndSaves() {
     assert.strictEqual(out.autoCorrections[0].from, 'fragle');
     assert.strictEqual(out.autoCorrections[0].to, 'fragile');
     assert.ok(String(out.telegramReply || '').includes('자동 보정'));
+    assert.strictEqual(out.autoCorrectedCount, 1);
+    assert.ok(String(out.summary || '').includes('자동 보정 1건'));
 }
 
 async function testDetachedKoreanHintFragmentsMerged() {

@@ -181,6 +181,22 @@ const RETRY_SAFE_COMMANDS = new Set([
     'project',
     'prompt',
 ]);
+const TOKYO_TIMEZONE = 'Asia/Tokyo';
+const TOKYO_DAY_FORMAT = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: TOKYO_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+});
+const TOKYO_DATETIME_FORMAT = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: TOKYO_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+});
 const ANKI_SYNC_WARNING_COOLDOWN_MS = Number(process.env.ANKI_SYNC_WARNING_COOLDOWN_MS || 10 * 60 * 1000);
 let ankiSyncWarningMemo = { message: '', at: 0 };
 
@@ -2314,6 +2330,267 @@ function routeByPrefix(text) {
     });
 }
 
+function toValidDate(input = null) {
+    const date = input ? new Date(input) : new Date();
+    if (Number.isFinite(date.getTime())) return date;
+    return new Date();
+}
+
+function nowTokyoDate(now = null) {
+    return TOKYO_DAY_FORMAT.format(toValidDate(now));
+}
+
+function formatTokyoDateTime(input = null) {
+    return TOKYO_DATETIME_FORMAT.format(toValidDate(input));
+}
+
+function parseWordLogMeta(metaJson) {
+    try {
+        const parsed = JSON.parse(String(metaJson || '{}'));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function isDuplicateWordLog(row) {
+    const meta = parseWordLogMeta(row && row.meta_json);
+    return Boolean(meta.duplicate);
+}
+
+function getCorrectedWordFromLog(row) {
+    const meta = parseWordLogMeta(row && row.meta_json);
+    return String(meta.correctedWord || '').trim();
+}
+
+function normalizeWordReadQuery(text = '') {
+    return String(text || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function detectWordReadMode(text = '') {
+    const compact = normalizeWordReadQuery(text);
+    if (!compact) return null;
+    if (compact.includes('오늘추가')) return 'today_added';
+    if (compact.includes('실패목록')) return 'failure_list';
+    if (compact.includes('복습추천')) return 'review_recommendation';
+    return null;
+}
+
+function getWordTodayActivity(options = {}) {
+    const dbPath = personalStorage.ensureStorage(options);
+    const date = nowTokyoDate(options.now);
+    const rows = personalStorage.runSqlJson(
+        dbPath,
+        `
+SELECT word, save_status, error_text, meta_json, created_at
+FROM vocab_logs
+WHERE date(datetime(created_at), '+9 hours') = ${personalStorage.sqlQuote(date)}
+ORDER BY datetime(created_at) DESC, id DESC
+LIMIT 500;
+`,
+    );
+    const totals = {
+        total: rows.length,
+        saved: 0,
+        failed: 0,
+        duplicate: 0,
+        autoCorrected: 0,
+    };
+    const recentAdded = [];
+    const seenRecentWords = new Set();
+
+    for (const row of rows) {
+        const duplicate = isDuplicateWordLog(row);
+        const correctedWord = getCorrectedWordFromLog(row);
+        if (row.save_status === 'saved') {
+            totals.saved += 1;
+            if (duplicate) totals.duplicate += 1;
+            if (correctedWord) totals.autoCorrected += 1;
+            const word = String(row.word || '').trim();
+            if (word && !duplicate && !seenRecentWords.has(word.toLowerCase()) && recentAdded.length < 5) {
+                seenRecentWords.add(word.toLowerCase());
+                recentAdded.push(word);
+            }
+        } else if (row.save_status === 'failed') {
+            totals.failed += 1;
+        }
+    }
+
+    return {
+        date,
+        totals,
+        recentAdded,
+    };
+}
+
+function getRecentWordFailures(options = {}) {
+    const dbPath = personalStorage.ensureStorage(options);
+    const limit = Math.max(1, Number(options.limit || 8));
+    const rows = personalStorage.runSqlJson(
+        dbPath,
+        `
+SELECT word, error_text, created_at
+FROM vocab_logs
+WHERE save_status = 'failed'
+ORDER BY datetime(created_at) DESC, id DESC
+LIMIT ${limit};
+`,
+    );
+    return rows.map((row) => ({
+        word: String(row.word || '').trim() || '(unknown)',
+        reason: String(row.error_text || '').trim() || 'unknown_error',
+        createdAt: String(row.created_at || '').trim(),
+        createdAtTokyo: formatTokyoDateTime(row.created_at),
+    }));
+}
+
+function getWordReviewRecommendations(options = {}) {
+    const dbPath = personalStorage.ensureStorage(options);
+    const limit = Math.max(1, Number(options.limit || 5));
+    const days = Math.max(1, Number(options.days || 60));
+    const now = toValidDate(options.now);
+    const cutoffMs = now.getTime() - (days * 24 * 60 * 60 * 1000);
+    const rows = personalStorage.runSqlJson(
+        dbPath,
+        `
+SELECT word, save_status, meta_json, created_at
+FROM vocab_logs
+ORDER BY datetime(created_at) DESC, id DESC
+LIMIT 1000;
+`,
+    );
+    const bucket = new Map();
+
+    for (const row of rows) {
+        const createdAt = String(row.created_at || '').trim();
+        const createdMs = Date.parse(createdAt);
+        if (Number.isFinite(createdMs) && createdMs < cutoffMs) continue;
+
+        const word = String(row.word || '').trim();
+        if (!word) continue;
+        const key = word.toLowerCase();
+        if (!bucket.has(key)) {
+            bucket.set(key, {
+                word,
+                savedCount: 0,
+                failedCount: 0,
+                duplicateCount: 0,
+                autoCorrectedCount: 0,
+                lastSeenAt: createdAt,
+            });
+        }
+        const item = bucket.get(key);
+        const duplicate = isDuplicateWordLog(row);
+        const correctedWord = getCorrectedWordFromLog(row);
+        if (row.save_status === 'saved') {
+            item.savedCount += 1;
+            if (duplicate) item.duplicateCount += 1;
+            if (correctedWord) item.autoCorrectedCount += 1;
+        } else if (row.save_status === 'failed') {
+            item.failedCount += 1;
+        }
+        if (!item.lastSeenAt || Date.parse(createdAt) > Date.parse(item.lastSeenAt)) {
+            item.lastSeenAt = createdAt;
+            item.word = word;
+        }
+    }
+
+    return [...bucket.values()]
+        .filter((row) => row.savedCount > 0)
+        .map((row) => {
+            const lastSeenMs = Date.parse(row.lastSeenAt);
+            const staleDays = Number.isFinite(lastSeenMs)
+                ? Math.max(0, Math.floor((now.getTime() - lastSeenMs) / (24 * 60 * 60 * 1000)))
+                : 0;
+            const score = (row.failedCount * 4)
+                + (row.duplicateCount * 3)
+                + (row.autoCorrectedCount * 2)
+                + Math.min(staleDays, 5)
+                + Math.min(row.savedCount, 2);
+            const reasons = [];
+            if (row.failedCount > 0) reasons.push(`실패 ${row.failedCount}`);
+            if (row.duplicateCount > 0) reasons.push(`중복 ${row.duplicateCount}`);
+            if (row.autoCorrectedCount > 0) reasons.push(`자동 보정 ${row.autoCorrectedCount}`);
+            if (staleDays > 0) reasons.push(`${staleDays}일 경과`);
+            if (reasons.length === 0) reasons.push(`저장 ${row.savedCount}`);
+            return {
+                ...row,
+                staleDays,
+                score,
+                reasonText: reasons.join(', '),
+                lastSeenTokyo: formatTokyoDateTime(row.lastSeenAt),
+            };
+        })
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            if (b.staleDays !== a.staleDays) return b.staleDays - a.staleDays;
+            return Date.parse(a.lastSeenAt) - Date.parse(b.lastSeenAt);
+        })
+        .slice(0, limit);
+}
+
+function handleWordReadCommand(text, options = {}) {
+    const queryMode = detectWordReadMode(text);
+    if (!queryMode) return null;
+
+    if (queryMode === 'today_added') {
+        const activity = getWordTodayActivity(options);
+        return {
+            route: 'word',
+            success: true,
+            queryMode,
+            date: activity.date,
+            savedCount: activity.totals.saved,
+            failedCount: activity.totals.failed,
+            duplicateCount: activity.totals.duplicate,
+            autoCorrectedCount: activity.totals.autoCorrected,
+            recentWords: activity.recentAdded,
+            telegramReply: [
+                `오늘 단어 활동 (${activity.date})`,
+                `- 저장: ${activity.totals.saved}건`,
+                `- 실패: ${activity.totals.failed}건`,
+                `- 중복: ${activity.totals.duplicate}건`,
+                `- 자동 보정: ${activity.totals.autoCorrected}건`,
+                `- 최근 추가: ${activity.recentAdded.length ? activity.recentAdded.join(', ') : '없음'}`,
+            ].join('\n'),
+        };
+    }
+
+    if (queryMode === 'failure_list') {
+        const failures = getRecentWordFailures(options);
+        return {
+            route: 'word',
+            success: true,
+            queryMode,
+            failures,
+            telegramReply: [
+                '최근 단어 실패 목록',
+                ...(failures.length > 0
+                    ? failures.map((row) => `- ${row.word}: ${row.reason} (${row.createdAtTokyo})`)
+                    : ['- 없음']),
+            ].join('\n'),
+        };
+    }
+
+    if (queryMode === 'review_recommendation') {
+        const recommendations = getWordReviewRecommendations(options);
+        return {
+            route: 'word',
+            success: true,
+            queryMode,
+            recommendations,
+            telegramReply: [
+                '단어 복습 추천',
+                ...(recommendations.length > 0
+                    ? recommendations.map((row) => `- ${row.word}: ${row.reasonText} (점수 ${row.score})`)
+                    : ['- 추천할 단어가 아직 없습니다.']),
+            ].join('\n'),
+        };
+    }
+
+    return null;
+}
+
 function buildGogNoPrefixGuide(inputText) {
     const raw = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
     if (!raw) return '';
@@ -2665,7 +2942,9 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
         sourceModeCounts[mode] = (sourceModeCounts[mode] || 0) + 1;
         if (row.quality?.degraded) degradedCount += 1;
     }
-    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failedTotal}건`;
+    const duplicateCount = results.filter((row) => Boolean(row && row.duplicate)).length;
+    const autoCorrectedCount = correctionRows.length;
+    const summary = `Anki 저장 결과: 성공 ${results.length}건 / 실패 ${failedTotal}건 / 중복 ${duplicateCount}건 / 자동 보정 ${autoCorrectedCount}건`;
     const failedRows = failures.filter((f) => !String(f.token || '').startsWith('__sync__'));
     const typoReview = analyzeWordFailures(failedRows);
     const telegramReplyCore = failedRows.length > 0
@@ -2690,6 +2969,8 @@ async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
         syncWarning,
         summary,
         telegramReply,
+        duplicateCount,
+        autoCorrectedCount,
         failedTokens: failedRows.map(f => `${f.token}: ${f.reason}`),
         results,
         failures: failedRows,
@@ -2967,7 +3248,10 @@ async function main() {
 
             case 'word': {
                 // usage: node bridge.js word "Activated 활성화된, Formulate"
-                const wordResult = await processWordTokens(fullText, toeicDeck, toeicTags, {
+                const wordReadResult = handleWordReadCommand(fullText, {
+                    dbPath: process.env.PERSONAL_DB_PATH,
+                });
+                const wordResult = wordReadResult || await processWordTokens(fullText, toeicDeck, toeicTags, {
                     source: 'telegram',
                     rawText: `단어: ${fullText}`,
                 });
@@ -2975,7 +3259,7 @@ async function main() {
                     route: 'word',
                     ...wordResult,
                     preferredModelAlias: 'gpt',
-                    preferredReasoning: 'high',
+                    preferredReasoning: wordReadResult ? 'low' : 'high',
                 }, {
                     route: 'word',
                     commandText: fullText,
@@ -3228,7 +3512,13 @@ async function main() {
                         buildNoPrefixGuide,
                     }),
                     handlePersonalRoute,
-                    processWordTokens,
+                    processWordTokens: async (text, deck, tags, options = {}) => {
+                        const readOnlyResult = handleWordReadCommand(text, {
+                            dbPath: process.env.PERSONAL_DB_PATH,
+                        });
+                        if (readOnlyResult) return readOnlyResult;
+                        return processWordTokens(text, deck, tags, options);
+                    },
                     handleMemoCommand: async (text) => {
                         const memoJournal = require('./memo_journal');
                         return memoJournal.handleMemoCommand(text);
@@ -3358,4 +3648,6 @@ module.exports = {
     isWeakEnrichment,
     normalizeQualityPolicy,
     QUALITY_STYLE_VERSION,
+    detectWordReadMode,
+    handleWordReadCommand,
 };
