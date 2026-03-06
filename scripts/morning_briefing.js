@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const moltEngine = require('./molt_engine');
 const { enqueueBridgePayload } = require('./bridge_queue');
+const { readRecursiveImproveHealth } = require('./lib/recursive_improve_health');
 const NIGHTLY_AUTOPILOT_LOG = path.join(__dirname, '..', 'logs', 'nightly_autopilot_latest.json');
 
 function httpGetJson(url) {
@@ -140,7 +141,29 @@ async function generateMorningBriefing() {
         // 야간 리포트 파싱 실패는 브리핑 본문을 막지 않는다.
     }
 
-    // 5. 마무리
+    // 5. 자정 재귀개선 요약
+    try {
+        const recursiveImprove = readRecursiveImproveHealth(path.join(__dirname, '..'));
+        briefing += `🛠️ **자정 재귀개선**\n`;
+        if (!recursiveImprove.exists) {
+            briefing += `   리포트 없음 · 자정 크론 및 latest 리포트를 확인하세요\n\n`;
+        } else if (!recursiveImprove.fresh) {
+            briefing += `   리포트 stale · 최근 자정 실행 결과가 오래되었습니다\n`;
+            briefing += `   다음 조치: ${recursiveImprove.nextAction}\n\n`;
+        } else if (recursiveImprove.ok) {
+            briefing += `   성공`;
+            if (recursiveImprove.preflightRepaired) briefing += ` · 워크트리 자동복구`;
+            if (recursiveImprove.prUrl) briefing += ` · PR 생성/갱신`;
+            briefing += `\n\n`;
+        } else {
+            briefing += `   실패 · ${recursiveImprove.failureCode || 'unknown'} · 연속 ${recursiveImprove.consecutiveFailures}회\n`;
+            briefing += `   다음 조치: ${recursiveImprove.nextAction}\n\n`;
+        }
+    } catch (_) {
+        briefing += `🛠️ **자정 재귀개선**: 요약 조회 실패\n\n`;
+    }
+
+    // 6. 마무리
     briefing += `━━━━━━━━━━━━━━━━━━━━\n`;
     briefing += `좋은 하루 되세요! 🚀\n`;
     briefing += `_Powered by Moltbot + Antigravity_`;

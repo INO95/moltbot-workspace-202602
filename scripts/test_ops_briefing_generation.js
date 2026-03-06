@@ -2,18 +2,34 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const personalBriefing = require('./personal_briefing');
-const personalStorage = require('./personal_storage');
 
 function writeJson(filePath, data) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
+function readJsonl(filePath) {
+    if (!fs.existsSync(filePath)) return [];
+    return fs.readFileSync(filePath, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+            try {
+                return JSON.parse(line);
+            } catch (_) {
+                return null;
+            }
+        })
+        .filter(Boolean);
+}
+
 async function run() {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-briefing-'));
     process.env.OPS_WORKSPACE_ROOT = tmpRoot;
     process.env.BRIDGE_DIR = path.join(tmpRoot, 'data', 'bridge');
+    const personalBriefing = require('./personal_briefing');
+    const personalStorage = require('./personal_storage');
 
     const configPath = path.join(tmpRoot, 'ops', 'config', 'daily_ops_mvp.json');
     writeJson(configPath, {
@@ -26,7 +42,7 @@ async function run() {
             cooldown_hours: 2,
             quiet_hours: { start: '23:00', end: '07:00' },
         },
-        briefings: { morning_time: '08:30', evening_time: '18:30', send: false },
+        briefings: { morning_time: '08:30', evening_time: '18:30', send: true },
         workers: {
             'bot-dev': { active: true },
             'bot-anki': { active: true },
@@ -112,6 +128,39 @@ async function run() {
             },
         },
     });
+    writeJson(path.join(tmpRoot, 'logs', 'midnight_recursive_improve_latest.json'), {
+        runAt: '2026-02-16T00:00:00+09:00',
+        ok: false,
+        skipped: false,
+        error: 'stage1_failed:node scripts/test_bridge_nl_inference.js',
+        consecutiveFailures: 2,
+        preflight: {
+            worktreePath: path.join(tmpRoot, '.worktrees', 'nightly-recursive-improve'),
+            valid: true,
+            gitdirPath: '',
+            registered: true,
+            repaired: true,
+            repairAction: 'remove_broken_worktree_path',
+        },
+        retry: {
+            attempted: false,
+            reason: '',
+            succeeded: false,
+        },
+        delivery: {
+            prAttempted: false,
+            prUrl: '',
+            briefingEligible: true,
+        },
+        pr: {
+            attempted: false,
+            ok: false,
+            action: 'none',
+            number: null,
+            url: '',
+            error: '',
+        },
+    });
 
     const supervisor = require('./ops_daily_supervisor');
     const morning = supervisor.runBriefing('morning', {
@@ -124,6 +173,7 @@ async function run() {
     const morningText = fs.readFileSync(morning.result.reportPath, 'utf8');
     assert.ok(morningText.includes('Morning Briefing'));
     assert.ok(morningText.includes('bot-research:fp_test_1'));
+    assert.ok(morningText.includes('Midnight recursive improve'));
 
     const evening = supervisor.runBriefing('evening', {
         now: '2026-02-16T18:30:00+09:00',
@@ -215,6 +265,71 @@ async function run() {
     assert.strictEqual(personalRun.ok, true);
     assert.strictEqual(personalRun.enqueue, false);
     assert.ok(personalRun.text.includes('단어 활동:'));
+
+    const scanNow = '2026-02-17T08:30:00+09:00';
+    const scan1 = supervisor.runScan({
+        now: scanNow,
+        configPath,
+        sendEnabled: true,
+    });
+    const scan2 = supervisor.runScan({
+        now: scanNow,
+        configPath,
+        sendEnabled: true,
+    });
+    assert.strictEqual(scan1.ok, true);
+    assert.strictEqual(scan2.ok, true);
+    assert.ok(scan1.findings.some((row) => row.issue_id === 'system:midnight_recursive_improve'));
+    const issuesAfterScan = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'ops', 'state', 'issues.json'), 'utf8'));
+    assert.strictEqual(issuesAfterScan.issues['system:midnight_recursive_improve'].severity, 'P2');
+    assert.strictEqual(issuesAfterScan.issues['system:midnight_recursive_improve'].consecutive_failures, 2);
+    const inboxRows = readJsonl(path.join(tmpRoot, 'data', 'bridge', 'inbox.jsonl'));
+    const morningRows = inboxRows.filter((row) => (
+        String(row.notification_kind || '') === 'briefing'
+        && String(row.dedupe_key || '').includes('ops-briefing:morning:2026-02-17')
+    ));
+    assert.strictEqual(morningRows.length, 1, 'morning briefing should be deduped to one message per window');
+    assert.strictEqual(morningRows[0].source_kind, 'scheduled_background');
+    assert.strictEqual(morningRows[0].user_visible, true);
+    assert.ok(typeof morningRows[0].classification_reason === 'string' && morningRows[0].classification_reason.length > 0);
+
+    const briefingAfterScan = supervisor.runBriefing('morning', {
+        now: scanNow,
+        configPath,
+        sendEnabled: true,
+    });
+    assert.strictEqual(briefingAfterScan.ok, true);
+    assert.strictEqual(briefingAfterScan.result, null, 'explicit briefing should skip when same-day briefing already exists');
+
+    const inboxAfterExplicit = readJsonl(path.join(tmpRoot, 'data', 'bridge', 'inbox.jsonl'));
+    const morningRowsAfterExplicit = inboxAfterExplicit.filter((row) => (
+        String(row.notification_kind || '') === 'briefing'
+        && String(row.dedupe_key || '').includes('ops-briefing:morning:2026-02-17')
+    ));
+    assert.strictEqual(morningRowsAfterExplicit.length, 1, 'explicit briefing should not create a duplicate after scan');
+
+    const briefingDate = '2026-02-18T18:30:00+09:00';
+    const explicitEvening1 = supervisor.runBriefing('evening', {
+        now: briefingDate,
+        configPath,
+        sendEnabled: true,
+    });
+    const explicitEvening2 = supervisor.runBriefing('evening', {
+        now: briefingDate,
+        configPath,
+        sendEnabled: true,
+    });
+    assert.strictEqual(explicitEvening1.ok, true);
+    assert.ok(explicitEvening1.result && explicitEvening1.result.delivered === true);
+    assert.strictEqual(explicitEvening2.ok, true);
+    assert.strictEqual(explicitEvening2.result, null, 'repeated explicit briefing should skip on the same date');
+
+    const inboxAfterRepeated = readJsonl(path.join(tmpRoot, 'data', 'bridge', 'inbox.jsonl'));
+    const eveningRows = inboxAfterRepeated.filter((row) => (
+        String(row.notification_kind || '') === 'briefing'
+        && String(row.dedupe_key || '').includes('ops-briefing:evening:2026-02-18')
+    ));
+    assert.strictEqual(eveningRows.length, 1, 'same-day explicit briefing should only enqueue once');
 }
 
 run()
