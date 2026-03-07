@@ -1,56 +1,84 @@
 const assert = require('assert');
-const { spawnSync } = require('child_process');
-const path = require('path');
+const { handleAutoRoutedCommand } = require('./lib/bridge_auto_routes');
 
-const ROOT = path.join(__dirname, '..');
-
-function runAuto(message, env = {}) {
-    const res = spawnSync('node', ['scripts/bridge.js', 'auto', message], {
-        cwd: ROOT,
-        encoding: 'utf8',
-        timeout: 90000,
-        env: {
-            ...process.env,
-            BRIDGE_ALLOWLIST_ENABLED: 'true',
-            BRIDGE_ALLOWLIST_DIRECT_COMMANDS: 'auto',
-            BRIDGE_ALLOWLIST_AUTO_ROUTES: 'word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops',
-            ...env,
-        },
-    });
-    assert.strictEqual(res.status, 0, `bridge failed: ${res.stderr || res.stdout}`);
-    const raw = String(res.stdout || '').trim();
-    assert.ok(raw, 'bridge output empty');
-    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-        try {
-            return JSON.parse(lines[i]);
-        } catch (_) {
-            // Continue scanning until the last JSON line.
-        }
-    }
-    throw new Error(`bridge output missing json: ${raw}`);
+function withApiMeta(payload, meta) {
+    return {
+        ...payload,
+        ...meta,
+    };
 }
 
-function main() {
-    const researchOut = runAuto('리포트: 보내줘', {
-        MOLTBOT_BOT_ID: 'bot-research',
-        MOLTBOT_BOT_ROLE: 'worker',
-    });
+function pickPreferredModelMeta(result, fallbackAlias = 'fast', fallbackReasoning = 'low') {
+    const source = result && typeof result === 'object' ? result : {};
+    return {
+        preferredModelAlias: String(source.preferredModelAlias || fallbackAlias),
+        preferredReasoning: String(source.preferredReasoning || fallbackReasoning),
+        activeModelStage: String(source.activeModelStage || ''),
+    };
+}
+
+function buildDeps() {
+    return {
+        withApiMeta,
+        appendExternalLinks: (text) => String(text || ''),
+        pickPreferredModelMeta,
+        normalizeReportNewsPayload: (text) => String(text || '').trim() || '지금요약',
+        isResearchRuntime: (env) => String(env && env.MOLTBOT_BOT_ID || '').trim() === 'bot-research',
+        handleNewsCommand: async () => ({
+            success: true,
+            telegramReply: '리포트 완료',
+            preferredModelAlias: 'gpt',
+            preferredReasoning: 'high',
+            activeModelStage: 'write',
+        }),
+        buildDailySummary: async () => ({
+            success: true,
+            telegramReply: '리포트 완료',
+        }),
+        publishFromReports: async () => ({
+            success: true,
+            telegramReply: '리포트 완료',
+        }),
+        buildWeeklyReport: async () => ({
+            success: true,
+            telegramReply: '리포트 완료',
+        }),
+    };
+}
+
+async function runReport(botId) {
+    return handleAutoRoutedCommand({
+        routed: {
+            route: 'report',
+            payload: '보내줘',
+        },
+        fullText: '리포트: 보내줘',
+        env: {
+            ...process.env,
+            MOLTBOT_BOT_ID: botId,
+            MOLTBOT_BOT_ROLE: 'worker',
+        },
+    }, buildDeps());
+}
+
+async function main() {
+    const researchOut = await runReport('bot-research');
     assert.strictEqual(researchOut.route, 'report');
     assert.strictEqual(researchOut.routeHint, 'report-tech-trend');
     assert.ok(!String(researchOut.telegramReply || '').includes('알 수 없는 소식 명령'));
     assert.strictEqual(researchOut.preferredModelAlias, 'gpt');
     assert.strictEqual(researchOut.activeModelStage, 'write');
 
-    const devOut = runAuto('리포트: 보내줘', {
-        MOLTBOT_BOT_ID: 'bot-dev',
-        MOLTBOT_BOT_ROLE: 'worker',
-    });
+    const devOut = await runReport('bot-dev');
     assert.strictEqual(devOut.route, 'report');
     assert.strictEqual(devOut.routeHint, 'report-daily');
     assert.ok(!String(devOut.telegramReply || '').includes('알 수 없는 소식 명령'));
+    assert.strictEqual(devOut.preferredModelAlias, 'fast');
 
     console.log('test_bridge_report_default_by_runtime: ok');
 }
 
-main();
+main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});

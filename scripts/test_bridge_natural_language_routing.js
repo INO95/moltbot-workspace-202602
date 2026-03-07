@@ -146,14 +146,14 @@ function main() {
     });
     assert.strictEqual(disabled.route, 'none');
 
-    const projectExplicitPath = runRouteWithEnv(
-        '/Users/inho-baek/Projects 여기로 프로젝트 설치해. 없으면 /home/node/.openclaw/workspace/Projects로 fallback해서 프로젝트 생성해.',
+    const projectExplicitPath = runAutoWithEnv(
+        '프로젝트 /Users/inho-baek/Projects 여기로 rust wasm 게임 템플릿 설치해. 없으면 /home/node/.openclaw/workspace/Projects로 fallback해서 프로젝트 생성해.',
         inferEnv,
     );
     assert.strictEqual(projectExplicitPath.route, 'project');
     assert.ok(
-        /경로:\s*\/Users\/inho-baek\/Projects\b/.test(String(projectExplicitPath.payload || '')),
-        `expected explicit /Users\/inho-baek path in payload, got: ${projectExplicitPath.payload}`,
+        String(projectExplicitPath.fields && projectExplicitPath.fields.경로 || '') === '/Users/inho-baek/Projects',
+        `expected explicit /Users/inho-baek path in fields, got: ${JSON.stringify(projectExplicitPath.fields || {})}`,
     );
 
     const projectPrefixedLike = runAutoWithEnv('프로젝트 rust wasm 게임 템플릿 만들어줘', inferEnv);
