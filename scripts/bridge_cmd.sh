@@ -32,7 +32,7 @@ resolve_bridge_js() {
   for candidate in \
     "$ROOT_DIR/scripts/bridge.js" \
     "$sandbox_base/scripts/bridge.js" \
-    "/Users/moltbot/Projects/Moltbot_Workspace/scripts/bridge.js" \
+    "/Users/inho-baek/Projects/Moltbot_Workspace/scripts/bridge.js" \
     "/home/node/.openclaw/workspace/scripts/bridge.js" \
     "/workspace/scripts/bridge.js"
   do
@@ -42,6 +42,52 @@ resolve_bridge_js() {
     fi
   done
 
+  return 1
+}
+
+resolve_app_entry() {
+  bot_id=$(printf '%s' "${MOLTBOT_BOT_ID:-}" | tr '[:upper:]' '[:lower:]')
+  app_rel=""
+  case "$bot_id" in
+    bot-daily|bot-daily-bak)
+      app_rel="apps/bot-daily/src/main.js"
+      ;;
+    bot-dev|bot-dev-bak)
+      app_rel="apps/bot-dev/src/main.js"
+      ;;
+    bot-anki|bot-anki-bak)
+      app_rel="apps/bot-anki/src/main.js"
+      ;;
+    bot-research|bot-research-bak)
+      app_rel="apps/bot-research/src/main.js"
+      ;;
+    bot-codex)
+      app_rel="apps/bot-codex/src/main.js"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  sandbox_base=""
+  case "$ROOT_DIR" in
+    *"/.openclaw-sandboxes/"*)
+      sandbox_base=${ROOT_DIR%%/.openclaw-sandboxes/*}
+      ;;
+  esac
+
+  for candidate in \
+    "$ROOT_DIR/$app_rel" \
+    "$sandbox_base/$app_rel" \
+    "/Users/inho-baek/Projects/Moltbot_Workspace/$app_rel" \
+    "/home/node/.openclaw/workspace/$app_rel" \
+    "/workspace/$app_rel"
+  do
+    if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -57,6 +103,21 @@ if [ -z "$NODE_BIN" ]; then
   exit 127
 fi
 
+APP_ENTRY="$(resolve_app_entry || true)"
+if [ -n "$APP_ENTRY" ]; then
+  APP_ROOT=$(CDPATH= cd -- "$(dirname "$APP_ENTRY")/../../.." && pwd)
+  cd "$APP_ROOT"
+  exec "$NODE_BIN" "$APP_ENTRY" "$@"
+fi
+
 BRIDGE_ROOT=$(CDPATH= cd -- "$(dirname "$BRIDGE_JS")/.." && pwd)
 cd "$BRIDGE_ROOT"
+
+# AnkiConnect stability defaults (can be overridden by env)
+: "${ANKI_CONNECT_HOSTS:=127.0.0.1,localhost,host.docker.internal}"
+: "${ANKI_CONNECT_TIMEOUT_MS:=8000}"
+: "${ANKI_CONNECT_SYNC_TIMEOUT_MS:=12000}"
+: "${ANKI_SYNC_WARNING_COOLDOWN_MS:=600000}"
+export ANKI_CONNECT_HOSTS ANKI_CONNECT_TIMEOUT_MS ANKI_CONNECT_SYNC_TIMEOUT_MS ANKI_SYNC_WARNING_COOLDOWN_MS
+
 exec "$NODE_BIN" "$BRIDGE_JS" "$@"

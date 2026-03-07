@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { readRecursiveImproveHealth } = require('./lib/recursive_improve_health');
 
 const ROOT = path.join(__dirname, '..');
 const LOG_DIR = path.join(ROOT, 'logs');
@@ -46,6 +47,9 @@ function step(name, cmd, args, envAdd = {}) {
   if (name === 'blog-publish-dry-run') {
     return normalizeBlogDryRunStep(out);
   }
+  if (name === 'prompt-web-health') {
+    return normalizePromptWebHealthStep(out);
+  }
   return out;
 }
 
@@ -80,6 +84,22 @@ function normalizeBlogDryRunStep(stepResult) {
   return stepResult;
 }
 
+function normalizePromptWebHealthStep(stepResult) {
+  const parsed = extractJsonPayload(stepResult.stderr) || extractJsonPayload(stepResult.stdout);
+  if (!parsed || typeof parsed !== 'object') return stepResult;
+  const classification = String(parsed.classification || '').trim().toLowerCase();
+  if (classification === 'service_absent') {
+    return {
+      ...stepResult,
+      ok: true,
+      code: 0,
+      normalized: true,
+      normalizedReason: 'service_absent',
+    };
+  }
+  return stepResult;
+}
+
 function summarize(report) {
   const failed = report.steps.filter((s) => !s.ok);
   const ok = report.steps.length - failed.length;
@@ -91,6 +111,44 @@ function summarize(report) {
       failed: failed.length,
       failedNames: failed.map((f) => f.name),
     },
+  };
+}
+
+function buildRecursiveImproveHealthStep(root = ROOT, options = {}) {
+  const startedAt = nowIso();
+  const health = readRecursiveImproveHealth(root, options);
+  const endedAt = nowIso();
+  const ok = Boolean(health.exists && health.ok && health.fresh);
+  const summary = {
+    ok,
+    exists: health.exists,
+    fresh: health.fresh,
+    runAt: health.runAt,
+    ageMinutes: health.ageMinutes,
+    consecutiveFailures: health.consecutiveFailures,
+    preflightRepaired: health.preflightRepaired,
+    prAttempted: health.prAttempted,
+    prUrl: health.prUrl,
+    shouldEscalate: health.shouldEscalate,
+    failureCode: health.failureCode,
+    nextAction: health.nextAction,
+    summaryLine: health.summaryLine,
+    path: health.path,
+  };
+  const stderr = ok
+    ? ''
+    : (health.exists ? (health.error || health.summaryLine) : 'midnight recursive improve report missing');
+
+  return {
+    name: 'recursive-improve-health',
+    command: 'internal:read logs/midnight_recursive_improve_latest.json',
+    startedAt,
+    endedAt,
+    ok,
+    code: ok ? 0 : 1,
+    stdout: JSON.stringify(summary, null, 2).slice(0, 4000),
+    stderr: String(stderr || '').slice(0, 4000),
+    error: '',
   };
 }
 
@@ -107,9 +165,11 @@ function toMarkdown(report) {
   }
   lines.push('');
   for (const s of report.steps) {
-    lines.push(`## ${s.ok ? 'OK' : 'FAIL'} - ${s.name}`);
+    const label = s.ok ? (s.normalized ? 'OK (normalized)' : 'OK') : 'FAIL';
+    lines.push(`## ${label} - ${s.name}`);
     lines.push(`- command: \`${s.command}\``);
     lines.push(`- code: ${s.code}`);
+    if (s.normalizedReason) lines.push(`- normalizedReason: ${s.normalizedReason}`);
     if (s.stderr) lines.push(`- stderr: \`${s.stderr.replace(/`/g, "'")}\``);
     lines.push('');
   }
@@ -121,6 +181,7 @@ function main() {
 
   const steps = [
     step('ops-worker', 'node', ['scripts/ops_host_worker.js']),
+    buildRecursiveImproveHealthStep(ROOT),
     step('tunnel-status', 'node', ['scripts/dev_tunnel.js', 'status']),
     step('prompt-web-health', 'node', ['scripts/prompt_web_healthcheck.js'], { SKIP_OPS_WORKER: '1', SKIP_AUTOPILOT_TRIGGER: '1' }),
     step('seo-audit', 'node', ['scripts/seo_optimizer_bot.js']),
@@ -150,9 +211,22 @@ function main() {
   if (report.summary.failed > 0) process.exit(1);
 }
 
-try {
-  main();
-} catch (e) {
-  console.error(String(e && e.message ? e.message : e));
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (e) {
+    console.error(String(e && e.message ? e.message : e));
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  run,
+  step,
+  buildRecursiveImproveHealthStep,
+  extractJsonPayload,
+  normalizeBlogDryRunStep,
+  normalizePromptWebHealthStep,
+  summarize,
+  toMarkdown,
+};

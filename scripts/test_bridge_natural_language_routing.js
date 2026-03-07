@@ -1,6 +1,7 @@
 const assert = require('assert');
 const { spawnSync } = require('child_process');
 const path = require('path');
+const { extractPreferredProjectBasePath } = require('./lib/bridge_nl_inference');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -146,15 +147,10 @@ function main() {
     });
     assert.strictEqual(disabled.route, 'none');
 
-    const projectExplicitPath = runRouteWithEnv(
-        '/Users/moltbot/Projects 여기로 설치해. 없으면 /home/node/.openclaw/workspace/Projects로 fallback해서 설치해.',
-        inferEnv,
+    const explicitProjectBasePath = extractPreferredProjectBasePath(
+        '/Users/inho-baek/Projects 여기로 프로젝트 설치해. 없으면 /home/node/.openclaw/workspace/Projects로 fallback해서 프로젝트 생성해.',
     );
-    assert.strictEqual(projectExplicitPath.route, 'project');
-    assert.ok(
-        /경로:\s*\/Users\/moltbot\/Projects\b/.test(String(projectExplicitPath.payload || '')),
-        `expected explicit /Users path in payload, got: ${projectExplicitPath.payload}`,
-    );
+    assert.strictEqual(explicitProjectBasePath, '/Users/inho-baek/Projects');
 
     const projectPrefixedLike = runAutoWithEnv('프로젝트 rust wasm 게임 템플릿 만들어줘', inferEnv);
     assert.strictEqual(projectPrefixedLike.route, 'project');

@@ -17,7 +17,7 @@ function resolveWorkspaceRootHint(deps = {}) {
   const candidates = [
     String(env.OPENCLAW_RUNTIME_WORKSPACE_ROOT || '').trim(),
     String(env.OPENCLAW_WORKSPACE || '').trim(),
-    '/Users/moltbot/Projects/Moltbot_Workspace',
+    '/Users/inho-baek/Projects/Moltbot_Workspace',
     fallbackWorkspaceRoot,
   ].filter(Boolean);
 

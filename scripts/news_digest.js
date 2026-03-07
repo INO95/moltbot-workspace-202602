@@ -21,12 +21,12 @@ const { loadRuntimeEnv } = require('./env_runtime');
 const DEFAULT_DIGEST_STAGE_MODELS = Object.freeze({
     collect: Object.freeze({
         alias: 'fast',
-        model: 'openai-codex/gpt-5.3-codex-spark',
+        model: 'openai-codex/gpt-5.1-codex-mini',
         reasoning: 'low',
     }),
     write: Object.freeze({
         alias: 'gpt',
-        model: 'openai-codex/gpt-5.2',
+        model: 'openai/gpt-5.2-pro',
         reasoning: 'high',
     }),
 });
@@ -60,7 +60,7 @@ function normalizeDigestStageModel(raw, fallback) {
     const seed = fallback && typeof fallback === 'object' ? fallback : {};
     return {
         alias: String(source.alias || seed.alias || '').trim() || String(seed.alias || 'fast'),
-        model: String(source.model || seed.model || '').trim() || String(seed.model || 'openai-codex/gpt-5.3-codex'),
+        model: String(source.model || seed.model || '').trim() || String(seed.model || 'openai/gpt-5.2-pro'),
         reasoning: normalizeReasoningLevel(source.reasoning, seed.reasoning || 'low'),
     };
 }
@@ -95,6 +95,7 @@ function parseConfig(paths) {
             minMentions: Number(eventThresholds.minMentions || 6),
             minVelocity: Number(eventThresholds.minVelocity || 2.0),
         },
+        eventAlertsEnabled: config.eventAlertsEnabled !== false,
         digestPolicy: {
             similarityLookbackHours: Math.max(1, Number(digestPolicy.similarityLookbackHours || 8)),
             overlapKeywordsMin: Math.max(1, Number(digestPolicy.overlapKeywordsMin || 2)),
@@ -420,6 +421,25 @@ function listCodexModelsViaCli(timeoutMs, cliBackend = null) {
         .filter(Boolean);
 }
 
+function parseProviderFromModelRef(modelRef) {
+    const raw = String(modelRef || '').trim();
+    if (!raw.includes('/')) return '';
+    return raw.split('/')[0].trim().toLowerCase();
+}
+
+function listProviderModelsViaCli(provider, timeoutMs, cliBackend = null) {
+    const safeProvider = String(provider || '').trim();
+    if (!safeProvider) return [];
+    const out = runOpenClawCli(
+        ['models', 'list', '--all', '--provider', safeProvider, '--plain'],
+        { timeoutMs, cliBackend },
+    );
+    return out
+        .split('\n')
+        .map((line) => String(line || '').trim())
+        .filter(Boolean);
+}
+
 function getDefaultModelViaCli(timeoutMs, cliBackend = null) {
     return runOpenClawCli(['models', 'status', '--plain'], { timeoutMs, cliBackend }).trim();
 }
@@ -478,7 +498,8 @@ async function generateDigestTextWithModel(input = {}) {
     let originalModel = '';
     let switched = false;
     try {
-        const available = listCodexModelsViaCli(Math.min(timeoutMs, 45000), cliBackend);
+        const provider = parseProviderFromModelRef(stage.model) || 'openai';
+        const available = listProviderModelsViaCli(provider, Math.min(timeoutMs, 45000), cliBackend);
         if (available.length > 0 && !available.includes(stage.model)) {
             return {
                 ok: false,
@@ -562,13 +583,48 @@ function formatPercent(value) {
     return (n * 100).toFixed(1);
 }
 
-function formatTrendLine(trend) {
+function formatMentionDeltaPercent(currentTrend, previousTrend) {
+    const current = Number(currentTrend && currentTrend.mention_count || 0);
+    const previous = Number(previousTrend && previousTrend.mention_count || 0);
+    if (!Number.isFinite(current) || current <= 0) return '변화 데이터 부족';
+    if (!Number.isFinite(previous) || previous <= 0) return '신규 급부상';
+    const pct = ((current - previous) / previous) * 100;
+    const sign = pct > 0 ? '+' : '';
+    return `${sign}${pct.toFixed(1)}%`;
+}
+
+function pickRepresentativeItemForTrend(recentItems, keyword) {
+    const key = normalizeKeyword(keyword || '');
+    const items = Array.isArray(recentItems) ? recentItems : [];
+    if (!key || !items.length) return null;
+    const lower = key.toLowerCase();
+    return items.find((item) => String(item && item.title || '').toLowerCase().includes(lower)) || null;
+}
+
+function formatTrendLine(trend, index = 0, context = {}) {
     const levelText = trend.level === 'high'
-        ? '불장'
+        ? '지금 강하게 뜨는 중 🔥'
         : trend.level === 'medium'
-            ? '슬슬 뜨는중'
-            : '찍먹 구간';
-    return `- ${trend.keyword}: 언급 ${trend.mention_count}건 / 속도 ${Number(trend.velocity).toFixed(2)} / 점수 ${Number(trend.trend_score).toFixed(2)} (${trend.level}, ${levelText})`;
+            ? '관심이 빠르게 모이는 중 ⬆️'
+            : '초기 반응 단계 👀';
+    const rank = Number(index) + 1;
+    const previousByKeyword = context.previousByKeyword || new Map();
+    const previousTrend = previousByKeyword.get(normalizeKeyword(trend && trend.keyword ? trend.keyword : '')) || null;
+    const deltaText = formatMentionDeltaPercent(trend, previousTrend);
+    const mention = Number(trend && trend.mention_count || 0);
+    const velocity = Number(trend && trend.velocity || 0).toFixed(2);
+    const score = Number(trend && trend.trend_score || 0).toFixed(2);
+    const repItem = pickRepresentativeItemForTrend(context.recentItems, trend && trend.keyword);
+    const reasonText = trend && trend.reason_text ? String(trend.reason_text).trim() : '';
+
+    const whyLine = reasonText
+        ? `   왜 뜸: ${reasonText}`
+        : `   왜 뜸: 최근 언급 ${mention}건이고, 확산 속도 ${velocity}로 빠른 편. 직전 대비 ${deltaText}, 종합 점수 ${score}`;
+    const issueLine = repItem
+        ? `   대표 이슈: ${repItem.title}`
+        : '   대표 이슈: 연관 기사 제목은 아직 부족함';
+
+    return `${rank}) ${trend.keyword} — ${levelText}\n${whyLine}\n${issueLine}`;
 }
 
 function buildVibeSummary(topTrends) {
@@ -1347,7 +1403,7 @@ GROUP BY source;
 function buildWriterFallbackAlertMessage(writerExecution, generatedAtIso, reportTimezone, stage) {
     const when = formatIsoInTimezone(generatedAtIso || nowIso(), reportTimezone, true)
         || String(generatedAtIso || nowIso()).slice(0, 16).replace('T', ' ');
-    const targetModel = String(stage && stage.model || 'openai-codex/gpt-5.2').trim();
+    const targetModel = String(stage && stage.model || 'openai/gpt-5.2-pro').trim();
     const targetReasoning = normalizeReasoningLevel(stage && stage.reasoning, 'high');
     const reason = String(writerExecution && writerExecution.reason || 'unknown').trim();
     const backend = String(writerExecution && writerExecution.backend || '').trim();
@@ -1700,49 +1756,85 @@ async function buildDigest(paths, config, options = {}) {
 }
 
 async function buildEvent(paths, config, options = {}) {
+    if (config.eventAlertsEnabled === false) {
+        return {
+            success: true,
+            action: 'event',
+            pipeline: {
+                collect: { ok: true, skipped: true, reason: 'event_alert_disabled' },
+                trend: { ok: true, skipped: true, reason: 'event_alert_disabled' },
+            },
+            triggered: 0,
+            queued: false,
+            directSent: false,
+            delivery: {
+                queued: false,
+                directSent: false,
+                directReason: 'event_alert_disabled',
+                directStatusCode: 0,
+            },
+            events: [],
+            telegramReply: '🚨 지금 뜨는 이슈 알림은 현재 비활성화 상태입니다.',
+        };
+    }
+
     const pipeline = await runPipeline(paths, config, options);
     const lookbackMinutes = Math.max(180, Number(config.thresholds.windowMinutes || 120) * 2);
     const lookbackIso = new Date(Date.now() - lookbackMinutes * 60 * 1000).toISOString();
-    const trends = loadRecentTrends(paths.dbPath, 20, lookbackIso);
+    const trends = loadRecentTrends(paths.dbPath, 80, lookbackIso);
+    const recentItems = loadRecentItems(paths.dbPath, 80, lookbackIso);
     const candidates = selectEventCandidates(trends, config);
     const filtered = [];
     for (const trend of candidates) {
         if (hasCooldown(paths.dbPath, trend.keyword, config.thresholds.cooldownHours)) continue;
         filtered.push(trend);
     }
+    const uniqueFiltered = pickUniqueTrendsByKeyword(filtered, 5);
+    const selectedByKeyword = new Map(
+        uniqueFiltered.map((row) => [normalizeKeyword(row && row.keyword ? row.keyword : ''), row])
+    );
+    const previousByKeyword = new Map();
+    for (const [key, currentTrend] of selectedByKeyword.entries()) {
+        if (!key || !currentTrend) continue;
+        const prev = trends.find((row) => normalizeKeyword(row && row.keyword ? row.keyword : '') === key && Number(row.id) !== Number(currentTrend.id));
+        previousByKeyword.set(key, prev || null);
+    }
 
-    for (const trend of filtered) persistAlert(paths.dbPath, trend);
+    for (const trend of uniqueFiltered) persistAlert(paths.dbPath, trend);
 
     let telegramReply;
-    if (!filtered.length) {
-        telegramReply = '🚨 이벤트 없음 (임계치 또는 쿨다운 조건 미충족)';
+    if (!uniqueFiltered.length) {
+        telegramReply = '🚨 지금 뜨는 이벤트 없음 (임계치/쿨다운 조건 미충족)';
     } else {
-        const lines = ['🚨 Hot Event Alert'];
-        lines.push(...filtered.slice(0, 5).map(formatTrendLine));
+        const lines = ['🚨 지금 뜨는 이슈 알림', `왜 뜨는지 핵심만 정리했어 (TOP ${uniqueFiltered.length})`];
+        lines.push(...uniqueFiltered.map((trend, idx) => formatTrendLine(trend, idx, {
+            previousByKeyword,
+            recentItems,
+        })));
         telegramReply = lines.join('\n');
     }
 
     const enqueue = Boolean(options.enqueue);
-    const delivery = enqueue && filtered.length > 0
+    const delivery = enqueue && uniqueFiltered.length > 0
         ? await queueTelegramMessage(telegramReply)
         : {
             queued: false,
             directSent: false,
-            directReason: filtered.length > 0 ? 'enqueue_disabled' : 'no_event',
+            directReason: uniqueFiltered.length > 0 ? 'enqueue_disabled' : 'no_event',
             directStatusCode: 0,
         };
 
-    if (enqueue && filtered.length > 0 && !delivery.directSent && !delivery.queued) {
+    if (enqueue && uniqueFiltered.length > 0 && !delivery.directSent && !delivery.queued) {
         return {
             success: false,
             errorCode: 'NEWS_TELEGRAM_DELIVERY_FAILED',
             action: 'event',
             pipeline,
-            triggered: filtered.length,
+            triggered: uniqueFiltered.length,
             queued: false,
             directSent: false,
             delivery,
-            events: filtered,
+            events: uniqueFiltered,
             telegramReply: `이벤트 알림 전송 실패: ${delivery.directReason || 'unknown'}`,
         };
     }
@@ -1751,11 +1843,11 @@ async function buildEvent(paths, config, options = {}) {
         success: true,
         action: 'event',
         pipeline,
-        triggered: filtered.length,
+        triggered: uniqueFiltered.length,
         queued: Boolean(delivery.queued),
         directSent: Boolean(delivery.directSent),
         delivery,
-        events: filtered,
+        events: uniqueFiltered,
         telegramReply,
     };
 }

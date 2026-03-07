@@ -1,0 +1,159 @@
+{
+  "mode": "api_rss_only",
+  "tokenBudget": {
+    "maxFetchedBytesPerRun": 180000,
+    "maxItemsPerSourcePerRun": 30
+  },
+  "thresholds": {
+    "windowMinutes": 120,
+    "minMentions": 2,
+    "velocityThreshold": 1.2,
+    "cooldownHours": 4
+  },
+  "eventThresholds": {
+    "scoreThreshold": 3.8,
+    "minMentions": 8,
+    "minVelocity": 2.5
+  },
+  "eventAlertsEnabled": false,
+  "blockedDomains": [
+    "fmkorea.com",
+    "dcinside.com"
+  ],
+  "digestPolicy": {
+    "similarityLookbackHours": 8,
+    "overlapKeywordsMin": 2,
+    "maxRepeatFocus": 2,
+    "personalizationEnabled": true,
+    "personalizationMaxItems": 2,
+    "personalizationSource": "web",
+    "reportTimezone": "America/Los_Angeles",
+    "modelWriterEnabled": true,
+    "modelWriterTimeoutMs": 120000,
+    "modelStages": {
+      "collect": {
+        "alias": "fast",
+        "model": "openai-codex/gpt-5.3-codex-spark",
+        "reasoning": "low"
+      },
+      "write": {
+        "alias": "gpt",
+        "model": "openai/gpt-5.2-pro",
+        "reasoning": "high"
+      }
+    }
+  },
+  "sources": [
+    {
+      "id": "hn",
+      "enabled": true,
+      "pollMinutes": 20,
+      "feeds": [
+        "topstories",
+        "newstories"
+      ],
+      "maxItems": 20
+    },
+    {
+      "id": "reddit",
+      "enabled": true,
+      "pollMinutes": 30,
+      "feedType": "new",
+      "subreddits": [
+        "technology",
+        "programming",
+        "MachineLearning",
+        "artificial",
+        "opensource"
+      ],
+      "perSubreddit": 4,
+      "maxItems": 20,
+      "maxFetchedBytes": 70000
+    },
+    {
+      "id": "producthunt",
+      "enabled": true,
+      "pollMinutes": 60,
+      "postedDaysWindow": 7,
+      "maxItems": 12,
+      "maxFetchedBytes": 60000
+    },
+    {
+      "id": "github_trending",
+      "enabled": true,
+      "pollMinutes": 60,
+      "createdDaysWindow": 7,
+      "minStars": 50,
+      "query": "topic:ai",
+      "maxItems": 20,
+      "maxFetchedBytes": 120000
+    }
+  ],
+  "keywords": [
+    "vibe coding",
+    "vibecoding",
+    "agentic coding",
+    "openai",
+    "chatgpt",
+    "gpt-5",
+    "claude",
+    "opus 4.6",
+    "cursor",
+    "windsurf",
+    "bolt.new",
+    "lovable",
+    "openclaw",
+    "codex",
+    "japan it",
+    "일본 it",
+    "ai",
+    "llm",
+    "agent",
+    "open source",
+    "typescript",
+    "python",
+    "automation",
+    "developer tools",
+    "hacker news",
+    "reddit",
+    "product hunt",
+    "github trending"
+  ],
+  "optionalSources": [
+    {
+      "id": "forem",
+      "enabled": false,
+      "reason": "Disabled in tech-trend default profile"
+    },
+    {
+      "id": "qiita",
+      "enabled": false,
+      "reason": "Disabled in tech-trend default profile"
+    },
+    {
+      "id": "zenn",
+      "enabled": false,
+      "reason": "Disabled in tech-trend default profile"
+    },
+    {
+      "id": "mastodon",
+      "enabled": false,
+      "reason": "Disabled in tech-trend default profile"
+    },
+    {
+      "id": "stackexchange",
+      "enabled": false,
+      "reason": "Disabled in tech-trend default profile"
+    },
+    {
+      "id": "hatena",
+      "enabled": false,
+      "reason": "Large RSS payload; keep disabled by default"
+    },
+    {
+      "id": "bluesky",
+      "enabled": false,
+      "reason": "Public endpoint returns 403 in current environment"
+    }
+  ]
+}

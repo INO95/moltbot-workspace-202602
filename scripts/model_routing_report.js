@@ -141,6 +141,7 @@ function summarizeApiLanes() {
 
 function buildRecommendations(summary, codexCatalog, apiLaneSummary) {
     const rec = [];
+    const defaultOpenAI = 'openai/gpt-5.2-pro';
     const codexBest =
         codexCatalog.find(m => m.includes('gpt-5.3-codex')) ||
         codexCatalog.find(m => m.includes('gpt-5.2-codex')) ||
@@ -149,8 +150,8 @@ function buildRecommendations(summary, codexCatalog, apiLaneSummary) {
 
     rec.push({
         rule: 'default_route',
-        value: codexBest || 'openai-codex/gpt-5.3-codex',
-        reason: 'OpenAI-only routing baseline for routine and medium-complexity tasks.',
+        value: defaultOpenAI,
+        reason: 'General-purpose baseline for routine and medium-complexity tasks.',
     });
     if (codexBest) {
         rec.push({
@@ -161,7 +162,7 @@ function buildRecommendations(summary, codexCatalog, apiLaneSummary) {
     } else {
         rec.push({
             rule: 'complex_route',
-            value: 'openai-codex/gpt-5.3-codex',
+            value: 'openai-codex/gpt-5.2-codex',
             reason: 'Codex catalog unavailable; keep OpenAI-only path and restore OAuth/catalog access.',
         });
     }

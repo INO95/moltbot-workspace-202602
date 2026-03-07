@@ -9,43 +9,45 @@ const PROFILE_META = {
   anki: { container: 'moltbot-anki', service: 'openclaw-anki', composeProfile: 'live' },
   research: { container: 'moltbot-research', service: 'openclaw-research', composeProfile: 'live' },
   daily: { container: 'moltbot-daily', service: 'openclaw-daily', composeProfile: 'live' },
+  codex: { container: 'moltbot-codex', service: 'openclaw-codex', composeProfile: 'live' },
   dev_bak: { container: 'moltbot-dev-bak', service: 'openclaw-dev-bak', composeProfile: 'backup' },
   anki_bak: { container: 'moltbot-anki-bak', service: 'openclaw-anki-bak', composeProfile: 'backup' },
   research_bak: { container: 'moltbot-research-bak', service: 'openclaw-research-bak', composeProfile: 'backup' },
   daily_bak: { container: 'moltbot-daily-bak', service: 'openclaw-daily-bak', composeProfile: 'backup' },
 };
 
-const LIVE_PROFILES = ['dev', 'anki', 'research', 'daily'];
+const LIVE_PROFILES = ['dev', 'anki', 'research', 'daily', 'codex'];
 const BACKUP_PROFILES = ['dev_bak', 'anki_bak', 'research_bak', 'daily_bak'];
 
-const HEAVY_PREFERRED = [
+// Operational profile:
+// - default: gpt-5.2-pro
+// - complex coding: gpt-5.3-codex
+// - ultra-low-latency edit loops: gpt-5.3-codex-spark
+const DEFAULT_PREFERRED = [
+  'openai/gpt-5.2-pro',
+  'openai/gpt-5.2',
+  'openai-codex/gpt-5.3-codex',
+  'openai/gpt-5.2-codex',
+];
+
+const CODING_PREFERRED = [
   'openai-codex/gpt-5.3-codex',
   'openai-codex/gpt-5.2-codex',
   'openai-codex/gpt-5.2',
-  'openai-codex/gpt-5.1-codex-max',
-  'openai-codex/gpt-5.1',
 ];
 
-const LIGHT_PREFERRED = [
+const SPARK_PREFERRED = [
   'openai-codex/gpt-5.3-codex-spark',
   'openai-codex/gpt-5.1-codex-mini',
   'openai-codex/gpt-5.1',
 ];
 
-const DEEP_PREFERRED = [
-  'openai-codex/gpt-5.2-codex',
+// Keep spark out of automatic fallback by default (text-only model).
+const DEFAULT_OPERATION_FALLBACKS = [
+  'openai/gpt-5.2-pro',
+  'openai/gpt-5.2',
   'openai-codex/gpt-5.3-codex',
-  'openai-codex/gpt-5.2',
-  'openai-codex/gpt-5.1-codex-max',
-  'openai-codex/gpt-5.1',
-];
-
-const DEFAULT_HEAVY_FALLBACKS = [
-  'openai-codex/gpt-5.2-codex',
-  'openai-codex/gpt-5.2',
-  'openai-codex/gpt-5.3-codex-spark',
-  'openai-codex/gpt-5.1-codex-mini',
-  'openai-codex/gpt-5.1',
+  'openai/gpt-5.2-codex',
 ];
 
 function run(cmd, args, opts = {}) {
@@ -118,7 +120,7 @@ function parseArgs(argv) {
 
 function usage() {
   process.stderr.write(
-    'Usage: node scripts/openclaw_codex_sync.js [--profiles dev,anki,research,daily] [--include-backup] [--restart]\n',
+    'Usage: node scripts/openclaw_codex_sync.js [--profiles dev,anki,research,daily,codex] [--include-backup] [--restart]\n',
   );
 }
 
@@ -155,10 +157,10 @@ function ensureContainerRunning(profile) {
   return { container: meta.container, started: true };
 }
 
-function listAvailableCodexModels(container) {
+function listAvailableModels(container, provider) {
   const out = mustRun(
     'docker',
-    ['exec', container, '/bin/sh', '-lc', 'node dist/index.js models list --all --provider openai-codex --plain'],
+    ['exec', container, '/bin/sh', '-lc', `node dist/index.js models list --all --provider ${provider} --plain`],
   );
   return out.stdout
     .split('\n')
@@ -179,10 +181,10 @@ function syncConfigInContainer(container, selection) {
   const script = `
 const fs = require('fs');
 const cfgPath = ${JSON.stringify(CONFIG_PATH)};
-const heavyModel = ${JSON.stringify(selection.heavyModel)};
-const lightModel = ${JSON.stringify(selection.lightModel)};
-const deepModel = ${JSON.stringify(selection.deepModel)};
-const defaultHeavyFallbacks = ${JSON.stringify(DEFAULT_HEAVY_FALLBACKS)};
+const defaultModel = ${JSON.stringify(selection.defaultModel)};
+const codingModel = ${JSON.stringify(selection.codingModel)};
+const sparkModel = ${JSON.stringify(selection.sparkModel)};
+const defaultFallbacks = ${JSON.stringify(DEFAULT_OPERATION_FALLBACKS)};
 const availableModels = ${JSON.stringify(selection.availableModels || [])};
 
 let cfg = {};
@@ -203,7 +205,7 @@ const model = defaults.model;
 const models = defaults.models;
 const availableSet = new Set(availableModels.map((v) => String(v || '').trim()).filter(Boolean));
 
-const trackedAliases = new Set(['codex', 'fast', 'deep']);
+const trackedAliases = new Set(['gpt', 'codex', 'deep', 'spark', 'fast']);
 for (const key of Object.keys(models)) {
   const row = models[key];
   if (!row || typeof row !== 'object') continue;
@@ -215,21 +217,16 @@ function setAlias(modelName, alias) {
   models[modelName] = { ...(models[modelName] || {}), alias };
 }
 
-setAlias(heavyModel, 'codex');
-setAlias(lightModel, 'fast');
+setAlias(defaultModel, 'gpt');
+setAlias(codingModel, 'codex');
+setAlias(sparkModel, 'spark');
 
-let deepAliasModel = '';
-if (deepModel && deepModel !== heavyModel && deepModel !== lightModel) {
-  setAlias(deepModel, 'deep');
-  deepAliasModel = deepModel;
-}
-
-model.primary = heavyModel;
-let nextFallbacks = defaultHeavyFallbacks
+model.primary = defaultModel;
+let nextFallbacks = defaultFallbacks
   .filter((v) => availableSet.has(v))
-  .filter((v) => v !== heavyModel);
-if (deepAliasModel && !nextFallbacks.includes(deepAliasModel)) {
-  nextFallbacks.unshift(deepAliasModel);
+  .filter((v) => v !== defaultModel);
+if (codingModel && codingModel !== defaultModel && !nextFallbacks.includes(codingModel)) {
+  nextFallbacks.unshift(codingModel);
 }
 model.fallbacks = [...new Set(nextFallbacks)];
 
@@ -247,9 +244,9 @@ process.stdout.write(JSON.stringify({
   primary: model.primary,
   fallbacks: model.fallbacks,
   aliases: {
-    codex: heavyModel,
-    fast: lightModel,
-    deep: deepAliasModel || null
+    gpt: defaultModel,
+    codex: codingModel,
+    spark: sparkModel
   },
   gatewayBind: cfg.gateway.bind
 }));
@@ -280,30 +277,32 @@ function main() {
   for (const profile of profiles) {
     const started = ensureContainerRunning(profile);
     const container = PROFILE_META[profile].container;
-    const available = listAvailableCodexModels(container);
-    const heavyModel = selectBest(available, HEAVY_PREFERRED);
-    if (!heavyModel) {
-      throw new Error(`[${profile}] no heavy codex model found. available=${available.join(',')}`);
+    const availableOpenAI = listAvailableModels(container, 'openai');
+    const availableCodex = listAvailableModels(container, 'openai-codex');
+    const available = [...new Set([...availableOpenAI, ...availableCodex])];
+    const defaultModel = selectBest(available, DEFAULT_PREFERRED);
+    if (!defaultModel) {
+      throw new Error(`[${profile}] no default model found. available=${available.join(',')}`);
     }
-    let lightModel = selectBest(available, LIGHT_PREFERRED, new Set([heavyModel]));
-    if (!lightModel) {
-      lightModel = selectBest(available, LIGHT_PREFERRED);
+    let codingModel = selectBest(available, CODING_PREFERRED, new Set([defaultModel]));
+    if (!codingModel) {
+      codingModel = selectBest(available, CODING_PREFERRED);
     }
-    if (!lightModel) {
-      throw new Error(`[${profile}] no light codex model found. available=${available.join(',')}`);
+    if (!codingModel) {
+      throw new Error(`[${profile}] no coding codex model found. available=${available.join(',')}`);
     }
-    let deepModel = selectBest(available, DEEP_PREFERRED, new Set([heavyModel, lightModel]));
-    if (!deepModel) {
-      deepModel = selectBest(available, DEEP_PREFERRED, new Set([heavyModel]));
+    let sparkModel = selectBest(available, SPARK_PREFERRED, new Set([defaultModel, codingModel]));
+    if (!sparkModel) {
+      sparkModel = selectBest(available, SPARK_PREFERRED, new Set([defaultModel]));
     }
-    if (!deepModel) {
-      deepModel = selectBest(available, DEEP_PREFERRED);
+    if (!sparkModel) {
+      throw new Error(`[${profile}] no spark/fast codex model found. available=${available.join(',')}`);
     }
 
     const sync = syncConfigInContainer(container, {
-      heavyModel,
-      lightModel,
-      deepModel,
+      defaultModel,
+      codingModel,
+      sparkModel,
       availableModels: available,
     });
     const restarted = restartContainer(container, args.restart && sync.changed);
@@ -341,6 +340,6 @@ if (require.main === module) {
 module.exports = {
   LIVE_PROFILES,
   PROFILE_META,
-  listAvailableCodexModels,
+  listAvailableModels,
   selectBest,
 };

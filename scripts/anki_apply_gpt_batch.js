@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const anki = require('./anki_connect');
 
+const ROOT = path.join(__dirname, '..');
 const TARGET_DECKS = new Set(['TOEIC_AI', '단어::영단어::2603TOEIC', '단어::영단어::Eng_Voca']);
+const AUDIT_LOG_REL = path.join('logs', 'anki_quality_pipeline.jsonl');
+const LATEST_SUMMARY_REL = path.join('logs', 'anki_quality_pipeline_latest.json');
+const EXTRACT_JSON_REL = path.join('reports', 'anki_20_words_for_gpt_latest.json');
 
 function parseArgs(argv) {
     const out = {
@@ -42,13 +47,76 @@ function chunk(items, size) {
     return out;
 }
 
-function ensureDir(filePath) {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+function ensureDir(dirPath) {
+    fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function timestamp14() {
-    return new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+function writeFileAtomic(filePath, text) {
+    ensureDir(path.dirname(filePath));
+    const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(tmpPath, String(text || ''), 'utf8');
+    fs.renameSync(tmpPath, filePath);
+}
+
+function writeJsonAtomic(filePath, payload) {
+    writeFileAtomic(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function readJson(filePath, fallback) {
+    try {
+        if (!fs.existsSync(filePath)) return fallback;
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (_) {
+        return fallback;
+    }
+}
+
+function appendJsonl(filePath, row) {
+    ensureDir(path.dirname(filePath));
+    fs.appendFileSync(filePath, `${JSON.stringify(row)}\n`, 'utf8');
+}
+
+function createNowFn(now) {
+    if (typeof now === 'function') {
+        return () => {
+            const value = now();
+            return value instanceof Date ? value : new Date(value);
+        };
+    }
+    if (now) {
+        return () => (now instanceof Date ? now : new Date(now));
+    }
+    return () => new Date();
+}
+
+function createRunId() {
+    return typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `anki-quality-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function resolveRootDir(input) {
+    return input ? path.resolve(String(input)) : ROOT;
+}
+
+function updateLatestSummary(rootDir, stage, payload) {
+    const summaryPath = path.join(rootDir, LATEST_SUMMARY_REL);
+    const current = readJson(summaryPath, {
+        schema_version: '1.0',
+        updatedAt: null,
+        stages: {},
+    });
+    const next = {
+        ...current,
+        schema_version: '1.0',
+        updatedAt: payload.ts || new Date().toISOString(),
+        stages: {
+            ...(current && current.stages ? current.stages : {}),
+            [stage]: payload,
+        },
+    };
+    writeJsonAtomic(summaryPath, next);
+    return summaryPath;
 }
 
 function decodeHtmlEntities(text) {
@@ -90,19 +158,29 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+function normalizeTag(tag) {
+    return String(tag || '').trim().toLowerCase();
+}
+
+function normalizeTags(tags) {
+    return Array.isArray(tags)
+        ? tags.map((tag) => normalizeTag(tag)).filter(Boolean)
+        : [];
+}
+
 function wordCandidates(word) {
-    const w = normalizeInline(word).toLowerCase();
-    if (!w) return [];
-    const out = [w];
-    if (!w.includes(' ')) {
-        if (w.endsWith('ies') && w.length > 4) out.push(`${w.slice(0, -3)}y`);
-        if (w.endsWith('s') && w.length > 3) out.push(w.slice(0, -1));
-        if (w.endsWith('ing') && w.length > 5) {
-            const stem = w.slice(0, -3);
+    const normalized = normalizeInline(word).toLowerCase();
+    if (!normalized) return [];
+    const out = [normalized];
+    if (!normalized.includes(' ')) {
+        if (normalized.endsWith('ies') && normalized.length > 4) out.push(`${normalized.slice(0, -3)}y`);
+        if (normalized.endsWith('s') && normalized.length > 3) out.push(normalized.slice(0, -1));
+        if (normalized.endsWith('ing') && normalized.length > 5) {
+            const stem = normalized.slice(0, -3);
             out.push(stem, `${stem}e`);
         }
-        if (w.endsWith('ed') && w.length > 4) {
-            const stem = w.slice(0, -2);
+        if (normalized.endsWith('ed') && normalized.length > 4) {
+            const stem = normalized.slice(0, -2);
             out.push(stem, `${stem}e`);
         }
     }
@@ -110,18 +188,19 @@ function wordCandidates(word) {
 }
 
 function mentionsWord(example, word) {
-    const ex = normalizeInline(example).toLowerCase();
-    if (!ex) return false;
-    return wordCandidates(word).some((c) => ex.includes(c));
+    const normalized = normalizeInline(example).toLowerCase();
+    if (!normalized) return false;
+    return wordCandidates(word).some((candidate) => normalized.includes(candidate));
 }
 
 function parseBasicAnswer(rawAnswer) {
-    const txt = htmlToText(rawAnswer);
-    const meaningMatch = txt.match(/(?:^|\n)\s*뜻\s*[:：]\s*(.+?)(?=(?:\n\s*품사\s*[:：]|\n\s*예문\s*[:：]|\n\s*해석\s*[:：]|\n\s*💡|$))/i);
-    const posMatch = txt.match(/(?:^|\n)\s*품사\s*[:：]\s*(.+?)(?=(?:\n|$))/i);
-    const meaningKo = normalizeInline(meaningMatch ? meaningMatch[1] : '');
-    const partOfSpeech = normalizeInline(posMatch ? posMatch[1] : '');
-    return { meaningKo, partOfSpeech, sourceText: txt };
+    const text = htmlToText(rawAnswer);
+    const meaningMatch = text.match(/(?:^|\n)\s*뜻\s*[:：]\s*(.+?)(?=(?:\n\s*품사\s*[:：]|\n\s*예문\s*[:：]|\n\s*해석\s*[:：]|\n\s*💡|$))/i);
+    const posMatch = text.match(/(?:^|\n)\s*품사\s*[:：]\s*(.+?)(?=(?:\n|$))/i);
+    return {
+        meaningKo: normalizeInline(meaningMatch ? meaningMatch[1] : ''),
+        partOfSpeech: normalizeInline(posMatch ? posMatch[1] : ''),
+    };
 }
 
 function parseJsonRelaxed(raw) {
@@ -146,9 +225,8 @@ function pickRecords(payload) {
 }
 
 function toRecord(raw) {
-    const noteId = Number(raw && raw.noteId);
     return {
-        noteId,
+        noteId: Number(raw && raw.noteId),
         exampleEn: normalizeInline(raw && raw.exampleEn),
         exampleKo: normalizeInline(raw && raw.exampleKo),
         toeicTip: normalizeInline(raw && raw.toeicTip),
@@ -163,11 +241,13 @@ function inferDeckFromCards(cardsInfoRows = []) {
     return '';
 }
 
-function findLatestExtractSource() {
-    const reportsDir = path.join(__dirname, '..', 'reports');
+function findLatestExtractSource(rootDir = ROOT) {
+    const reportsDir = path.join(rootDir, 'reports');
+    const stable = path.join(rootDir, EXTRACT_JSON_REL);
+    if (fs.existsSync(stable)) return stable;
     if (!fs.existsSync(reportsDir)) return '';
     const files = fs.readdirSync(reportsDir)
-        .filter((f) => /^anki_20_words_for_gpt_\d{14}\.json$/.test(f))
+        .filter((fileName) => /^anki_20_words_for_gpt_\d{14}\.json$/.test(fileName))
         .sort()
         .reverse();
     return files.length ? path.join(reportsDir, files[0]) : '';
@@ -214,87 +294,144 @@ function buildEngVocaSentenceMean(exampleEn, exampleKo, toeicTip) {
     ].join('<br>');
 }
 
-async function main() {
-    const args = parseArgs(process.argv.slice(2));
+function buildDesiredUpdate(note, row, source) {
+    const fields = note && note.fields ? note.fields : {};
+    if (fields.Clean_Word && fields.Sentence_Mean) {
+        return {
+            fields: {
+                Example_Sentence: row.exampleEn,
+                Sentence_Mean: buildEngVocaSentenceMean(row.exampleEn, row.exampleKo, row.toeicTip),
+            },
+            reasons: [],
+        };
+    }
+    if (fields.Question && fields.Answer) {
+        const parsed = parseBasicAnswer(fields.Answer.value || '');
+        const meaningKo = parsed.meaningKo || (source ? source.currentMeaningKo : '');
+        const partOfSpeech = parsed.partOfSpeech || '';
+        if (!meaningKo) {
+            return {
+                fields: null,
+                reasons: ['unable_to_preserve_meaning'],
+            };
+        }
+        return {
+            fields: {
+                Answer: buildBasicAnswer(meaningKo, partOfSpeech, row.exampleEn, row.exampleKo, row.toeicTip),
+            },
+            reasons: [],
+        };
+    }
+    return {
+        fields: null,
+        reasons: ['unsupported_note_model'],
+    };
+}
+
+function diffFieldKeys(note, desiredFields) {
+    const currentFields = note && note.fields ? note.fields : {};
+    const changed = [];
+    for (const [key, value] of Object.entries(desiredFields || {})) {
+        const currentValue = currentFields[key] && Object.prototype.hasOwnProperty.call(currentFields[key], 'value')
+            ? currentFields[key].value
+            : '';
+        if (String(currentValue || '').trim() !== String(value || '').trim()) changed.push(key);
+    }
+    return changed;
+}
+
+function diffTags(noteTags, desiredTags) {
+    const current = new Set(normalizeTags(noteTags));
+    return desiredTags.filter((tag) => !current.has(normalizeTag(tag)));
+}
+
+function pushSample(target, row, limit = 15) {
+    if (target.length >= limit) return;
+    target.push(row);
+}
+
+async function runApplyGptBatch(argv, deps = {}) {
+    const args = parseArgs(argv);
     if (!args.input) {
         throw new Error('Usage: node scripts/anki_apply_gpt_batch.js --input <gpt_output.json> [--source <extract_json>] [--apply]');
     }
 
-    const inputPath = path.resolve(args.input);
+    const ankiClient = deps.anki || anki;
+    const rootDir = resolveRootDir(deps.rootDir);
+    const nowFn = createNowFn(deps.now);
+    const nowIso = nowFn().toISOString();
+    const runId = deps.runId || createRunId();
+    const inputPath = path.resolve(rootDir, args.input);
     if (!fs.existsSync(inputPath)) {
         throw new Error(`input file not found: ${inputPath}`);
     }
 
     const sourcePath = args.source
-        ? path.resolve(args.source)
-        : findLatestExtractSource();
+        ? path.resolve(rootDir, args.source)
+        : findLatestExtractSource(rootDir);
 
     const sourceMap = new Map();
     if (sourcePath && fs.existsSync(sourcePath)) {
         const sourcePayload = parseJsonRelaxed(fs.readFileSync(sourcePath, 'utf8'));
-        for (const [k, v] of buildSourceMap(sourcePayload).entries()) sourceMap.set(k, v);
+        for (const [key, value] of buildSourceMap(sourcePayload).entries()) sourceMap.set(key, value);
     }
 
     const rawInput = parseJsonRelaxed(fs.readFileSync(inputPath, 'utf8'));
     const records = pickRecords(rawInput).map(toRecord);
-
-    const ts = timestamp14();
-    const reportPath = path.join(__dirname, '..', 'logs', `anki_apply_20_report_${ts}.json`);
-
-    const report = {
-        createdAt: new Date().toISOString(),
-        apply: Boolean(args.apply),
-        scope: args.scope,
-        inputPath,
-        sourcePath: sourcePath || null,
-        totals: {
-            received: records.length,
-            valid: 0,
-            invalid: 0,
-            applied: 0,
-            failed: 0,
-        },
-        invalid: [],
-        updates: [],
-    };
-
-    const dup = new Set();
-    const seen = new Set();
-    for (const row of records) {
-        if (!Number.isFinite(row.noteId)) continue;
-        if (seen.has(row.noteId)) dup.add(row.noteId);
-        seen.add(row.noteId);
-    }
-
-    const noteIds = [...new Set(records.map((r) => Number(r.noteId)).filter(Number.isFinite))];
+    const noteIds = [...new Set(records.map((row) => Number(row.noteId)).filter(Number.isFinite))];
     const notesById = new Map();
+
     for (const batch of chunk(noteIds, 200)) {
         if (!batch.length) continue;
-        const notes = await anki.invoke('notesInfo', { notes: batch });
+        const notes = await ankiClient.invoke('notesInfo', { notes: batch });
         for (const note of notes) notesById.set(Number(note.noteId), note);
     }
 
-    const allCardIds = [...new Set([...notesById.values()].flatMap((n) => Array.isArray(n.cards) ? n.cards.map(Number) : []))];
+    const allCardIds = [...new Set(
+        [...notesById.values()]
+            .flatMap((note) => (Array.isArray(note.cards) ? note.cards.map(Number) : []))
+            .filter(Number.isFinite)
+    )];
     const cardsById = new Map();
     for (const batch of chunk(allCardIds, 200)) {
         if (!batch.length) continue;
-        const rows = await anki.invoke('cardsInfo', { cards: batch });
+        const rows = await ankiClient.invoke('cardsInfo', { cards: batch });
         for (const row of rows) cardsById.set(Number(row.cardId), row);
     }
 
-    const validOps = [];
+    const duplicateNoteIds = new Set();
+    const seenNoteIds = new Set();
+    for (const row of records) {
+        if (!Number.isFinite(row.noteId)) continue;
+        if (seenNoteIds.has(row.noteId)) duplicateNoteIds.add(row.noteId);
+        seenNoteIds.add(row.noteId);
+    }
+
+    const totals = {
+        received: records.length,
+        invalid: 0,
+        ready: 0,
+        skipped_unchanged: 0,
+        applied: 0,
+        failed: 0,
+    };
+    const invalid = [];
+    const operations = [];
+    const sample = [];
 
     for (const row of records) {
         const reasons = [];
         if (!Number.isFinite(row.noteId)) reasons.push('invalid_note_id');
-        if (dup.has(row.noteId)) reasons.push('duplicate_note_id');
+        if (duplicateNoteIds.has(row.noteId)) reasons.push('duplicate_note_id');
 
         const note = notesById.get(row.noteId);
         if (!note) reasons.push('note_not_found');
 
         let deck = '';
         if (note) {
-            const cards = Array.isArray(note.cards) ? note.cards.map((cid) => cardsById.get(Number(cid))).filter(Boolean) : [];
+            const cards = Array.isArray(note.cards)
+                ? note.cards.map((cardId) => cardsById.get(Number(cardId))).filter(Boolean)
+                : [];
             deck = inferDeckFromCards(cards);
             if (!deck) reasons.push('note_not_in_target_decks');
         }
@@ -315,124 +452,146 @@ async function main() {
         if (!row.exampleEn) reasons.push('missing_example_en');
         if (!row.exampleKo) reasons.push('missing_example_ko');
         if (!row.toeicTip) reasons.push('missing_toeic_tip');
-
         if (row.exampleEn && word && !mentionsWord(row.exampleEn, word)) reasons.push('example_missing_target_word');
         if (row.exampleKo && !hasKorean(row.exampleKo)) reasons.push('example_ko_not_korean');
         if (row.toeicTip && !/(Part|파트|TOEIC)/i.test(row.toeicTip)) reasons.push('tip_missing_toeic_part');
         if (row.toeicTip && !/(함정|콜로케이션|collocation|전치사|품사|수일치|빈출|자주)/i.test(row.toeicTip)) reasons.push('tip_lacks_exam_trap');
-
         if (source && source.deck && deck && source.deck !== deck) reasons.push('source_deck_mismatch');
 
-        let updateFields = null;
-
-        if (!reasons.length) {
-            if (fields.Clean_Word && fields.Sentence_Mean) {
-                updateFields = {
-                    Example_Sentence: row.exampleEn,
-                    Sentence_Mean: buildEngVocaSentenceMean(row.exampleEn, row.exampleKo, row.toeicTip),
-                };
-            } else if (fields.Question && fields.Answer) {
-                const parsed = parseBasicAnswer(fields.Answer.value || '');
-                const meaningKo = parsed.meaningKo || (source ? source.currentMeaningKo : '');
-                const partOfSpeech = parsed.partOfSpeech || '';
-                if (!meaningKo) {
-                    reasons.push('unable_to_preserve_meaning');
-                } else {
-                    updateFields = {
-                        Answer: buildBasicAnswer(meaningKo, partOfSpeech, row.exampleEn, row.exampleKo, row.toeicTip),
-                    };
-                }
-            } else {
-                reasons.push('unsupported_note_model');
-            }
-        }
+        const desired = reasons.length ? { fields: null, reasons: [] } : buildDesiredUpdate(note, row, source);
+        for (const reason of desired.reasons || []) reasons.push(reason);
 
         if (reasons.length) {
-            report.totals.invalid += 1;
-            report.invalid.push({
+            totals.invalid += 1;
+            const invalidRow = {
                 noteId: row.noteId,
                 deck,
                 model,
                 word,
+                status: 'invalid',
                 reasons,
-            });
+            };
+            invalid.push(invalidRow);
+            pushSample(sample, invalidRow);
             continue;
         }
 
-        report.totals.valid += 1;
-        validOps.push({
+        const desiredTags = ['quality:gpt52'];
+        const fieldDiffKeys = diffFieldKeys(note, desired.fields);
+        const missingTags = diffTags(note.tags || [], desiredTags);
+        const op = {
             noteId: row.noteId,
             deck,
             model,
             word,
-            fields: updateFields,
+            desiredFields: desired.fields,
+            fieldDiffKeys,
+            desiredTags,
+            missingTags,
+            status: fieldDiffKeys.length || missingTags.length ? 'ready' : 'skipped_unchanged',
+        };
+        operations.push(op);
+        if (op.status === 'ready') {
+            totals.ready += 1;
+        } else {
+            totals.skipped_unchanged += 1;
+        }
+        pushSample(sample, {
+            noteId: op.noteId,
+            deck: op.deck,
+            word: op.word,
+            status: op.status,
+            fieldDiffKeys: op.fieldDiffKeys,
+            missingTags: op.missingTags,
         });
     }
 
-    for (const op of validOps) {
-        if (!args.apply) {
-            report.updates.push({
-                noteId: op.noteId,
-                deck: op.deck,
-                model: op.model,
-                word: op.word,
-                mode: 'dry-run',
-                fieldKeys: Object.keys(op.fields || {}),
-            });
-            continue;
+    if (args.apply) {
+        for (const op of operations) {
+            if (op.status !== 'ready') continue;
+            try {
+                if (op.fieldDiffKeys.length) {
+                    const fields = {};
+                    for (const key of op.fieldDiffKeys) fields[key] = op.desiredFields[key];
+                    await ankiClient.invoke('updateNoteFields', {
+                        note: {
+                            id: Number(op.noteId),
+                            fields,
+                        },
+                    });
+                }
+                if (op.missingTags.length) {
+                    await ankiClient.invoke('addTags', {
+                        notes: [Number(op.noteId)],
+                        tags: op.missingTags.join(' '),
+                    });
+                }
+                totals.applied += 1;
+                op.status = 'applied';
+            } catch (error) {
+                totals.failed += 1;
+                op.status = 'failed';
+                op.reason = String(error.message || error);
+            }
         }
-        try {
-            await anki.invoke('updateNoteFields', {
-                note: {
-                    id: Number(op.noteId),
-                    fields: op.fields,
-                },
-            });
-            await anki.invoke('addTags', {
-                notes: [Number(op.noteId)],
-                tags: 'quality:gpt52',
-            });
-            report.totals.applied += 1;
-            report.updates.push({
-                noteId: op.noteId,
-                deck: op.deck,
-                model: op.model,
-                word: op.word,
-                mode: 'applied',
-                fieldKeys: Object.keys(op.fields || {}),
-            });
-        } catch (error) {
-            report.totals.failed += 1;
-            report.updates.push({
-                noteId: op.noteId,
-                deck: op.deck,
-                model: op.model,
-                word: op.word,
-                mode: 'failed',
-                reason: String(error.message || error),
-            });
+
+        if (args.sync && totals.applied > 0) {
+            try {
+                await ankiClient.syncWithDelay();
+            } catch (error) {
+                pushSample(sample, {
+                    status: 'sync_warning',
+                    reason: String(error.message || error),
+                });
+            }
         }
     }
 
-    if (args.apply && args.sync) {
-        try {
-            await anki.syncWithDelay();
-        } catch (error) {
-            report.updates.push({ mode: 'sync_warning', reason: String(error.message || error) });
-        }
-    }
+    const auditEvent = {
+        schema_version: '1.0',
+        ts: nowIso,
+        run_id: runId,
+        stage: 'apply_gpt',
+        mode: args.apply ? 'apply' : 'dry-run',
+        ok: totals.failed === 0,
+        totals,
+        artifacts: {
+            input_path: inputPath,
+            source_path: sourcePath || null,
+        },
+        sample,
+    };
+    const auditLogPath = path.join(rootDir, AUDIT_LOG_REL);
+    appendJsonl(auditLogPath, auditEvent);
+    const latestSummaryPath = updateLatestSummary(rootDir, 'apply_gpt', {
+        stage: 'apply_gpt',
+        run_id: runId,
+        ts: nowIso,
+        mode: args.apply ? 'apply' : 'dry-run',
+        ok: auditEvent.ok,
+        totals,
+        artifacts: auditEvent.artifacts,
+        sample,
+    });
 
-    ensureDir(reportPath);
-    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
+    return {
+        ok: auditEvent.ok,
+        stage: 'apply_gpt',
+        mode: args.apply ? 'apply' : 'dry-run',
+        inputPath,
+        sourcePath: sourcePath || null,
+        scope: args.scope,
+        mutatesAnki: Boolean(args.apply),
+        totals,
+        invalid,
+        auditLogPath,
+        latestSummaryPath,
+    };
+}
 
-    console.log(JSON.stringify({
-        ok: true,
-        apply: report.apply,
-        reportPath,
-        totals: report.totals,
-        invalid: report.invalid.length,
-        readyToApply: validOps.length,
-    }, null, 2));
+async function main() {
+    const result = await runApplyGptBatch(process.argv.slice(2));
+    console.log(JSON.stringify(result, null, 2));
 }
 
 if (require.main === module) {
@@ -441,3 +600,9 @@ if (require.main === module) {
         process.exit(1);
     });
 }
+
+module.exports = {
+    runApplyGptBatch,
+    parseArgs,
+    findLatestExtractSource,
+};

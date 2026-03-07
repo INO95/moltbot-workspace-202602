@@ -5,9 +5,11 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { loadRuntimeEnv } = require('./env_runtime');
 const { enqueueBridgePayload } = require('./bridge_queue');
+const telegramFinalizer = require('./finalizer');
 const rules = require('./ops_rules');
 const store = require('./ops_state_store');
 const opsCommandQueue = require('./ops_command_queue');
+const { readRecursiveImproveHealth } = require('./lib/recursive_improve_health');
 
 const ROOT = process.env.OPS_WORKSPACE_ROOT
     ? path.resolve(String(process.env.OPS_WORKSPACE_ROOT))
@@ -18,6 +20,7 @@ const DEFAULT_CONFIG_PATH = path.join(ROOT, 'ops', 'config', 'daily_ops_mvp.json
 const DEFAULT_REMEDIATION_POLICY_PATH = path.join(ROOT, 'ops', 'config', 'remediation_policy.json');
 const SANDBOX_EXPORT_LOG_FILES = Object.freeze([
     path.join('logs', 'nightly_autopilot_latest.json'),
+    path.join('logs', 'midnight_recursive_improve_latest.json'),
     path.join('logs', 'cron_guard_latest.json'),
     path.join('logs', 'notion_sync_dashboard_latest.json'),
     path.join('logs', 'model_cost_latency_dashboard_latest.json'),
@@ -26,11 +29,14 @@ const SANDBOX_EXPORT_LOG_FILES = Object.freeze([
 const TELEGRAM_LOG_SCAN_WINDOW_MINUTES = Math.max(5, Number(process.env.OPS_DAILY_TELEGRAM_LOG_SCAN_WINDOW_MINUTES || 20));
 const TELEGRAM_LOG_SCAN_TAIL_LINES = Math.max(50, Number(process.env.OPS_DAILY_TELEGRAM_LOG_SCAN_TAIL_LINES || 300));
 const TELEGRAM_LOG_ERROR_LINE_LIMIT = Math.max(1, Number(process.env.OPS_DAILY_TELEGRAM_LOG_ERROR_LINE_LIMIT || 5));
+const BRIEFING_LOCK_TTL_MS = Math.max(60 * 1000, Number(process.env.OPS_DAILY_BRIEFING_LOCK_TTL_MS || (8 * 60 * 60 * 1000)));
+const BRIEFING_LOCK_DIR = path.join(store.STATE_DIR, 'briefing_locks');
 const DEFAULT_HEALTH_POLICY = Object.freeze({
     heartbeat_stall_minutes: 15,
     stale_warn_minutes: 45,
     down_heartbeat_minutes: 6 * 60,
     down_requires_telegram_failure_when_container_running: true,
+    idle_stale_requires_telegram_failure_when_container_running: false,
     no_signal_status: 'UNKNOWN',
     idle_stale_status: 'WARN',
 });
@@ -396,6 +402,9 @@ function resolveHealthPolicy(config) {
         down_requires_telegram_failure_when_container_running: source.down_requires_telegram_failure_when_container_running == null
             ? DEFAULT_HEALTH_POLICY.down_requires_telegram_failure_when_container_running
             : Boolean(source.down_requires_telegram_failure_when_container_running),
+        idle_stale_requires_telegram_failure_when_container_running: source.idle_stale_requires_telegram_failure_when_container_running == null
+            ? DEFAULT_HEALTH_POLICY.idle_stale_requires_telegram_failure_when_container_running
+            : Boolean(source.idle_stale_requires_telegram_failure_when_container_running),
         no_signal_status: normalizeStatusEnum(source.no_signal_status, DEFAULT_HEALTH_POLICY.no_signal_status, ['UNKNOWN', 'WARN', 'ERROR']),
         idle_stale_status: normalizeStatusEnum(source.idle_stale_status, DEFAULT_HEALTH_POLICY.idle_stale_status, ['UNKNOWN', 'WARN']),
     };
@@ -914,13 +923,27 @@ function writeIssueAlert(issue, decision, nowIso, config, sendEnabled) {
     let delivered = false;
 
     if (sendEnabled) {
+        const safeMessage = finalizeSupervisorTelegramReply(alertRecord.message_markdown);
+        const dedupeKey = `ops-alert:${issue.issue_id}:${String(nowIso).slice(0, 13)}`;
         enqueueBridgePayload({
             taskId: `ops-alert-${Date.now()}`,
-            command: `[NOTIFY] ${alertRecord.message_markdown}`,
+            command: `[NOTIFY] ${safeMessage}`,
             timestamp: nowIso,
             status: 'pending',
             route: 'report',
             source: 'ops-daily-supervisor',
+            telegramReply: safeMessage,
+            notification_kind: 'alert',
+            source_kind: 'scheduled_background',
+            severity: String(issue.severity || 'P3').toUpperCase(),
+            user_visible: true,
+            dedupe_key: dedupeKey,
+            classification_reason: 'ops_issue_alert',
+            metadata: {
+                phase: 'report',
+                issue_id: issue.issue_id,
+                decision_rule: decision.decision_rule,
+            },
         });
         sentPath = store.markAlertSent(outboxPath);
         delivered = true;
@@ -946,6 +969,102 @@ function isScheduledTime(now, timezone, hhmm, fallbackHour) {
     return parts.hour === target.hour && parts.minute === target.minute;
 }
 
+function sanitizeLockToken(value) {
+    return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
+}
+
+function readLockMeta(lockPath) {
+    try {
+        const raw = fs.readFileSync(lockPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function acquireBriefingWindowLock(type, dateKey, now, options = {}) {
+    const force = Boolean(options.force);
+    if (force) {
+        return {
+            acquired: true,
+            lockPath: null,
+            reason: 'force',
+        };
+    }
+    const lockName = `${sanitizeLockToken(type)}_${sanitizeLockToken(dateKey)}.lock.json`;
+    const lockPath = path.join(BRIEFING_LOCK_DIR, lockName);
+    fs.mkdirSync(BRIEFING_LOCK_DIR, { recursive: true });
+    const lockPayload = {
+        schema_version: '1.0',
+        type,
+        date: dateKey,
+        created_at: isoNow(now),
+        pid: process.pid,
+    };
+    const writeLock = () => {
+        fs.writeFileSync(lockPath, `${JSON.stringify(lockPayload, null, 2)}\n`, {
+            encoding: 'utf8',
+            flag: 'wx',
+        });
+    };
+    try {
+        writeLock();
+        return {
+            acquired: true,
+            lockPath,
+            reason: 'created',
+        };
+    } catch (error) {
+        if (!error || error.code !== 'EEXIST') {
+            return {
+                acquired: false,
+                lockPath,
+                reason: String(error && error.code || 'LOCK_WRITE_FAILED'),
+            };
+        }
+        const existing = readLockMeta(lockPath);
+        const createdMs = Date.parse(String(existing && existing.created_at || ''));
+        if (Number.isFinite(createdMs) && (now.getTime() - createdMs) > BRIEFING_LOCK_TTL_MS) {
+            try {
+                fs.unlinkSync(lockPath);
+                writeLock();
+                return {
+                    acquired: true,
+                    lockPath,
+                    reason: 'stale_replaced',
+                };
+            } catch (_) {
+                return {
+                    acquired: false,
+                    lockPath,
+                    reason: 'lock_busy_after_stale_replace',
+                };
+            }
+        }
+        return {
+            acquired: false,
+            lockPath,
+            reason: 'already_locked',
+        };
+    }
+}
+
+function finalizeSupervisorTelegramReply(replyText) {
+    const raw = String(replyText || '').trim();
+    if (!raw) return raw;
+    const sanitized = telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function'
+        ? telegramFinalizer.sanitizeForUser(raw)
+        : raw;
+    const normalized = String(sanitized || '').trim();
+    return normalized || '운영 리포트 생성 중 내부 오류가 발생했습니다.';
+}
+
+function readRecursiveImproveStatus(now) {
+    return readRecursiveImproveHealth(ROOT, { now });
+}
+
 function buildBriefing(type, now, config, state, issuesDoc) {
     const timezone = config.timezone || 'Asia/Tokyo';
     const parts = rules.getTimeParts(now, timezone);
@@ -954,6 +1073,7 @@ function buildBriefing(type, now, config, state, issuesDoc) {
         ? `Morning Briefing — ${dateKey} (${timezone})`
         : `Evening Briefing — ${dateKey} (${timezone})`;
     const botHealth = state.bot_health || {};
+    const recursiveImprove = readRecursiveImproveStatus(now);
     const openIssues = Object.values(issuesDoc.issues || {}).filter((item) => item && item.status === 'open');
     const resolvedSince = Object.values(issuesDoc.issues || {}).filter((item) => {
         if (!item || item.status !== 'resolved' || !item.resolved_at) return false;
@@ -999,6 +1119,13 @@ function buildBriefing(type, now, config, state, issuesDoc) {
         lines.push(`- Missed schedules: ${staleBots.length ? staleBots.join(', ') : 'none'}`);
         const schemaIssue = openIssues.filter((issue) => String(issue.fingerprint || '').includes('schema_violation'));
         lines.push(`- Schema violations: ${schemaIssue.length ? schemaIssue.length : 'none'}`);
+        if (recursiveImprove.exists && recursiveImprove.fresh) {
+            lines.push(`- Midnight recursive improve: ${recursiveImprove.ok ? 'OK' : 'FAIL'}${recursiveImprove.preflightRepaired ? ' (worktree repaired)' : ''}; consecutive=${recursiveImprove.consecutiveFailures}; next=${recursiveImprove.nextAction}`);
+        } else if (recursiveImprove.exists) {
+            lines.push(`- Midnight recursive improve: stale report; next=${recursiveImprove.nextAction}`);
+        } else {
+            lines.push('- Midnight recursive improve: report missing; verify the midnight cron and latest report path.');
+        }
         lines.push('- Disk/log growth: pending dedicated metric (MVP baseline)');
         lines.push('');
         lines.push('Today’s Focus:');
@@ -1016,6 +1143,7 @@ function buildBriefing(type, now, config, state, issuesDoc) {
         lines.push(`- Total runs observed: ${Object.values(botHealth).reduce((acc, x) => acc + Number((x && x.runs_observed) || 0), 0)}`);
         lines.push(`- Errors: ${counts.P1 + counts.P2 + counts.P3} (P1: ${counts.P1}, P2: ${counts.P2}, P3: ${counts.P3})`);
         lines.push(`- Retries recovered: ${Object.values(botHealth).reduce((acc, x) => acc + Number((x && x.retries_recovered) || 0), 0)}`);
+        lines.push(`- Midnight recursive improve: ${recursiveImprove.summaryLine}`);
         lines.push('');
         lines.push('Current Health:');
         for (const [botId, health] of Object.entries(botHealth)) {
@@ -1045,9 +1173,9 @@ function buildBriefing(type, now, config, state, issuesDoc) {
 function maybeGenerateBriefing(type, now, config, state, issuesDoc, options = {}) {
     const timezone = config.timezone || 'Asia/Tokyo';
     const sendEnabled = Boolean(options.sendEnabled);
-    const force = Boolean(options.force);
+    const bypassSchedule = Boolean(options.force);
     const briefingCfg = config.briefings || {};
-    const shouldRun = force || (
+    const shouldRun = bypassSchedule || (
         type === 'morning'
             ? isScheduledTime(now, timezone, briefingCfg.morning_time, 8)
             : isScheduledTime(now, timezone, briefingCfg.evening_time, 18)
@@ -1057,22 +1185,40 @@ function maybeGenerateBriefing(type, now, config, state, issuesDoc, options = {}
     const parts = rules.getTimeParts(now, timezone);
     const dateKey = parts.dateKey;
     const last = state.last_briefing_sent && state.last_briefing_sent[type];
-    if (!force && last && last.date === dateKey) return null;
+    if (last && last.date === dateKey) return null;
+    const lock = acquireBriefingWindowLock(type, dateKey, now);
+    if (!lock.acquired) return null;
 
     const content = buildBriefing(type, now, config, state, issuesDoc);
+    const safeContent = finalizeSupervisorTelegramReply(content);
     const fileName = `${type}_${dateKey}.md`;
     const reportPath = path.join(store.REPORTS_DIR, fileName);
-    store.writeReport(reportPath, content);
+    store.writeReport(reportPath, safeContent);
 
     let delivered = false;
     if (sendEnabled && briefingCfg.send !== false) {
+        const dedupeKey = `ops-briefing:${type}:${dateKey}`;
         enqueueBridgePayload({
             taskId: `ops-briefing-${type}-${Date.now()}`,
-            command: `[NOTIFY] ${content}`,
+            command: `[NOTIFY] ${safeContent}`,
             timestamp: isoNow(now),
             status: 'pending',
             route: 'report',
             source: 'ops-daily-supervisor',
+            telegramReply: safeContent,
+            notification_kind: 'briefing',
+            source_kind: 'scheduled_background',
+            severity: 'P4',
+            user_visible: true,
+            dedupe_key: dedupeKey,
+            classification_reason: 'scheduled_briefing',
+            metadata: {
+                phase: 'report',
+                briefing_type: type,
+                date_key: dateKey,
+                lock_reason: lock.reason,
+                lock_path: lock.lockPath || null,
+            },
         });
         delivered = true;
     }
@@ -1083,6 +1229,7 @@ function maybeGenerateBriefing(type, now, config, state, issuesDoc, options = {}
         ts: isoNow(now),
         report_path: reportPath,
         delivered,
+        lock_path: lock.lockPath || null,
     };
 
     return {
@@ -1142,6 +1289,27 @@ function runScan(options = {}) {
     state.bot_health = state.bot_health || {};
     const findings = [];
     const healthPolicy = resolveHealthPolicy(config);
+    const recursiveImprove = readRecursiveImproveStatus(now);
+
+    if (!recursiveImprove.ok || !recursiveImprove.fresh || !recursiveImprove.exists) {
+        const severity = recursiveImprove.shouldEscalate ? 'P2' : 'P3';
+        const summary = recursiveImprove.exists
+            ? `${recursiveImprove.summaryLine}. Next action: ${recursiveImprove.nextAction}`
+            : 'Midnight recursive improve report missing. Verify the midnight cron and report path.';
+        const issue = touchIssueOpen(issuesDoc, {
+            issue_id: 'system:midnight_recursive_improve',
+            bot_id: 'system',
+            fingerprint: 'midnight_recursive_improve',
+            severity,
+            ts: nowIso,
+            summary,
+            log_path: recursiveImprove.path,
+        });
+        issue.consecutive_failures = Math.max(0, Number(recursiveImprove.consecutiveFailures || 0));
+        findings.push({ botId: 'system', type: 'midnight_recursive_improve', issue_id: issue.issue_id });
+    } else {
+        resolveIssueById(issuesDoc, 'system:midnight_recursive_improve', nowIso, 'Midnight recursive improve healthy.');
+    }
 
     for (const worker of activeBots) {
         const botId = worker.botId;
@@ -1426,11 +1594,20 @@ function runScan(options = {}) {
             (heartbeatAgeMinutes != null && heartbeatAgeMinutes > healthPolicy.stale_warn_minutes)
             || (latestAgeMinutes != null && latestAgeMinutes > healthPolicy.stale_warn_minutes)
         );
+        const staleWarnBlockedByHealthyContainer = (
+            healthPolicy.idle_stale_requires_telegram_failure_when_container_running
+            && containerRunning === true
+            && telegramFailed === false
+        );
         if (shouldMarkDown) {
             health.status = 'DOWN';
         } else if (effectiveNoSignal) {
             health.status = healthPolicy.no_signal_status;
-        } else if (hasStaleTelemetry && (health.status === 'OK' || health.status === 'UNKNOWN')) {
+        } else if (
+            hasStaleTelemetry
+            && !staleWarnBlockedByHealthyContainer
+            && (health.status === 'OK' || health.status === 'UNKNOWN')
+        ) {
             health.status = healthPolicy.idle_stale_status;
         }
 
