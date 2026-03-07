@@ -19,35 +19,28 @@ const PROFILE_META = {
 const LIVE_PROFILES = ['dev', 'anki', 'research', 'daily', 'codex'];
 const BACKUP_PROFILES = ['dev_bak', 'anki_bak', 'research_bak', 'daily_bak'];
 
-// Operational profile:
-// - default: gpt-5.2-pro
-// - complex coding: gpt-5.3-codex
-// - ultra-low-latency edit loops: gpt-5.3-codex-spark
 const DEFAULT_PREFERRED = [
-  'openai/gpt-5.2-pro',
-  'openai/gpt-5.2',
+  'openai-codex/gpt-5.2',
   'openai-codex/gpt-5.3-codex',
-  'openai/gpt-5.2-codex',
+  'openai-codex/gpt-5.2-codex',
+  'openai-codex/gpt-5.1-codex-mini',
 ];
 
 const CODING_PREFERRED = [
   'openai-codex/gpt-5.3-codex',
   'openai-codex/gpt-5.2-codex',
-  'openai-codex/gpt-5.2',
 ];
 
-const SPARK_PREFERRED = [
-  'openai-codex/gpt-5.3-codex-spark',
+const FAST_PREFERRED = [
   'openai-codex/gpt-5.1-codex-mini',
   'openai-codex/gpt-5.1',
 ];
 
-// Keep spark out of automatic fallback by default (text-only model).
 const DEFAULT_OPERATION_FALLBACKS = [
-  'openai/gpt-5.2-pro',
-  'openai/gpt-5.2',
   'openai-codex/gpt-5.3-codex',
-  'openai/gpt-5.2-codex',
+  'openai-codex/gpt-5.2-codex',
+  'openai-codex/gpt-5.1-codex-mini',
+  'openai-codex/gpt-5.1',
 ];
 
 function run(cmd, args, opts = {}) {
@@ -183,7 +176,7 @@ const fs = require('fs');
 const cfgPath = ${JSON.stringify(CONFIG_PATH)};
 const defaultModel = ${JSON.stringify(selection.defaultModel)};
 const codingModel = ${JSON.stringify(selection.codingModel)};
-const sparkModel = ${JSON.stringify(selection.sparkModel)};
+const fastModel = ${JSON.stringify(selection.fastModel)};
 const defaultFallbacks = ${JSON.stringify(DEFAULT_OPERATION_FALLBACKS)};
 const availableModels = ${JSON.stringify(selection.availableModels || [])};
 
@@ -204,22 +197,47 @@ defaults.models = defaults.models || {};
 const model = defaults.model;
 const models = defaults.models;
 const availableSet = new Set(availableModels.map((v) => String(v || '').trim()).filter(Boolean));
+const defaultsCompaction = {
+  mode: 'safeguard',
+  reserveTokens: 48000,
+  keepRecentTokens: 8000,
+  reserveTokensFloor: 16000,
+  maxHistoryShare: 0.25,
+  identifierPolicy: 'strict',
+  memoryFlush: {
+    enabled: true,
+    softThresholdTokens: 12000,
+    forceFlushTranscriptBytes: '512kb',
+  },
+};
 
-const trackedAliases = new Set(['gpt', 'codex', 'deep', 'spark', 'fast']);
+const trackedAliases = new Set(['gpt', 'codex', 'deep', 'fast', 'gptmini', 'spark']);
 for (const key of Object.keys(models)) {
   const row = models[key];
   if (!row || typeof row !== 'object') continue;
   if (trackedAliases.has(row.alias)) delete row.alias;
 }
 
-function setAlias(modelName, alias) {
-  if (!modelName || !alias) return;
-  models[modelName] = { ...(models[modelName] || {}), alias };
+function ensureModel(modelName) {
+  if (!modelName) return;
+  models[modelName] = { ...(models[modelName] || {}) };
 }
+
+function setAlias(modelName, alias) {
+  const cleaned = String(alias || '').trim();
+  if (!modelName || !cleaned) return;
+  ensureModel(modelName);
+  models[modelName].alias = cleaned;
+}
+
+ensureModel(defaultModel);
+ensureModel(codingModel);
+ensureModel(fastModel);
+ensureModel('openai-codex/gpt-5.2-codex');
 
 setAlias(defaultModel, 'gpt');
 setAlias(codingModel, 'codex');
-setAlias(sparkModel, 'spark');
+setAlias(fastModel, 'fast');
 
 model.primary = defaultModel;
 let nextFallbacks = defaultFallbacks
@@ -229,6 +247,12 @@ if (codingModel && codingModel !== defaultModel && !nextFallbacks.includes(codin
   nextFallbacks.unshift(codingModel);
 }
 model.fallbacks = [...new Set(nextFallbacks)];
+defaults.compaction = defaultsCompaction;
+
+cfg.channels = cfg.channels || {};
+cfg.channels.telegram = cfg.channels.telegram || {};
+cfg.channels.telegram.historyLimit = 6;
+cfg.channels.telegram.dmHistoryLimit = 8;
 
 if (!cfg.gateway) cfg.gateway = {};
 cfg.gateway.bind = 'loopback';
@@ -244,9 +268,10 @@ process.stdout.write(JSON.stringify({
   primary: model.primary,
   fallbacks: model.fallbacks,
   aliases: {
+    fast: fastModel,
     gpt: defaultModel,
     codex: codingModel,
-    spark: sparkModel
+    deep: defaultModel
   },
   gatewayBind: cfg.gateway.bind
 }));
@@ -291,18 +316,18 @@ function main() {
     if (!codingModel) {
       throw new Error(`[${profile}] no coding codex model found. available=${available.join(',')}`);
     }
-    let sparkModel = selectBest(available, SPARK_PREFERRED, new Set([defaultModel, codingModel]));
-    if (!sparkModel) {
-      sparkModel = selectBest(available, SPARK_PREFERRED, new Set([defaultModel]));
+    let fastModel = selectBest(available, FAST_PREFERRED, new Set([defaultModel, codingModel]));
+    if (!fastModel) {
+      fastModel = selectBest(available, FAST_PREFERRED, new Set([defaultModel]));
     }
-    if (!sparkModel) {
-      throw new Error(`[${profile}] no spark/fast codex model found. available=${available.join(',')}`);
+    if (!fastModel) {
+      throw new Error(`[${profile}] no fast codex model found. available=${available.join(',')}`);
     }
 
     const sync = syncConfigInContainer(container, {
       defaultModel,
       codingModel,
-      sparkModel,
+      fastModel,
       availableModels: available,
     });
     const restarted = restartContainer(container, args.restart && sync.changed);

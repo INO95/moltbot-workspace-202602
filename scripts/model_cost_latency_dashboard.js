@@ -35,7 +35,15 @@ const { DEFAULT_NATURAL_LANGUAGE_ROUTING } = require('../packages/core-policy/sr
 const { sanitizeProjectName } = require('./project_bootstrap');
 const { resolveDbPath } = require('./personal_schema');
 const { runSqlJson } = require('./news_storage');
+const {
+    getPromptFileSizeMap,
+    summarizePromptSnapshot,
+    readMainSessionState,
+    evaluateMainSessionRotation,
+    readLatestSystemPromptReport,
+} = require('./lib/main_session_rotation');
 
+const ROOT = path.join(__dirname, '..');
 const DASHBOARD_JSON_PATH = path.join(__dirname, '../logs/model_cost_latency_dashboard_latest.json');
 const DASHBOARD_MD_PATH = path.join(__dirname, '../logs/model_cost_latency_dashboard_latest.md');
 const HISTORY_JSONL_PATH = path.join(__dirname, '../logs/model_cost_latency_history.jsonl');
@@ -500,6 +508,26 @@ function summarizeSessions(sessions) {
     return { byModel, totalInput, totalOutput, totalTokens, sessionCount: sessions.length };
 }
 
+function buildNormalizedBridgeLogCommand(commandText, options = {}) {
+    const text = String(commandText || '').trim();
+    if (!text) return '';
+    const routeResolver = typeof options.workspaceRootResolver === 'function'
+        ? options.workspaceRootResolver
+        : (() => resolveWorkspaceRootHintCore({
+            env: options.env || process.env,
+            fsModule: fs,
+            pathModule: path,
+            fallbackWorkspaceRoot: ROOT,
+        }));
+    const normalized = normalizeIncomingCommandTextCore(text, {
+        resolveWorkspaceRootHint: routeResolver,
+    });
+    return String(normalized || text)
+        .replace(/^\s*\[Telegram[^\]]*\]\s*/i, '')
+        .replace(/\s*\[message_id:\s*[^\]]+\]\s*$/i, '')
+        .trim();
+}
+
 function parseBridgeRouteCounts(options = {}) {
     const counts = emptyRouteCounts();
     const system = { cronFail: 0, otherSystem: 0, total: 0 };
@@ -530,6 +558,12 @@ function parseBridgeRouteCounts(options = {}) {
     const routingPolicy = loadRoutingPolicy();
     const env = options.env && typeof options.env === 'object' ? options.env : process.env;
     const routeResolver = buildRouteResolver({ commandPrefixes, naturalLanguageRouting, env });
+    const workspaceRootResolver = () => resolveWorkspaceRootHintCore({
+        env,
+        fsModule: fs,
+        pathModule: path,
+        fallbackWorkspaceRoot: ROOT,
+    });
 
     const lines = fs
         .readFileSync(bridgeLogPath, 'utf8')
@@ -557,6 +591,10 @@ function parseBridgeRouteCounts(options = {}) {
             system.total += 1;
             continue;
         }
+        obj.command = buildNormalizedBridgeLogCommand(obj.command, {
+            env,
+            workspaceRootResolver,
+        });
         const classified = classifyBridgeRoute(obj, {
             commandPrefixes,
             naturalLanguageRouting,
@@ -588,7 +626,13 @@ function parseBridgeRouteCounts(options = {}) {
         }
     }
     const userTotal = Object.values(counts).reduce((acc, value) => acc + Number(value || 0), 0);
-    return { counts, total: userTotal, system, apiLanes };
+    return {
+        counts,
+        byRoute: { ...counts },
+        total: userTotal,
+        system,
+        apiLanes,
+    };
 }
 
 function loadBudgetPolicy(options = {}) {
@@ -704,6 +748,45 @@ function appendHistory(snapshot) {
     fs.appendFileSync(HISTORY_JSONL_PATH, `${JSON.stringify(snapshot)}\n`, 'utf8');
 }
 
+function buildPromptBudgetSummary(options = {}) {
+    const root = options.root || ROOT;
+    const report = readLatestSystemPromptReport({ root, env: options.env || process.env });
+    const currentPromptSizes = getPromptFileSizeMap({ root });
+    const snapshot = summarizePromptSnapshot(report);
+    return {
+        injectedWorkspaceChars: Object.values(currentPromptSizes).reduce((acc, value) => (
+            Number.isFinite(Number(value)) ? acc + Number(value) : acc
+        ), 0),
+        toolSchemaChars: snapshot.toolSchemaChars,
+        skillsPromptChars: snapshot.skillsPromptChars,
+        injectedWorkspaceSnapshotChars: snapshot.injectedWorkspaceChars,
+        injectedWorkspaceByFile: currentPromptSizes,
+    };
+}
+
+function buildSessionRotationSummary(options = {}) {
+    const root = options.root || ROOT;
+    const state = readMainSessionState({ root, env: options.env || process.env });
+    if (!state.ok) {
+        return {
+            recommended: false,
+            reason: state.reason,
+        };
+    }
+    const decision = evaluateMainSessionRotation(state.current, {
+        root,
+        fsModule: fs,
+        pathModule: path,
+    });
+    return {
+        recommended: decision.recommended,
+        reason: decision.reason,
+        totalTokens: decision.totalTokens,
+        tokenSource: decision.tokenSource,
+        isStale: decision.isStale,
+    };
+}
+
 function markdownReport(report) {
     const lines = [];
     lines.push(`# Model Cost/Latency Dashboard`);
@@ -716,6 +799,12 @@ function markdownReport(report) {
     lines.push(`- Budget limit (JPY): ${report.cost.budgetPolicy.monthlyApiBudgetYen}`);
     lines.push('');
 
+    lines.push(`## Prompt Budget`);
+    lines.push(`- injectedWorkspaceChars: ${report.promptBudget.injectedWorkspaceChars}`);
+    lines.push(`- toolSchemaChars: ${report.promptBudget.toolSchemaChars}`);
+    lines.push(`- skillsPromptChars: ${report.promptBudget.skillsPromptChars}`);
+    lines.push('');
+
     lines.push(`## Latency Probes`);
     for (const p of report.latency.probes) {
         lines.push(
@@ -726,7 +815,7 @@ function markdownReport(report) {
 
     lines.push(`## Route Volume`);
     lines.push(`- Total user command events: ${report.routes.total}`);
-    for (const [k, v] of Object.entries(report.routes.counts)) {
+    for (const [k, v] of Object.entries(report.routes.byRoute || report.routes.counts || {})) {
         lines.push(`- ${k}: ${v}`);
     }
     if (report.routes.system) {
@@ -760,6 +849,11 @@ function markdownReport(report) {
         lines.push(`- ${model}: sessions=${info.sessions}, totalTokens=${info.totalTokens}`);
     }
     lines.push('');
+
+    lines.push(`## Session Rotation`);
+    lines.push(`- recommended: ${report.sessionRotation.recommended}`);
+    lines.push(`- reason: ${report.sessionRotation.reason}`);
+    lines.push('');
     return lines.join('\n');
 }
 
@@ -774,6 +868,8 @@ function main() {
     const bestCodexModel = chooseCodexModel(codexCatalog);
     const defaultModel = getModelStatusPlain();
     const probes = benchmarkLatencies(bestCodexModel);
+    const promptBudget = buildPromptBudgetSummary();
+    const sessionRotation = buildSessionRotationSummary();
 
     const report = {
         generatedAt: new Date().toISOString(),
@@ -784,6 +880,8 @@ function main() {
         },
         sessions: sessionSummary,
         routes,
+        promptBudget,
+        sessionRotation,
         wordMetrics,
         latency: {
             probes,
@@ -802,9 +900,11 @@ function main() {
         t: report.generatedAt,
         defaultModel,
         bestCodexModel,
-        routes: report.routes.counts,
+        routes: report.routes.byRoute || report.routes.counts,
         routeSystem: report.routes.system,
         routeApiLanes: report.routes.apiLanes,
+        promptBudget: report.promptBudget,
+        sessionRotation: report.sessionRotation,
         wordMetrics: report.wordMetrics,
         latency: report.latency.probes,
         sessions: {
@@ -837,6 +937,15 @@ if (require.main === module) {
         process.exit(1);
     }
 }
+
+module.exports = {
+    buildNormalizedBridgeLogCommand,
+    buildPromptBudgetSummary,
+    buildRouteResolver,
+    buildSessionRotationSummary,
+    classifyBridgeRoute,
+    parseBridgeRouteCounts,
+};
 
 module.exports = {
     parseBridgeRouteCounts,
