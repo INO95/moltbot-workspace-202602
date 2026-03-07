@@ -3,7 +3,7 @@
   "update": { "channel": "dev" },
   "agents": {
     "defaults": {
-      "workspace": "/Users/moltbot/Projects/Moltbot_Workspace",
+      "workspace": "/Users/inho-baek/Projects/Moltbot_Workspace",
       "sandbox": { "mode": "off" }
     }
   },

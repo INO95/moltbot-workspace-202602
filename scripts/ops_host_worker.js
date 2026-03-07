@@ -16,8 +16,13 @@ const photoManager = require('./capabilities/photo_manager');
 const scheduleManager = require('./capabilities/schedule_manager');
 const browserManager = require('./capabilities/browser_manager');
 const execManager = require('./capabilities/exec_manager');
+const codexManager = require('./capabilities/codex_manager');
 const telegramFinalizer = require('./finalizer');
 const approvalAuditLog = require('./approval_audit_log');
+const botPermissionPolicy = require('./bot_permission_policy');
+const {
+  rotateMainSessionIfNeeded,
+} = require('./lib/main_session_rotation');
 
 const RUNTIME_DIR = path.join(__dirname, '..', 'data', 'runtime');
 const QUEUE_PATH = path.join(RUNTIME_DIR, 'ops_requests.jsonl');
@@ -27,11 +32,23 @@ const SNAPSHOT_PATH = path.join(RUNTIME_DIR, 'ops_snapshot.json');
 const TUNNEL_STATE_PATH = path.join(RUNTIME_DIR, 'tunnel_state.json');
 const SKILL_FEEDBACK_STATE_PATH = path.join(RUNTIME_DIR, 'skill_feedback_state.json');
 const SKILL_FEEDBACK_SCRIPT = path.join(ROOT, 'scripts', 'skill_feedback_loop.js');
-const MAIN_SESSION_KEY = 'agent:main:main';
-const MAIN_SESSIONS_DIR_CANDIDATES = [
-  path.join(ROOT, 'configs', 'dev', 'agents', 'main', 'sessions'),
-  path.join(ROOT, 'configs', 'main', 'agents', 'main', 'sessions'),
+const NOTIFY_AGGREGATE_STATE_PATH = path.join(RUNTIME_DIR, 'ops_notify_aggregate_state.json');
+const NOTIFY_WINDOW_MS = Math.max(5, Number(process.env.OPS_NOTIFY_WINDOW_MINUTES || 30)) * 60 * 1000;
+const NOTIFY_SUPPRESSED_SUMMARY_THRESHOLD = Math.max(2, Number(process.env.OPS_NOTIFY_SUPPRESSED_SUMMARY_THRESHOLD || 3));
+const NOTIFY_SOURCE_KINDS = Object.freeze(['user_direct', 'test', 'internal', 'scheduled_background']);
+const NOTIFY_SEVERITIES = Object.freeze(['P1', 'P2', 'P3', 'P4', 'UNKNOWN']);
+const SAFE_INTERNAL_ERROR_REPLY = '실패\n원인: 내부 실행 오류가 발생했어.\n다음 조치: 잠시 후 다시 시도해줘.';
+const TRACE_BLOCK_PATTERNS = [
+  /Exec:/i,
+  /Command exited with code\s+\d+/i,
+  /Command aborted by signal/i,
+  /^\s*sh:\s*\d+:/i,
+  /"tool"\s*:\s*"exec"/i,
+  /Traceback \(most recent call last\)/i,
+  /^\s*(stderr|stack trace|raw json)\s*[:：]/i,
+  /^\s*\{\s*"status"\s*:\s*"error"/i,
 ];
+const BRIDGE_NOTIFY_POLICY_MODE = resolveBridgeNotifyPolicyMode();
 
 const ALLOWED_FILE_CONTROL_ACTIONS = new Set([
   'list_files',
@@ -58,6 +75,7 @@ const CAPABILITY_HANDLERS = Object.freeze({
   schedule: scheduleManager,
   browser: browserManager,
   exec: execManager,
+  codex: codexManager,
 });
 
 const KNOWN_CONTAINERS = [
@@ -69,11 +87,22 @@ const KNOWN_CONTAINERS = [
   'moltbot-anki-bak',
   'moltbot-research-bak',
   'moltbot-daily-bak',
+  'moltbot-codex',
   'moltbot-prompt-web',
   'moltbot-proxy',
   'moltbot-web-proxy',
   'moltbot-dev-tunnel',
 ];
+
+function isUnifiedApprovalEnabled() {
+  const envRaw = String(process.env.MOLTBOT_DISABLE_APPROVAL_TOKENS || '').trim().toLowerCase();
+  if (envRaw === '1' || envRaw === 'true' || envRaw === 'on') return false;
+  if (envRaw === '0' || envRaw === 'false' || envRaw === 'off') return true;
+  const section = (config && typeof config.opsUnifiedApprovals === 'object')
+    ? config.opsUnifiedApprovals
+    : {};
+  return section.enabled !== false;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -217,75 +246,14 @@ function maybeRunSkillFeedbackLoop() {
   };
 }
 
-function backup(filePath) {
-  const stamp = Date.now();
-  const bak = `${filePath}.bak.${stamp}`;
-  fs.copyFileSync(filePath, bak);
-  return bak;
-}
-
-function resolveMainSessionPaths() {
-  for (const dir of MAIN_SESSIONS_DIR_CANDIDATES) {
-    const jsonPath = path.join(dir, 'sessions.json');
-    if (fs.existsSync(jsonPath)) {
-      return { sessionsDir: dir, sessionsJson: jsonPath };
-    }
-  }
-  const fallbackDir = MAIN_SESSIONS_DIR_CANDIDATES[0];
-  return {
-    sessionsDir: fallbackDir,
-    sessionsJson: path.join(fallbackDir, 'sessions.json'),
-  };
-}
-
-function maybeRotateStaleMainSession() {
-  const paths = resolveMainSessionPaths();
-  if (!fs.existsSync(paths.sessionsJson)) {
-    return { rotated: false, reason: 'sessions.json not found' };
-  }
-  let sessions;
-  try {
-    sessions = JSON.parse(fs.readFileSync(paths.sessionsJson, 'utf8'));
-  } catch (e) {
-    return { rotated: false, reason: `parse error: ${e.message}` };
-  }
-  const current = sessions[MAIN_SESSION_KEY];
-  if (!current) {
-    return { rotated: false, reason: 'main session key missing' };
-  }
-
-  const promptFiles = (((current.systemPromptReport || {}).injectedWorkspaceFiles) || []);
-  const injectedAgents = promptFiles.find((f) => String(f.name || '').trim() === 'AGENTS.md');
-  const injectedRawChars = injectedAgents && Number.isFinite(Number(injectedAgents.rawChars))
-    ? Number(injectedAgents.rawChars)
-    : null;
-  const agentsPath = path.join(ROOT, 'AGENTS.md');
-  if (!fs.existsSync(agentsPath)) {
-    return { rotated: false, reason: 'workspace AGENTS.md not found' };
-  }
-  const currentRawChars = fs.statSync(agentsPath).size;
-
-  if (injectedRawChars == null || injectedRawChars === currentRawChars) {
-    return { rotated: false, reason: 'prompt snapshot up to date' };
-  }
-
-  const backups = { sessionsJson: backup(paths.sessionsJson), sessionFile: null };
-  const sessionId = String(current.sessionId || '').trim();
-  if (sessionId) {
-    const sessionFile = path.join(paths.sessionsDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(sessionFile)) {
-      backups.sessionFile = backup(sessionFile);
-    }
-  }
-  delete sessions[MAIN_SESSION_KEY];
-  fs.writeFileSync(paths.sessionsJson, JSON.stringify(sessions, null, 2), 'utf8');
-  return {
-    rotated: true,
-    reason: 'AGENTS.md changed; reset stale long-lived session',
-    injectedRawChars,
-    currentRawChars,
-    backups,
-  };
+function maybeRotateStaleMainSession(options = {}) {
+  return rotateMainSessionIfNeeded({
+    root: options.root || ROOT,
+    env: options.env || process.env,
+    nowMs: options.nowMs,
+    fsModule: options.fsModule || fs,
+    pathModule: options.pathModule || path,
+  });
 }
 
 function resolveFileControlPolicy() {
@@ -384,6 +352,365 @@ function maybeIssueApprovalGrant(policy, request, token, consumedRecord = null) 
   }
 }
 
+function resolveBridgeNotifyPolicyMode() {
+  const envMode = String(process.env.OPS_NOTIFY_POLICY_MODE || '').trim().toLowerCase();
+  const cfgMode = String(
+    config
+    && config.opsNotificationPolicy
+    && typeof config.opsNotificationPolicy === 'object'
+    && config.opsNotificationPolicy.mode
+      ? config.opsNotificationPolicy.mode
+      : '',
+  ).trim().toLowerCase();
+  const mode = envMode || cfgMode || 'strict';
+  if (mode === 'strict' || mode === 'relaxed') return mode;
+  return 'strict';
+}
+
+function normalizeNotifySourceKind(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (NOTIFY_SOURCE_KINDS.includes(key)) return key;
+  return 'internal';
+}
+
+function normalizeNotifySeverity(value) {
+  const key = String(value || '').trim().toUpperCase();
+  if (NOTIFY_SEVERITIES.includes(key)) return key;
+  return 'UNKNOWN';
+}
+
+function detectNotifySourceKind(request = {}) {
+  const req = request && typeof request === 'object' ? request : {};
+  const requestId = String(req.request_id || '').trim().toLowerCase();
+  const requestedBy = String(req.requested_by || '').trim().toLowerCase();
+  const telegramContext = (req.telegram_context && typeof req.telegram_context === 'object')
+    ? req.telegram_context
+    : {};
+  const hasDirectTransport = Boolean(
+    telegramContext
+    && (telegramContext.userId || telegramContext.groupId || telegramContext.chatId),
+  );
+  if (
+    requestId.startsWith('test-')
+    || requestedBy.startsWith('test-')
+    || requestedBy.includes('test user')
+    || requestedBy.includes(':test')
+  ) {
+    return 'test';
+  }
+  if (
+    requestedBy.includes('ops-daily-supervisor')
+    || requestedBy.includes('cron')
+    || requestedBy.includes('heartbeat')
+    || requestedBy.includes('nightly')
+    || requestedBy.includes('autopilot')
+    || requestedBy.includes('system:event')
+  ) {
+    return 'scheduled_background';
+  }
+  if (
+    hasDirectTransport
+    || /^(telegram|discord|slack|line|kakao|whatsapp):/.test(requestedBy)
+  ) {
+    return 'user_direct';
+  }
+  if (requestedBy.startsWith('bridge:') || requestedBy === 'unknown') {
+    return 'internal';
+  }
+  return 'internal';
+}
+
+function classifyNotifySeverity({ ok, errorCode, sourceKind, notificationKind }) {
+  const kind = String(notificationKind || 'result').trim().toLowerCase();
+  if (kind === 'aggregate_summary') return 'P4';
+  if (ok) return 'P4';
+
+  const source = normalizeNotifySourceKind(sourceKind);
+  const code = String(errorCode || '').trim().toUpperCase();
+  if (!code) return 'UNKNOWN';
+
+  if (code === 'UNHANDLED_WORKER_ERROR' || code === 'TOKEN_CONSUME_FAILED' || code === 'TOKEN_VALIDATE_FAILED') {
+    return 'P1';
+  }
+  if (code === 'CONNECTOR_UNAVAILABLE') {
+    return source === 'user_direct' ? 'P2' : 'P3';
+  }
+  if (code === 'PERMISSION_DENIED') {
+    return source === 'user_direct' ? 'P2' : 'P3';
+  }
+  if (code === 'TOKEN_NOT_FOUND' || code === 'PLAN_MISMATCH' || code === 'APPROVAL_FLAGS_REQUIRED') {
+    return 'P3';
+  }
+  if (code === 'DISPATCH_DELEGATED_SOFT_FAIL') {
+    return 'P4';
+  }
+  if (code.endsWith('_FAILED')) {
+    return source === 'user_direct' ? 'P2' : 'P3';
+  }
+  if (code.endsWith('_REQUIRED') || code.endsWith('_MISSING') || code.includes('_MISMATCH')) {
+    return 'P3';
+  }
+  return 'UNKNOWN';
+}
+
+function buildNotifyDedupeKey({ request, command, errorCode, sourceKind, tsMs = Date.now() }) {
+  const botId = String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+  const req = request && typeof request === 'object' ? request : {};
+  const commandKey = String(
+    req.command_kind
+    || command
+    || 'ops',
+  ).trim().toLowerCase() || 'ops';
+  const capability = String(req.capability || '').trim().toLowerCase();
+  const action = String(req.action || req.intent_action || '').trim().toLowerCase();
+  const code = String(errorCode || 'OK').trim().toUpperCase() || 'OK';
+  const windowStartMs = Math.floor(Number(tsMs) / NOTIFY_WINDOW_MS) * NOTIFY_WINDOW_MS;
+  const windowStartIso = new Date(windowStartMs).toISOString();
+  const dedupeKey = [
+    botId,
+    commandKey,
+    capability || '-',
+    action || '-',
+    code,
+    normalizeNotifySourceKind(sourceKind),
+    windowStartIso,
+  ].join(':');
+  return { dedupeKey, windowStartIso, windowStartMs };
+}
+
+function containsBlockedTrace(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return false;
+  return TRACE_BLOCK_PATTERNS.some((pattern) => pattern.test(raw));
+}
+
+function enforceSafeTelegramReply(text) {
+  const sanitized = telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function'
+    ? telegramFinalizer.sanitizeForUser(text)
+    : String(text || '');
+  const normalized = String(sanitized || '').trim();
+  if (!normalized) return SAFE_INTERNAL_ERROR_REPLY;
+  if (containsBlockedTrace(normalized)) return SAFE_INTERNAL_ERROR_REPLY;
+  return normalized;
+}
+
+function shouldNotifyUser(event, policyMode = BRIDGE_NOTIFY_POLICY_MODE) {
+  const sourceKind = normalizeNotifySourceKind(event && event.source_kind);
+  const severity = normalizeNotifySeverity(event && event.severity);
+  const notificationKind = String(event && event.notification_kind || 'result').trim().toLowerCase();
+  if (notificationKind === 'aggregate_summary') {
+    return { notify: true, reason: 'aggregate_summary' };
+  }
+  if (policyMode !== 'strict') {
+    return { notify: true, reason: `policy_${policyMode}` };
+  }
+  if (sourceKind === 'user_direct') {
+    return { notify: true, reason: 'strict:user_direct' };
+  }
+  if (severity === 'P1' || severity === 'P2') {
+    return { notify: true, reason: `strict:${severity}` };
+  }
+  return { notify: false, reason: `strict:block:${sourceKind}:${severity}` };
+}
+
+function readNotifyAggregateState() {
+  return readJson(NOTIFY_AGGREGATE_STATE_PATH, {
+    schema_version: '1.0',
+    windows: {},
+    updated_at: null,
+  });
+}
+
+function writeNotifyAggregateState(state) {
+  const payload = (state && typeof state === 'object') ? state : {};
+  payload.schema_version = '1.0';
+  payload.updated_at = nowIso();
+  payload.windows = payload.windows && typeof payload.windows === 'object' ? payload.windows : {};
+  writeJson(NOTIFY_AGGREGATE_STATE_PATH, payload);
+  return payload;
+}
+
+function maybeEnqueueSuppressedSummary(event) {
+  if (!event || event.ok || !event.errorCode) return { summarized: false, reason: 'not_eligible' };
+  const sourceKind = normalizeNotifySourceKind(event.source_kind);
+  if (sourceKind === 'user_direct' || sourceKind === 'test') {
+    return { summarized: false, reason: `${sourceKind}_passthrough` };
+  }
+  const severity = normalizeNotifySeverity(event.severity);
+  if (severity === 'P1' || severity === 'P2') return { summarized: false, reason: 'high_severity' };
+  const classification = buildNotifyDedupeKey({
+    request: event.request,
+    command: event.command,
+    errorCode: event.errorCode,
+    sourceKind,
+    tsMs: event.timestampMs,
+  });
+  const state = readNotifyAggregateState();
+  const key = classification.dedupeKey;
+  const now = nowIso();
+  const row = state.windows[key] && typeof state.windows[key] === 'object'
+    ? state.windows[key]
+    : {
+        source_kind: sourceKind,
+        severity,
+        error_code: String(event.errorCode || 'UNKNOWN'),
+        command: String(event.command || '').trim() || null,
+        window_start: classification.windowStartIso,
+        count: 0,
+        first_seen: now,
+        last_seen: now,
+        summary_enqueued: false,
+      };
+  row.count = Number(row.count || 0) + 1;
+  row.last_seen = now;
+  state.windows[key] = row;
+
+  const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+  for (const [windowKey, windowValue] of Object.entries(state.windows)) {
+    if (!windowValue || typeof windowValue !== 'object') {
+      delete state.windows[windowKey];
+      continue;
+    }
+    const windowStartMs = Date.parse(String(windowValue.window_start || ''));
+    if (Number.isFinite(windowStartMs) && windowStartMs < cutoff) {
+      delete state.windows[windowKey];
+    }
+  }
+
+  let summaryPayload = null;
+  if (!row.summary_enqueued && row.count >= NOTIFY_SUPPRESSED_SUMMARY_THRESHOLD) {
+    row.summary_enqueued = true;
+    row.summary_enqueued_at = now;
+    const summaryText = [
+      '[OPS] 내부 오류 집계 (30분)',
+      `- error: ${row.error_code}`,
+      `- count: ${row.count}`,
+      `- source: ${row.source_kind}`,
+      '- 영향: 사용자 직접 요청 영향 없음 (내부 처리됨)',
+    ].join('\n');
+    const summaryReply = enforceSafeTelegramReply(finalizeOpsTelegramReply(event.request || {}, summaryText, 'execute'));
+    summaryPayload = {
+      taskId: makeTaskId('ops-notify-summary'),
+      command: String(event.command || 'ops:summary'),
+      requestId: String(event.request && event.request.request_id || ''),
+      status: 'done',
+      timestamp: nowIso(),
+      telegramReply: summaryReply,
+      notification_kind: 'aggregate_summary',
+      source_kind: row.source_kind,
+      severity: 'P4',
+      user_visible: true,
+      dedupe_key: key,
+      classification_reason: `aggregate_summary_threshold:${NOTIFY_SUPPRESSED_SUMMARY_THRESHOLD}`,
+      metadata: {
+        phase: event.phase || null,
+        ok: false,
+        errorCode: row.error_code,
+        aggregateCount: row.count,
+        aggregateWindowStart: row.window_start,
+      },
+    };
+    enqueueBridgePayload(summaryPayload);
+  }
+
+  writeNotifyAggregateState(state);
+  return {
+    summarized: Boolean(summaryPayload),
+    reason: summaryPayload ? 'summary_enqueued' : 'aggregated_only',
+    aggregateCount: row.count,
+  };
+}
+
+function enqueueBridgeNotification({
+  request,
+  taskPrefix,
+  command,
+  status,
+  phase,
+  ok,
+  telegramReply,
+  errorCode = '',
+  errorMessage = '',
+  metadata = {},
+  notificationKind = 'result',
+}) {
+  const sourceKind = detectNotifySourceKind(request);
+  const severity = classifyNotifySeverity({
+    ok,
+    errorCode,
+    sourceKind,
+    notificationKind,
+  });
+  const classification = buildNotifyDedupeKey({
+    request,
+    command,
+    errorCode: errorCode || (ok ? 'OK' : 'UNKNOWN'),
+    sourceKind,
+    tsMs: Date.now(),
+  });
+  const policyDecision = shouldNotifyUser({
+    source_kind: sourceKind,
+    severity,
+    notification_kind: notificationKind,
+  }, BRIDGE_NOTIFY_POLICY_MODE);
+  const safeReply = enforceSafeTelegramReply(telegramReply);
+  const classificationReason = `${policyDecision.reason};policy=${BRIDGE_NOTIFY_POLICY_MODE}`;
+  const payload = {
+    taskId: makeTaskId(taskPrefix),
+    command,
+    requestId: String(request && request.request_id || ''),
+    status,
+    timestamp: nowIso(),
+    telegramReply: safeReply,
+    notification_kind: String(notificationKind || 'result'),
+    source_kind: sourceKind,
+    severity,
+    user_visible: Boolean(policyDecision.notify),
+    dedupe_key: classification.dedupeKey,
+    classification_reason: classificationReason,
+    metadata: {
+      phase,
+      ok,
+      errorCode: errorCode || null,
+      errorMessage: errorMessage || null,
+      source_kind: sourceKind,
+      severity,
+      user_visible: Boolean(policyDecision.notify),
+      dedupe_key: classification.dedupeKey,
+      classification_reason: classificationReason,
+      ...metadata,
+    },
+  };
+
+  if (!policyDecision.notify) {
+    maybeEnqueueSuppressedSummary({
+      ok,
+      errorCode,
+      severity,
+      source_kind: sourceKind,
+      request,
+      command,
+      phase,
+      timestampMs: Date.now(),
+    });
+    approvalAuditLog.append('bridge_notification_suppressed', {
+      request_id: String(request && request.request_id || ''),
+      command: String(command || ''),
+      phase: String(phase || ''),
+      ok: Boolean(ok),
+      error_code: errorCode || null,
+      source_kind: sourceKind,
+      severity,
+      dedupe_key: classification.dedupeKey,
+      reason: classificationReason,
+    });
+    return null;
+  }
+
+  enqueueBridgePayload(payload);
+  return payload;
+}
+
 function summarizeGitPreview(plan) {
   const lines = [];
   const git = plan && plan.git && typeof plan.git === 'object' ? plan.git : null;
@@ -427,15 +754,17 @@ function finalizeOpsTelegramReply(request, replyText, phase = '') {
     ].filter(Boolean).join(':'),
     finalizerApplied: false,
   });
-  const normalized = String(finalized || '').trim();
+  const normalized = enforceSafeTelegramReply(finalized || raw);
   if (normalized) return normalized;
-  return raw;
+  return SAFE_INTERNAL_ERROR_REPLY;
 }
 
 function logAutoExecuteDecision(request, plan, decision) {
+  const actorBotId = String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+  const actorRequestedBy = String(request && request.requested_by || 'unknown');
   approvalAuditLog.append('auto_execute_decision', {
     request_id: String(request && request.request_id || ''),
-    requested_by: String(request && request.requested_by || 'unknown'),
+    requested_by: actorRequestedBy,
     command_kind: String(request && request.command_kind || 'file_control'),
     action_type: String((plan && (plan.action_type || plan.capability)) || 'file_control'),
     capability: String(plan && plan.capability || ''),
@@ -443,15 +772,21 @@ function logAutoExecuteDecision(request, plan, decision) {
     decision: String(decision || '').trim() || 'approval_required',
     risk_level: String(plan && plan.risk_tier || request && request.risk_tier || 'MEDIUM'),
     payload: plan && plan.payload ? plan.payload : {},
+    actor_requested_by: actorRequestedBy,
+    actor_bot_id: actorBotId,
+    token_owner_requested_by: actorRequestedBy,
+    token_owner_bot_id: actorBotId,
   });
 }
 
 function logExecutionResult(request, planOrResult, executeResult, ok) {
   const source = (planOrResult && typeof planOrResult === 'object') ? planOrResult : {};
   const result = (executeResult && typeof executeResult === 'object') ? executeResult : {};
+  const actorBotId = String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+  const actorRequestedBy = String(request && request.requested_by || 'unknown');
   approvalAuditLog.append('execution_result', {
     request_id: String(request && request.request_id || ''),
-    requested_by: String(request && request.requested_by || 'unknown'),
+    requested_by: actorRequestedBy,
     command_kind: String(request && request.command_kind || source.command_kind || 'file_control'),
     action_type: String(source.action_type || source.capability || 'file_control'),
     capability: String(source.capability || request && request.capability || ''),
@@ -462,6 +797,10 @@ function logExecutionResult(request, planOrResult, executeResult, ok) {
     error: result.error || null,
     summary: result.summary || null,
     payload: source.payload || {},
+    actor_requested_by: actorRequestedBy,
+    actor_bot_id: actorBotId,
+    token_owner_requested_by: actorRequestedBy,
+    token_owner_bot_id: actorBotId,
   });
 }
 
@@ -476,19 +815,18 @@ function notifyBridgePlanResult(request, plan, approvalRecord, ok, errorCode = '
   const gitPreview = ok ? summarizeGitPreview(plan) : '';
   const telegramReplyRaw = gitPreview ? `${baseReply}\n${gitPreview}` : baseReply;
   const telegramReply = finalizeOpsTelegramReply(request, telegramReplyRaw, 'plan');
-
-  enqueueBridgePayload({
-    taskId: makeTaskId('opsfc-plan'),
+  enqueueBridgeNotification({
+    request,
+    taskPrefix: 'opsfc-plan',
     command: 'ops:file-control:plan',
-    requestId: String(request.request_id || ''),
     status: ok ? 'done' : 'failed',
-    timestamp: nowIso(),
+    phase: 'plan',
+    ok,
     telegramReply,
+    errorCode,
+    errorMessage,
     metadata: {
-      phase: 'plan',
-      ok,
       token: approvalRecord ? approvalRecord.token : null,
-      errorCode: errorCode || null,
     },
   });
 }
@@ -512,19 +850,18 @@ function notifyBridgeExecuteResult(request, executeResult, ok, errorCode = '', e
         approvalGrantLine,
       ].filter(Boolean).join('\n'));
   const telegramReply = finalizeOpsTelegramReply(request, telegramReplyRaw, 'execute');
-
-  enqueueBridgePayload({
-    taskId: makeTaskId('opsfc-exec'),
+  enqueueBridgeNotification({
+    request,
+    taskPrefix: 'opsfc-exec',
     command: 'ops:file-control:execute',
-    requestId: String(request.request_id || ''),
     status: ok ? 'done' : 'failed',
-    timestamp: nowIso(),
+    phase: 'execute',
+    ok,
     telegramReply,
+    errorCode,
+    errorMessage,
     metadata: {
-      phase: 'execute',
-      ok,
       token: request.payload && request.payload.token ? String(request.payload.token) : null,
-      errorCode: errorCode || null,
     },
   });
 }
@@ -720,6 +1057,11 @@ function buildCapabilityPlanFromHandler(request, policy) {
     plan.mutating = true;
   }
 
+  if (!isUnifiedApprovalEnabled()) {
+    plan.requires_approval = false;
+    plan.required_flags = [];
+  }
+
   return {
     ok: true,
     plan,
@@ -740,8 +1082,13 @@ function notifyBridgeCapabilityPlanResult(request, plan, approvalRecord, ok, err
       lines.push(`- blockers: ${plan.blockers.slice(0, 3).map((item) => item.code || 'BLOCKED').join(', ')}`);
     }
     if (approvalRecord) {
-      lines.push(`- token: ${approvalRecord.token}`);
-      lines.push(`- expires: ${approvalRecord.expires_at}`);
+      if (approvalRecord.request_id) {
+        lines.push(`- request: ${approvalRecord.request_id}`);
+      }
+      if (approvalRecord.expires_at) {
+        lines.push(`- expires: ${approvalRecord.expires_at}`);
+      }
+      lines.push('- next: `운영: 액션: 승인`으로 실행, `운영: 액션: 거부`로 취소');
     }
   } else {
     lines.push('[PLAN] capability failed');
@@ -750,21 +1097,21 @@ function notifyBridgeCapabilityPlanResult(request, plan, approvalRecord, ok, err
   }
 
   const telegramReply = finalizeOpsTelegramReply(request, lines.join('\\n'), 'plan');
-  enqueueBridgePayload({
-    taskId: makeTaskId('opsc-plan'),
+  enqueueBridgeNotification({
+    request,
+    taskPrefix: 'opsc-plan',
     command: 'ops:capability:plan',
-    requestId: String(request.request_id || ''),
     status: ok ? 'done' : 'failed',
-    timestamp: nowIso(),
+    phase: 'plan',
+    ok,
     telegramReply,
+    errorCode,
+    errorMessage,
     metadata: {
-      phase: 'plan',
       command_kind: 'capability',
       capability: request.capability || null,
       action: request.action || null,
-      ok,
       token: approvalRecord ? approvalRecord.token : null,
-      errorCode: errorCode || null,
     },
   });
 }
@@ -774,7 +1121,15 @@ function notifyBridgeCapabilityExecuteResult(request, executeResult, ok, errorCo
   const directReply = executeResult && typeof executeResult.telegramReply === 'string'
     ? String(executeResult.telegramReply).trim()
     : '';
-  if (ok && executeResult) {
+  const errorClass = executeResult && typeof executeResult.error_class === 'string'
+    ? String(executeResult.error_class).trim().toUpperCase()
+    : '';
+  const isSoftFail = Boolean(
+    errorClass === 'SOFT_FAIL'
+    || (executeResult && executeResult.soft_fail === true)
+    || String(errorCode || '').trim().toUpperCase() === 'DISPATCH_DELEGATED_SOFT_FAIL',
+  );
+  if (ok && executeResult && !isSoftFail) {
     if (directReply) {
       lines.push(directReply);
     } else {
@@ -789,6 +1144,15 @@ function notifyBridgeCapabilityExecuteResult(request, executeResult, ok, errorCo
       if (executeResult.note) lines.push(`- note: ${executeResult.note}`);
       if (executeResult.dry_run) lines.push('- dry-run: yes');
     }
+  } else if (isSoftFail) {
+    lines.push('[RESULT] capability advisory');
+    if (directReply) lines.push(directReply);
+    const advisoryNote = String(
+      errorMessage
+      || executeResult && (executeResult.note || executeResult.error || executeResult.summary)
+      || '',
+    ).trim();
+    if (advisoryNote) lines.push(`- note: ${advisoryNote}`);
   } else {
     lines.push('[RESULT] capability execute failed');
     lines.push(`- error: ${errorCode || 'CAPABILITY_EXECUTE_FAILED'}`);
@@ -802,22 +1166,25 @@ function notifyBridgeCapabilityExecuteResult(request, executeResult, ok, errorCo
   }
 
   const telegramReply = finalizeOpsTelegramReply(request, lines.join('\\n'), 'execute');
-  enqueueBridgePayload({
-    taskId: makeTaskId('opsc-exec'),
+  const queueStatus = (ok || isSoftFail) ? 'done' : 'failed';
+  enqueueBridgeNotification({
+    request,
+    taskPrefix: 'opsc-exec',
     command: 'ops:capability:execute',
-    requestId: String(request.request_id || ''),
-    status: ok ? 'done' : 'failed',
-    timestamp: nowIso(),
+    status: queueStatus,
+    phase: 'execute',
+    ok,
     telegramReply,
+    errorCode,
+    errorMessage,
     metadata: {
-      phase: 'execute',
       command_kind: 'capability',
       capability: request.capability || null,
       action: request.action || null,
-      ok,
       token: request.payload && request.payload.token ? String(request.payload.token) : null,
-      errorCode: errorCode || null,
+      error_class: errorClass || null,
     },
+    notificationKind: isSoftFail ? 'advisory' : 'result',
   });
 }
 
@@ -849,6 +1216,24 @@ function executeCapabilityPlan(request, plan, handler, policy) {
     policy,
   });
   if (!result || !result.ok) {
+    const errorClass = String(result && result.error_class || '').trim().toUpperCase();
+    if (errorClass === 'SOFT_FAIL') {
+      const advisorySteps = Array.isArray(result && result.executed_steps)
+        ? result.executed_steps
+        : [{ step: `${plan.capability}:${plan.action}:advisory`, ok: true }];
+      return {
+        ok: true,
+        advisory: true,
+        details: {
+          ...(result || {}),
+          advisory: true,
+          soft_fail: true,
+          error_class: 'SOFT_FAIL',
+          note: String(result && (result.error || result.summary) || 'advisory guidance from delegated route'),
+        },
+        executed_steps: advisorySteps,
+      };
+    }
     return {
       ok: false,
       error_code: String((result && result.error_code) || 'CAPABILITY_EXECUTE_FAILED'),
@@ -879,6 +1264,37 @@ function handleCapabilityPlanPhase(request, policy) {
   }
 
   const plan = built.plan;
+  const runtimeBotId = String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+  const capabilityAllowed = botPermissionPolicy.canUseCapability(runtimeBotId, plan.capability, plan.action);
+  if (!capabilityAllowed) {
+    const errorCode = 'PERMISSION_DENIED';
+    const errorMessage = `capability not allowed for bot ${runtimeBotId}: ${plan.capability}:${plan.action}`;
+    approvalAuditLog.append('approval_decision', {
+      decision: 'permission_denied',
+      request_id: String(request && request.request_id || ''),
+      command_kind: 'capability',
+      capability: String(plan.capability || ''),
+      action: String(plan.action || ''),
+      action_type: String(plan.action_type || plan.capability || 'capability'),
+      risk_level: String(plan.risk_tier || 'MEDIUM'),
+      actor_requested_by: String(request && request.requested_by || 'unknown'),
+      actor_bot_id: runtimeBotId,
+      token_owner_requested_by: String(request && request.requested_by || 'unknown'),
+      token_owner_bot_id: runtimeBotId,
+      error_code: errorCode,
+      error: errorMessage,
+    });
+    notifyBridgeCapabilityPlanResult(request, null, null, false, errorCode, errorMessage);
+    return buildCapabilityResultBase(request, {
+      capability: plan.capability,
+      action: plan.action,
+      risk_tier: plan.risk_tier,
+      requires_approval: true,
+      ok: false,
+      error_code: errorCode,
+      error: errorMessage,
+    });
+  }
   const activeGrant = plan.requires_approval
     ? findActiveApprovalGrant(policy, request.requested_by, 'all')
     : { active: false, record: null };
@@ -966,6 +1382,7 @@ function handleCapabilityPlanPhase(request, policy) {
 }
 
 function handleCapabilityExecuteWithToken(request, policy, token, tokenRecord, planned) {
+  const runtimeBotId = String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
   const capabilityRequest = {
     ...request,
     command_kind: 'capability',
@@ -1014,6 +1431,7 @@ function handleCapabilityExecuteWithToken(request, policy, token, tokenRecord, p
     consumed = opsApprovalStore.consumeApproval({
       token,
       consumedBy: request.requested_by,
+      consumedBotId: runtimeBotId,
       executionRequestId: request.request_id,
     });
   } catch (error) {
@@ -1116,10 +1534,19 @@ function handlePlanPhase(request, policy) {
   }
 
   const plan = planResult.plan;
-  const activeGrant = plan.mutating
+  plan.requires_approval = Boolean(
+    plan.requires_approval
+    || (plan.mutating && Array.isArray(plan.required_flags) && plan.required_flags.length > 0),
+  );
+  if (!isUnifiedApprovalEnabled()) {
+    plan.requires_approval = false;
+    plan.required_flags = [];
+  }
+  const activeGrant = plan.requires_approval
     ? findActiveApprovalGrant(policy, request.requested_by, 'all')
     : { active: false, record: null };
-  if (plan.mutating && activeGrant.active && activeGrant.record) {
+  if (plan.requires_approval && activeGrant.active && activeGrant.record) {
+    plan.requires_approval = false;
     plan.required_flags = [];
     plan.approval_grant = {
       grant_id: activeGrant.record.grant_id || null,
@@ -1134,10 +1561,10 @@ function handlePlanPhase(request, policy) {
     action_type: 'file_control',
     capability: 'file_control',
     action: plan.intent_action,
-  }, (plan.mutating && !plan.approval_grant) ? 'approval_required' : 'auto_execute');
+  }, (plan.requires_approval && !plan.approval_grant) ? 'approval_required' : 'auto_execute');
 
   let approvalRecord = null;
-  if (plan.mutating && !plan.approval_grant) {
+  if (plan.requires_approval && !plan.approval_grant) {
     const snapshotHash = opsApprovalStore.hashPlanSnapshot(plan);
     approvalRecord = opsApprovalStore.createApprovalToken({
       requestedBy: request.requested_by,
@@ -1154,7 +1581,7 @@ function handlePlanPhase(request, policy) {
   }
 
   notifyBridgePlanResult(request, plan, approvalRecord, true);
-  if (plan.mutating && plan.approval_grant && !approvalRecord) {
+  if (plan.mutating && (!plan.requires_approval || plan.approval_grant) && !approvalRecord) {
     const execResult = opsFileControl.executePlan({
       plan,
       policy,
@@ -1217,8 +1644,32 @@ function handleExecutePhase(request, policy) {
   const token = String(payload.token || '').trim();
   const decision = String(payload.decision || 'approve').trim().toLowerCase() || 'approve';
   const providedFlags = opsFileControl.normalizeApprovalFlags(payload.approval_flags || payload.options || '');
+  const runtimeBotId = String(process.env.MOLTBOT_BOT_ID || 'unknown').trim() || 'unknown';
+  const actorRequestedBy = String(request && request.requested_by || 'unknown').trim() || 'unknown';
 
   if (decision === 'deny') {
+    if (!botPermissionPolicy.canDeny(runtimeBotId)) {
+      const errorCode = 'PERMISSION_DENIED';
+      const errorMessage = `bot ${runtimeBotId} cannot deny approvals`;
+      approvalAuditLog.append('approval_decision', {
+        decision: 'permission_denied',
+        token: token || null,
+        request_id: String(request && request.request_id || ''),
+        actor_requested_by: actorRequestedBy,
+        actor_bot_id: runtimeBotId,
+        token_owner_requested_by: null,
+        token_owner_bot_id: null,
+        error_code: errorCode,
+        error: errorMessage,
+      });
+      notifyBridgeExecuteResult(request, null, false, errorCode, errorMessage);
+      return buildFileControlResultBase(request, {
+        token_id: token || null,
+        ok: false,
+        error_code: errorCode,
+        error: errorMessage,
+      });
+    }
     if (!token) {
       const errorCode = 'TOKEN_REQUIRED';
       const errorMessage = 'approval token is required for deny';
@@ -1235,6 +1686,7 @@ function handleExecutePhase(request, policy) {
       denied = opsApprovalStore.denyApproval({
         token,
         deniedBy: request.requested_by,
+        deniedBotId: runtimeBotId,
         executionRequestId: request.request_id,
       });
     } catch (error) {
@@ -1255,7 +1707,6 @@ function handleExecutePhase(request, policy) {
       action: 'deny',
       telegramReply: [
         '[RESULT] approval denied',
-        `- token: ${token}`,
         `- action_type: ${deniedActionType}`,
       ].join('\n'),
     }, true);
@@ -1293,11 +1744,35 @@ function handleExecutePhase(request, policy) {
     });
   }
 
+  if (!botPermissionPolicy.canApprove(runtimeBotId)) {
+    const errorCode = 'PERMISSION_DENIED';
+    const errorMessage = `bot ${runtimeBotId} cannot approve tokens`;
+    approvalAuditLog.append('approval_decision', {
+      decision: 'permission_denied',
+      token: token || null,
+      request_id: String(request && request.request_id || ''),
+      actor_requested_by: actorRequestedBy,
+      actor_bot_id: runtimeBotId,
+      token_owner_requested_by: null,
+      token_owner_bot_id: null,
+      error_code: errorCode,
+      error: errorMessage,
+    });
+    notifyBridgeExecuteResult(request, null, false, errorCode, errorMessage);
+    return buildFileControlResultBase(request, {
+      token_id: token || null,
+      ok: false,
+      error_code: errorCode,
+      error: errorMessage,
+    });
+  }
+
   let validated;
   try {
     validated = opsApprovalStore.validateApproval({
       token,
       requestedBy: request.requested_by,
+      botId: runtimeBotId,
       providedFlags,
     });
   } catch (error) {
@@ -1371,6 +1846,7 @@ function handleExecutePhase(request, policy) {
     consumed = opsApprovalStore.consumeApproval({
       token,
       consumedBy: request.requested_by,
+      consumedBotId: runtimeBotId,
       executionRequestId: request.request_id,
     });
   } catch (error) {
@@ -1574,6 +2050,8 @@ function main() {
   ensureDir();
   opsCommandQueue.ensureLayout();
   opsApprovalStore.ensureLayout();
+  const approvalsGc = opsApprovalStore.expirePendingTokens();
+  opsApprovalStore.syncPendingApprovalsMirror();
 
   const sessionRotate = maybeRotateStaleMainSession();
   const handledLegacy = processLegacyRestartQueue();
@@ -1586,6 +2064,7 @@ function main() {
     handledLegacy,
     handledFileControl,
     handled: handledLegacy + handledFileControl,
+    approvalsGc,
     sessionRotate,
     skillFeedback,
     snapshotUpdatedAt: snapshot.updatedAt,
@@ -1605,4 +2084,5 @@ if (require.main === module) {
 
 module.exports = {
   finalizeOpsTelegramReply,
+  maybeRotateStaleMainSession,
 };
