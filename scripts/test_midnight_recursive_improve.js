@@ -3,6 +3,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const ROOT = path.join(__dirname, '..');
 
 const {
   buildConfig,
@@ -123,6 +124,22 @@ function testHelpers() {
     [{ id: 'a', status: 'pending_approval' }, { id: 'b', status: 'pending_approval' }],
   );
   assert.deepStrictEqual(newPending, ['b']);
+}
+
+function testBundledCommandRefs() {
+  const config = buildConfig(process.env, ROOT);
+  for (const command of [...config.stage1Commands, ...config.stage2Commands]) {
+    const match = /^node\s+(.+\.js)$/.exec(String(command || '').trim());
+    assert.ok(match, `expected node script command, got: ${command}`);
+    const scriptPath = path.join(ROOT, match[1]);
+    assert.ok(fs.existsSync(scriptPath), `referenced script must exist: ${match[1]}`);
+  }
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.strictEqual(
+    pkg && pkg.scripts && pkg.scripts['nightly:recursive-improve'],
+    'node scripts/midnight_recursive_improve.js',
+  );
 }
 
 function testScenarioNoChanges() {
@@ -476,6 +493,7 @@ function testRepairBlockedOutsideManagedPath() {
 
 function main() {
   testHelpers();
+  testBundledCommandRefs();
   testScenarioNoChanges();
   testScenarioRoutingOnly();
   testScenarioSkillOnly();

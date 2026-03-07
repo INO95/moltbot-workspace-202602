@@ -18,14 +18,14 @@ const DEFAULT_ALLOWLIST = Object.freeze([
 ]);
 
 const STAGE1_COMMANDS = Object.freeze([
-  'node scripts/test_routing_recursive_loop.js',
+  'node scripts/test_midnight_recursive_improve.js',
   'node scripts/test_bridge_nl_inference.js',
   'node scripts/test_bridge_natural_language_routing.js',
   'node scripts/test_skill_feedback_loop.js',
 ]);
 
 const STAGE2_COMMANDS = Object.freeze([
-  'node scripts/test_bridge_runtime_policy.js',
+  'node scripts/test_bridge_report_default_by_runtime.js',
   'node scripts/test_no_prefix_routing_report.js',
 ]);
 

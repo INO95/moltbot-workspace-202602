@@ -181,7 +181,6 @@ function main() {
 
   const steps = [
     step('ops-worker', 'node', ['scripts/ops_host_worker.js']),
-    step('ops-notify-audit', 'node', ['scripts/ops_notification_audit.js', '--hours', '48', '--baseline-hours', '48', '--write-report']),
     buildRecursiveImproveHealthStep(ROOT),
     step('tunnel-status', 'node', ['scripts/dev_tunnel.js', 'status']),
     step('prompt-web-health', 'node', ['scripts/prompt_web_healthcheck.js'], { SKIP_OPS_WORKER: '1', SKIP_AUTOPILOT_TRIGGER: '1' }),

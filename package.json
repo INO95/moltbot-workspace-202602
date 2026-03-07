@@ -78,7 +78,7 @@
     "ops:daily:briefing:morning": "node scripts/ops_daily_supervisor.js briefing --type morning",
     "ops:daily:briefing:evening": "node scripts/ops_daily_supervisor.js briefing --type evening",
     "ops:daily:health": "node scripts/ops_daily_supervisor.js health",
-    "ops:notify:audit": "node scripts/ops_notification_audit.js --hours 48 --baseline-hours 48 --write-report",
+    "nightly:recursive-improve": "node scripts/midnight_recursive_improve.js",
     "nightly:autopilot": "node scripts/nightly_autopilot.js",
     "nightly:trigger": "node scripts/nightly_autopilot_trigger.js",
     "tunnel:start": "node scripts/dev_tunnel.js start",
