@@ -518,8 +518,8 @@ services:
       - /Users/inho-baek/Projects:/Users/inho-baek/Projects:rw
       - docker_proxy_sock:/var/run/docker-proxy
     ports:
-      - "127.0.0.1:19489:18789"
-      - "127.0.0.1:19490:18790"
+      - "127.0.0.1:19589:18789"
+      - "127.0.0.1:19590:18790"
     init: true
     restart: unless-stopped
     read_only: true

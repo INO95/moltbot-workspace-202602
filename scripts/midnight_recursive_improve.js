@@ -1043,13 +1043,13 @@ function executeMidnightRecursivePass(config, d, report, queuePath, previewPath)
     }
   }
 
-  const stage1 = d.runCommandsStage('stage1', config.stage1Commands, config.mainWorkspace);
+  const stage1 = d.runCommandsStage('stage1', config.stage1Commands, config.worktreePath);
   report.tests.push(stage1);
   if (!stage1.ok) {
     throw new Error(`stage1_failed:${stage1.failedCommand}`);
   }
 
-  const stage2 = d.runCommandsStage('stage2', config.stage2Commands, config.mainWorkspace);
+  const stage2 = d.runCommandsStage('stage2', config.stage2Commands, config.worktreePath);
   report.tests.push(stage2);
   if (!stage2.ok) {
     throw new Error(`stage2_failed:${stage2.failedCommand}`);

@@ -54,6 +54,7 @@ function initGitRepo(tmpRoot) {
 function makeDeps(overrides = {}) {
   const callState = {
     stageCalls: 0,
+    stageCwds: [],
     upsertCalls: 0,
     releaseCalls: 0,
   };
@@ -80,8 +81,9 @@ function makeDeps(overrides = {}) {
     },
     runRoutingLoopOnce: () => ({ ok: true, totalAdded: 0 }),
     runSkillFeedbackLoopOnce: () => ({ ok: true, newPendingIds: [], appliedIds: [] }),
-    runCommandsStage: (stage) => {
+    runCommandsStage: (stage, _commands, cwd) => {
       callState.stageCalls += 1;
+      callState.stageCwds.push(cwd);
       return { stage, ok: true, failedCommand: '', rows: [] };
     },
     stageAllowedChanges: () => ({
@@ -226,8 +228,9 @@ function testScenarioStage1Failure() {
   try {
     const config = makeConfig(tmpRoot);
     const { deps, callState } = makeDeps({
-      runCommandsStage: (stage) => {
+      runCommandsStage: (stage, _commands, cwd) => {
         callState.stageCalls += 1;
+        callState.stageCwds.push(cwd);
         if (stage === 'stage1') {
           return { stage, ok: false, failedCommand: 'node scripts/test_bridge_nl_inference.js', rows: [] };
         }
@@ -242,6 +245,7 @@ function testScenarioStage1Failure() {
     assert.strictEqual(report.ok, false);
     assert.ok(String(report.error).includes('stage1_failed'));
     assert.strictEqual(callState.stageCalls, 1);
+    assert.deepStrictEqual(callState.stageCwds, [config.worktreePath]);
     assert.strictEqual(report.pr.attempted, true);
     assert.strictEqual(report.delivery.briefingEligible, true);
   } finally {
@@ -254,8 +258,9 @@ function testScenarioStage2Failure() {
   try {
     const config = makeConfig(tmpRoot);
     const { deps, callState } = makeDeps({
-      runCommandsStage: (stage) => {
+      runCommandsStage: (stage, _commands, cwd) => {
         callState.stageCalls += 1;
+        callState.stageCwds.push(cwd);
         if (stage === 'stage2') {
           return { stage, ok: false, failedCommand: 'node scripts/test_no_prefix_routing_report.js', rows: [] };
         }
@@ -266,6 +271,7 @@ function testScenarioStage2Failure() {
     assert.strictEqual(report.ok, false);
     assert.ok(String(report.error).includes('stage2_failed'));
     assert.strictEqual(callState.stageCalls, 2);
+    assert.deepStrictEqual(callState.stageCwds, [config.worktreePath, config.worktreePath]);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
