@@ -1,17 +1,23 @@
+const { resolveOauthRouteModelPolicy } = require('./oauth_model_policy');
+
 const PERSONAL_ROUTES = new Set(['finance', 'todo', 'routine', 'workout', 'media', 'place']);
 
 async function buildStructuredRouteResponse(route, payload, options = {}, deps = {}) {
   const parsed = deps.parseStructuredCommand(route, payload);
   const telegramReply = deps.appendExternalLinks(parsed.telegramReply || '');
   const degradedMode = deps.buildCodexDegradedMeta();
+  const modelPolicy = resolveOauthRouteModelPolicy(route, {
+    degraded: degradedMode,
+    preferredReasoning: options.preferredReasoning,
+    commandText: payload,
+  });
   const response = {
     route,
     templateValid: parsed.ok,
     ...parsed,
     telegramReply,
     degradedMode,
-    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-    preferredReasoning: options.preferredReasoning || 'high',
+    ...modelPolicy,
     routeHint: options.routeHint || route,
   };
   if (options.includeDuelMode) {
@@ -169,7 +175,11 @@ async function handleAutoRoutedCommand(input = {}, deps = {}) {
 
   if (PERSONAL_ROUTES.has(route)) {
     const out = await deps.handlePersonalRoute(route, commandText, { source: 'telegram' });
-    return deps.withApiMeta(out, {
+    const modelMeta = deps.pickPreferredModelMeta(out, 'fast', 'low');
+    return deps.withApiMeta({
+      ...out,
+      ...modelMeta,
+    }, {
       route,
       commandText,
     });
@@ -182,8 +192,8 @@ async function handleAutoRoutedCommand(input = {}, deps = {}) {
     });
     return deps.withApiMeta({
       route,
-      preferredModelAlias: 'gpt',
-      preferredReasoning: 'high',
+      preferredModelAlias: 'fast',
+      preferredReasoning: 'low',
       ...wordResult,
     }, {
       route,
@@ -227,7 +237,7 @@ async function handleAutoRoutedCommand(input = {}, deps = {}) {
   if (route === 'work') {
     return buildStructuredRouteResponse('work', payload, {
       routeHint: 'complex-workload',
-      preferredReasoning: 'high',
+      preferredReasoning: 'medium',
       includeDuelMode: true,
     }, deps);
   }
@@ -253,12 +263,15 @@ async function handleAutoRoutedCommand(input = {}, deps = {}) {
     const payloadData = deps.buildProjectRoutePayload(parsed);
     const degradedMode = deps.buildCodexDegradedMeta();
     const routeHint = 'project-bootstrap';
+    const modelPolicy = resolveOauthRouteModelPolicy('project', {
+      degraded: degradedMode,
+      commandText: payload,
+    });
     return deps.withApiMeta({
       ...payloadData,
       route,
       degradedMode,
-      preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-      preferredReasoning: 'high',
+      ...modelPolicy,
       routeHint,
     }, {
       route,
@@ -273,9 +286,11 @@ async function handleAutoRoutedCommand(input = {}, deps = {}) {
     if (out && out.telegramReply) {
       out.telegramReply = deps.appendExternalLinks(out.telegramReply);
     }
+    const modelMeta = deps.pickPreferredModelMeta(out, 'gpt', 'low');
     return deps.withApiMeta({
       route: 'prompt',
       ...out,
+      ...modelMeta,
     }, {
       route: 'prompt',
       commandText: payload,
@@ -318,7 +333,11 @@ async function handleAutoRoutedCommand(input = {}, deps = {}) {
     if (out && out.telegramReply) {
       out.telegramReply = deps.appendExternalLinks(out.telegramReply);
     }
-    return deps.withApiMeta(out, {
+    const modelMeta = deps.pickPreferredModelMeta(out, 'fast', 'low');
+    return deps.withApiMeta({
+      ...out,
+      ...modelMeta,
+    }, {
       route: 'ops',
       commandText: payload,
     });

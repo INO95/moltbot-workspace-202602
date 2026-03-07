@@ -35,7 +35,6 @@ const { handleMediaPlaceCommand } = require('./personal_media_place');
 const { finalizeTelegramBoundary: finalizeTelegramBoundaryCore } = require('./lib/bridge_output_boundary');
 const {
     parseReportModeCommand: parseReportModeCommandCore,
-    parsePersonaInfoCommand: parsePersonaInfoCommandCore,
 } = require('./lib/bridge_route_parsers');
 const {
     parseStructuredCommand: parseStructuredCommandCore,
@@ -68,6 +67,34 @@ const {
     mergeUniqueLower: mergeUniqueLowerCore,
     resolveApprovalFlagsForToken: resolveApprovalFlagsForTokenCore,
 } = require('./lib/bridge_approval_hints');
+const { createApprovalHintBindings } = require('./lib/bridge_approval_hint_bindings');
+const {
+    OPS_ALLOWED_TARGETS: OPS_ALLOWED_TARGETS_CORE,
+    OPS_CAPABILITY_POLICY: OPS_CAPABILITY_POLICY_CORE,
+    normalizeOpsAction: normalizeOpsActionCore,
+    normalizeOpsCapabilityAction: normalizeOpsCapabilityActionCore,
+    buildCapabilityPayload: buildCapabilityPayloadCore,
+    normalizeOpsTarget: normalizeOpsTargetCore,
+} = require('./lib/bridge_ops_primitives');
+const {
+    parseTransportEnvelopeContext: parseTransportEnvelopeContextCore,
+    resolveOpsFilePolicy: resolveOpsFilePolicyCore,
+    isUnifiedApprovalEnabled: isUnifiedApprovalEnabledCore,
+    normalizeOpsOptionFlags: normalizeOpsOptionFlagsCore,
+    normalizeOpsFileIntent: normalizeOpsFileIntentCore,
+    isFileControlAction: isFileControlActionCore,
+    enforceFileControlTelegramGuard: enforceFileControlTelegramGuardCore,
+    isApprovalGrantEnabled: isApprovalGrantEnabledCore,
+    parseApproveShorthand: parseApproveShorthandCore,
+    parseDenyShorthand: parseDenyShorthandCore,
+    parseNaturalApprovalShorthand: parseNaturalApprovalShorthandCore,
+    normalizeOpsPayloadText: normalizeOpsPayloadTextCore,
+} = require('./lib/bridge_ops_context');
+const {
+    enqueueFileControlCommand: enqueueFileControlCommandCore,
+    enqueueCapabilityCommand: enqueueCapabilityCommandCore,
+    queueOpsRequest: queueOpsRequestCore,
+} = require('./lib/bridge_ops_queue');
 const {
     normalizeOpsStateBucket: normalizeOpsStateBucketCore,
     buildOpsStatusRowsFromDocker: buildOpsStatusRowsFromDockerCore,
@@ -80,8 +107,7 @@ const {
 } = require('./lib/bridge_ops_batch');
 const {
     handleOpsTokenAction: handleOpsTokenActionCore,
-    handleOpsPersonaAction: handleOpsPersonaActionCore,
-} = require('./lib/bridge_ops_persona_token');
+} = require('./lib/bridge_ops_token');
 const {
     handleOpsApproveAction: handleOpsApproveActionCore,
     handleOpsDenyAction: handleOpsDenyActionCore,
@@ -91,26 +117,65 @@ const {
     handleOpsFileAction: handleOpsFileActionCore,
     handleOpsCapabilityAction: handleOpsCapabilityActionCore,
 } = require('./lib/bridge_ops_plan_routes');
+const { handleOpsStatusAction: handleOpsStatusActionCore } = require('./lib/bridge_ops_status_action');
+const {
+    prepareOpsCommandContext: prepareOpsCommandContextCore,
+    dispatchOpsAction: dispatchOpsActionCore,
+} = require('./lib/bridge_ops_dispatch');
+const {
+    normalizeHttpsBase: normalizeHttpsBaseCore,
+    getTunnelPublicBaseUrl: getTunnelPublicBaseUrlCore,
+    getPublicBases: getPublicBasesCore,
+    buildExternalLinksText: buildExternalLinksTextCore,
+    rewriteLocalLinks: rewriteLocalLinksCore,
+    appendExternalLinks: appendExternalLinksCore,
+} = require('./lib/bridge_external_links');
 const {
     clampPreview: clampPreviewCore,
     executeProjectBootstrapScript: executeProjectBootstrapScriptCore,
     readDirectoryListPreview: readDirectoryListPreviewCore,
     buildProjectRoutePayload: buildProjectRoutePayloadCore,
 } = require('./lib/bridge_project_route');
+const {
+    writeJsonFileSafe: writeJsonFileSafeCore,
+    readJsonFileSafe: readJsonFileSafeCore,
+    saveLastProjectBootstrap: saveLastProjectBootstrapCore,
+    loadLastProjectBootstrap: loadLastProjectBootstrapCore,
+    resolveDefaultProjectBasePath: resolveDefaultProjectBasePathCore,
+    toProjectTemplatePayload: toProjectTemplatePayloadCore,
+} = require('./lib/bridge_project_state');
+const {
+    resolveHubDelegationTarget: resolveHubDelegationTargetCore,
+    enqueueHubDelegationCommand: enqueueHubDelegationCommandCore,
+} = require('./lib/bridge_hub_delegation');
+const {
+    readOpsSnapshot: readOpsSnapshotCore,
+    readPendingApprovalsState: readPendingApprovalsStateCore,
+} = require('./lib/bridge_ops_state_store');
+const {
+    isInlineApprovalExecutionEnabled: isInlineApprovalExecutionEnabledCore,
+    triggerInlineOpsWorker: triggerInlineOpsWorkerCore,
+} = require('./lib/bridge_ops_worker_trigger');
 const { handleAutoRoutedCommand } = require('./lib/bridge_auto_routes');
+const { handleDirectBridgeCommand } = require('./lib/bridge_direct_commands');
 const { routeByPrefix: routeByPrefixCore } = require('./lib/bridge_route_dispatch');
 const {
     buildNoPrefixGuide: buildNoPrefixGuideCore,
     inferPathListReply: inferPathListReplyCore,
-    isLegacyPersonaSwitchAttempt: isLegacyPersonaSwitchAttemptCore,
     buildDailyCasualNoPrefixReply: buildDailyCasualNoPrefixReplyCore,
     buildNoPrefixReply: buildNoPrefixReplyCore,
 } = require('./lib/bridge_no_prefix_reply');
+const {
+    handleCodexBotAutoCommand,
+} = require('./lib/bridge_codex_auto');
+const { handleAutoBridgeCommand } = require('./lib/bridge_auto_command');
+const { dispatchBridgeCommandOnce } = require('./lib/bridge_command_dispatch');
 const {
     normalizeMonthToken: normalizeMonthTokenCore,
     extractMemoStatsPayload: extractMemoStatsPayloadCore,
     isLikelyMemoJournalBlock: isLikelyMemoJournalBlockCore,
     stripNaturalMemoLead: stripNaturalMemoLeadCore,
+    inferWordIntentPayload: inferWordIntentPayloadCore,
     inferMemoIntentPayload: inferMemoIntentPayloadCore,
     inferFinanceIntentPayload: inferFinanceIntentPayloadCore,
     inferTodoIntentPayload: inferTodoIntentPayloadCore,
@@ -121,7 +186,6 @@ const {
     inferBrowserIntentPayload: inferBrowserIntentPayloadCore,
     inferScheduleIntentPayload: inferScheduleIntentPayloadCore,
     inferGogLookupIntentPayload: inferGogLookupIntentPayloadCore,
-    inferPersonaIntentPayload: inferPersonaIntentPayloadCore,
     inferStatusIntentPayload: inferStatusIntentPayloadCore,
     inferLinkIntentPayload: inferLinkIntentPayloadCore,
     inferReportIntentPayload: inferReportIntentPayloadCore,
@@ -130,24 +194,46 @@ const {
     inferNaturalLanguageRoute: inferNaturalLanguageRouteCore,
 } = require('./lib/bridge_nl_inference');
 const {
-    normalizeDailyPersonaConfig,
-    applyPersonaToSystemReply,
-    enforcePersonaReply,
-    buildDailyPersonaStatusReply,
-    isDailyPersonaRuntime,
-} = require('./daily_persona');
-const {
-    DAILY_PERSONA_STATE_MODES,
-    readDailyPersonaState,
-    writeDailyPersonaState,
-    resolvePresetProfileId,
-    applyDailyPersonaStateToConfig,
-} = require('./lib/daily_persona_state');
+    DEFAULT_TTL_MS: DEFAULT_FOLLOWUP_TTL_MS,
+    DEFAULT_MAX_ENTRIES_PER_SESSION: DEFAULT_FOLLOWUP_MAX_ENTRIES_PER_SESSION,
+    DEFAULT_MAX_SESSIONS: DEFAULT_FOLLOWUP_MAX_SESSIONS,
+    isResultFollowupQuery: isResultFollowupQueryCore,
+    rememberActionableResult: rememberActionableResultCore,
+    resolveRecentResult: resolveRecentResultCore,
+} = require('./lib/bridge_followup_context');
 const {
     DEFAULT_COMMAND_ALLOWLIST,
     DEFAULT_HUB_DELEGATION,
     DEFAULT_NATURAL_LANGUAGE_ROUTING,
 } = require('../packages/core-policy/src/bridge_defaults');
+const {
+    uniqueNormalizedList: uniqueNormalizedListCore,
+    parseAllowlistEnvList: parseAllowlistEnvListCore,
+    parseBooleanEnv: parseBooleanEnvCore,
+    normalizeAllowlistConfig: normalizeAllowlistConfigCore,
+    normalizeHubDelegationConfig: normalizeHubDelegationConfigCore,
+    normalizeNaturalLanguageRoutingConfig: normalizeNaturalLanguageRoutingConfigCore,
+    isHubRuntime: isHubRuntimeCore,
+    isResearchRuntime: isResearchRuntimeCore,
+    isWordRuntime: isWordRuntimeCore,
+} = require('./lib/bridge_runtime_policy');
+const {
+    createBridgeRunOutcome,
+    markCommandAllowlistBlocked,
+    markAutoRouteAllowlistBlocked,
+    markRunSuccess,
+    markRunFailure,
+    buildBridgeRetryLogPayload,
+    buildBridgeRunEndPayload,
+} = require('./lib/bridge_run_state');
+const { buildBridgeDispatchDeps } = require('./lib/bridge_dispatch_deps');
+const { executeBridgeRunLoop } = require('./lib/bridge_run_executor');
+const { runBridgePreflight } = require('./lib/bridge_preflight');
+const {
+    startBridgeRunLifecycle,
+    finishBridgeRunLifecycle,
+} = require('./lib/bridge_run_lifecycle');
+const { executeBridgeMainExecution } = require('./lib/bridge_main_execution');
 const MODEL_DUEL_LOG_PATH = path.join(__dirname, '../data/bridge/model_duel.jsonl');
 loadRuntimeEnv({ allowLegacyFallback: true, warnOnLegacyFallback: true });
 
@@ -212,2126 +298,8 @@ function shouldAnnounceAnkiSyncWarning(message) {
     return true;
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isRetriableError(error) {
-    const text = String(
-        (error && (error.code || error.message || error.toString && error.toString())) || '',
-    ).toLowerCase();
-    return /(timed?out|etimedout|econnreset|eai_again|429|503|rate limit|temporar)/i.test(text);
-}
-
-function uniqueNormalizedList(values) {
-    const out = [];
-    const seen = new Set();
-    for (const value of (Array.isArray(values) ? values : [])) {
-        const key = String(value || '').trim().toLowerCase();
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        out.push(key);
-    }
-    return out;
-}
-
-function parseAllowlistEnvList(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return [];
-    return uniqueNormalizedList(raw.split(',').map((v) => v.trim()).filter(Boolean));
-}
-
-function parseBooleanEnv(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    if (!raw) return null;
-    if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
-    if (['0', 'false', 'no', 'off'].includes(raw)) return false;
-    return null;
-}
-
-function normalizeAllowlistConfig(rawConfig, env = process.env) {
-    const warnings = [];
-    const source = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
-    if (rawConfig == null) {
-        warnings.push('config.commandAllowlist missing; fallback defaults applied');
-    } else if (typeof rawConfig !== 'object') {
-        warnings.push('config.commandAllowlist must be an object; fallback defaults applied');
-    }
-
-    let enabled = DEFAULT_COMMAND_ALLOWLIST.enabled;
-    if (typeof source.enabled === 'boolean') {
-        enabled = source.enabled;
-    } else if (Object.prototype.hasOwnProperty.call(source, 'enabled')) {
-        warnings.push('commandAllowlist.enabled must be boolean; fallback default applied');
-    }
-
-    let directCommands = uniqueNormalizedList(source.directCommands);
-    if (!directCommands.length) {
-        directCommands = [...DEFAULT_COMMAND_ALLOWLIST.directCommands];
-        warnings.push('commandAllowlist.directCommands invalid/missing; fallback defaults applied');
-    }
-
-    let autoRoutes = uniqueNormalizedList(source.autoRoutes);
-    if (!autoRoutes.length) {
-        autoRoutes = [...DEFAULT_COMMAND_ALLOWLIST.autoRoutes];
-        warnings.push('commandAllowlist.autoRoutes invalid/missing; fallback defaults applied');
-    }
-
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_ALLOWLIST_ENABLED')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_ALLOWLIST_ENABLED);
-        if (parsed == null) {
-            warnings.push('BRIDGE_ALLOWLIST_ENABLED invalid; keeping config/default value');
-        } else {
-            enabled = parsed;
-        }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_ALLOWLIST_DIRECT_COMMANDS')) {
-        const parsed = parseAllowlistEnvList(env.BRIDGE_ALLOWLIST_DIRECT_COMMANDS);
-        if (parsed.length > 0) {
-            directCommands = parsed;
-        } else {
-            warnings.push('BRIDGE_ALLOWLIST_DIRECT_COMMANDS empty/invalid; keeping config/default list');
-        }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_ALLOWLIST_AUTO_ROUTES')) {
-        const parsed = parseAllowlistEnvList(env.BRIDGE_ALLOWLIST_AUTO_ROUTES);
-        if (parsed.length > 0) {
-            autoRoutes = parsed;
-        } else {
-            warnings.push('BRIDGE_ALLOWLIST_AUTO_ROUTES empty/invalid; keeping config/default list');
-        }
-    }
-
-    return {
-        enabled,
-        directCommands,
-        autoRoutes,
-        warning: warnings.length > 0 ? warnings.join('; ') : '',
-    };
-}
-
-function normalizeHubDelegationConfig(rawConfig) {
-    const source = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
-    const rawMap = source.routeToProfile && typeof source.routeToProfile === 'object'
-        ? source.routeToProfile
-        : {};
-    const routeToProfile = {};
-    for (const [routeKey, profileValue] of Object.entries(rawMap)) {
-        const route = String(routeKey || '').trim().toLowerCase();
-        const profile = String(profileValue || '').trim().toLowerCase();
-        if (!route || !profile) continue;
-        routeToProfile[route] = profile;
-    }
-    const mergedRouteToProfile = {
-        ...DEFAULT_HUB_DELEGATION.routeToProfile,
-        ...routeToProfile,
-    };
-    return {
-        enabled: source.enabled == null ? DEFAULT_HUB_DELEGATION.enabled : Boolean(source.enabled),
-        fallbackPolicy: String(source.fallbackPolicy || DEFAULT_HUB_DELEGATION.fallbackPolicy).trim().toLowerCase() || 'local',
-        routeToProfile: mergedRouteToProfile,
-    };
-}
-
-function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
-    const source = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
-    const pickBool = (key, fallback) => (
-        source[key] == null ? fallback : Boolean(source[key])
-    );
-
-    let enabled = pickBool('enabled', DEFAULT_NATURAL_LANGUAGE_ROUTING.enabled);
-    let hubOnly = pickBool('hubOnly', DEFAULT_NATURAL_LANGUAGE_ROUTING.hubOnly);
-    let inferMemo = pickBool('inferMemo', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferMemo);
-    let inferFinance = pickBool('inferFinance', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferFinance);
-    let inferTodo = pickBool('inferTodo', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferTodo);
-    let inferRoutine = pickBool('inferRoutine', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferRoutine);
-    let inferWorkout = pickBool('inferWorkout', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferWorkout);
-    let inferPersona = pickBool('inferPersona', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferPersona);
-    let inferBrowser = pickBool('inferBrowser', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferBrowser);
-    let inferSchedule = pickBool('inferSchedule', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferSchedule);
-    let inferStatus = pickBool('inferStatus', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferStatus);
-    let inferLink = pickBool('inferLink', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferLink);
-    let inferWork = pickBool('inferWork', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferWork);
-    let inferInspect = pickBool('inferInspect', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferInspect);
-    let inferReport = pickBool('inferReport', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferReport);
-    let inferProject = pickBool('inferProject', DEFAULT_NATURAL_LANGUAGE_ROUTING.inferProject);
-
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_ROUTING_ENABLED')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_ROUTING_ENABLED);
-        if (parsed != null) enabled = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_ROUTING_HUB_ONLY')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_ROUTING_HUB_ONLY);
-        if (parsed != null) hubOnly = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_MEMO')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_MEMO);
-        if (parsed != null) inferMemo = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_FINANCE')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_FINANCE);
-        if (parsed != null) inferFinance = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_TODO')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_TODO);
-        if (parsed != null) inferTodo = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_ROUTINE')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_ROUTINE);
-        if (parsed != null) inferRoutine = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_WORKOUT')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_WORKOUT);
-        if (parsed != null) inferWorkout = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_PERSONA')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_PERSONA);
-        if (parsed != null) inferPersona = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_BROWSER')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_BROWSER);
-        if (parsed != null) inferBrowser = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_SCHEDULE')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_SCHEDULE);
-        if (parsed != null) inferSchedule = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_STATUS')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_STATUS);
-        if (parsed != null) inferStatus = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_LINK')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_LINK);
-        if (parsed != null) inferLink = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_WORK')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_WORK);
-        if (parsed != null) inferWork = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_INSPECT')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_INSPECT);
-        if (parsed != null) inferInspect = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_REPORT')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_REPORT);
-        if (parsed != null) inferReport = parsed;
-    }
-    if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_PROJECT')) {
-        const parsed = parseBooleanEnv(env.BRIDGE_NL_INFER_PROJECT);
-        if (parsed != null) inferProject = parsed;
-    }
-
-    return {
-        enabled,
-        hubOnly,
-        inferMemo,
-        inferFinance,
-        inferTodo,
-        inferRoutine,
-        inferWorkout,
-        inferPersona,
-        inferBrowser,
-        inferSchedule,
-        inferStatus,
-        inferLink,
-        inferWork,
-        inferInspect,
-        inferReport,
-        inferProject,
-    };
-}
-
-function isHubRuntime(env = process.env) {
-    const role = String(env.MOLTBOT_BOT_ROLE || '').trim().toLowerCase();
-    const botId = String(env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
-    const profile = String(env.MOLTBOT_PROFILE || env.OPENCLAW_PROFILE || '').trim().toLowerCase();
-    return role === 'supervisor'
-        || botId === 'bot-daily'
-        || botId === 'daily'
-        || botId === 'bot-main'
-        || botId === 'main'
-        || profile === 'daily'
-        || profile === 'main';
-}
-
-function isResearchRuntime(env = process.env) {
-    const botId = String(env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
-    const profile = String(env.MOLTBOT_PROFILE || env.OPENCLAW_PROFILE || '').trim().toLowerCase();
-    return botId === 'bot-research'
-        || botId === 'bot-research-bak'
-        || profile === 'research'
-        || profile === 'research_bak'
-        || profile === 'trend'
-        || profile === 'trend_bak';
-}
-
-const COMMAND_ALLOWLIST = normalizeAllowlistConfig(config.commandAllowlist, process.env);
-const HUB_DELEGATION = normalizeHubDelegationConfig(config.hubDelegation);
-const HUB_DELEGATION_ACTIVE = HUB_DELEGATION.enabled && isHubRuntime(process.env);
-const BRIDGE_BLOCK_HINT = String(process.env.BRIDGE_BLOCK_HINT || '').trim();
-const NATURAL_LANGUAGE_ROUTING = normalizeNaturalLanguageRoutingConfig(config.naturalLanguageRouting, process.env);
-const DAILY_PERSONA_BASE_CONFIG = config.dailyPersona && typeof config.dailyPersona === 'object'
-    ? config.dailyPersona
-    : {};
-
-function resolveDailyPersonaRuntimeContext() {
-    const stateRead = readDailyPersonaState(DAILY_PERSONA_BASE_CONFIG, {
-        env: process.env,
-    });
-    const applied = applyDailyPersonaStateToConfig(DAILY_PERSONA_BASE_CONFIG, stateRead.state || {});
-    return {
-        config: normalizeDailyPersonaConfig(applied.config || DAILY_PERSONA_BASE_CONFIG),
-        state: applied.state || stateRead.state || null,
-        meta: applied.meta || {},
-        statePath: stateRead.path || '',
-        stateRecovered: Boolean(stateRead.recovered),
-    };
-}
-
-function applyDailyPersonaToOutput(base, metaInput = {}) {
-    if (!base || typeof base !== 'object') return base;
-    if (typeof base.telegramReply !== 'string' || !String(base.telegramReply).trim()) return base;
-
-    const route = String(metaInput.route || base.route || '').trim().toLowerCase();
-    const runtimeBotId = String(metaInput.botId || process.env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
-    const runtimeProfile = String(metaInput.profile || process.env.MOLTBOT_PROFILE || process.env.OPENCLAW_PROFILE || '').trim().toLowerCase();
-    const personaRuntime = resolveDailyPersonaRuntimeContext();
-    const personaConfig = personaRuntime.config;
-    const rewritten = rewriteLocalLinks(base.telegramReply, getPublicBases());
-    const personaApplied = isDailyPersonaRuntime(personaConfig, runtimeBotId, { profile: runtimeProfile })
-        ? applyPersonaToSystemReply(rewritten, {
-            route,
-            botId: runtimeBotId,
-            profile: runtimeProfile,
-            config: personaConfig,
-        })
-        : rewritten;
-
-    if (personaApplied === base.telegramReply) return base;
-    return {
-        ...base,
-        telegramReply: personaApplied,
-    };
-}
-
-function allowlistMeta() {
-    return {
-        allowlistEnabled: COMMAND_ALLOWLIST.enabled,
-        ...(COMMAND_ALLOWLIST.warning ? { allowlistWarning: COMMAND_ALLOWLIST.warning } : {}),
-    };
-}
-
-function isDirectCommandAllowed(command) {
-    if (!COMMAND_ALLOWLIST.enabled) return true;
-    const key = String(command || '').trim().toLowerCase();
-    if (!key) return false;
-    return COMMAND_ALLOWLIST.directCommands.includes(key);
-}
-
-function isAutoRouteAllowed(route) {
-    if (!COMMAND_ALLOWLIST.enabled) return true;
-    const key = String(route || '').trim().toLowerCase();
-    if (!key || key === 'none') return true;
-    return COMMAND_ALLOWLIST.autoRoutes.includes(key);
-}
-
-function buildAllowlistBlockedResponse({ requestedCommand = '', requestedRoute = '' } = {}) {
-    const lines = [
-        '허용되지 않은 명령입니다.',
-        requestedCommand ? `요청 command: ${requestedCommand}` : '',
-        requestedRoute ? `요청 route: ${requestedRoute}` : '',
-        `허용 direct: ${COMMAND_ALLOWLIST.directCommands.join(', ')}`,
-        `허용 auto route: ${COMMAND_ALLOWLIST.autoRoutes.join(', ')}`,
-        BRIDGE_BLOCK_HINT ? `안내: ${BRIDGE_BLOCK_HINT}` : '',
-    ].filter(Boolean);
-    const out = {
-        route: 'blocked',
-        blocked: true,
-        errorCode: 'COMMAND_NOT_ALLOWED',
-        requestedCommand: requestedCommand || undefined,
-        requestedRoute: requestedRoute || undefined,
-        telegramReply: lines.join('\n'),
-        ...allowlistMeta(),
-    };
-    return finalizeTelegramBoundary(out, { route: 'blocked' });
-}
-
-function captureConversationSafe({ route = 'none', message = '', source = 'user', skillHint = '' } = {}) {
-    const text = String(message || '').trim();
-    if (!text) return;
-    try {
-        captureConversation({
-            route,
-            source,
-            message: text,
-            skillHint: skillHint || route,
-            approvalState: 'staged',
-        });
-    } catch (_) {
-        // Capture failures must not break bridge responses.
-    }
-}
-
-function splitWords(text) {
-    const raw = String(text || '')
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        // Telegram/bridge에서 literal "\\n"으로 들어온 경우도 실제 개행으로 취급
-        .replace(/\\n/g, '\n');
-
-    const byLines = raw
-        .split('\n')
-        .map(s => s.trim())
-        .filter(Boolean);
-
-    let primaryTokens = byLines.length > 1
-        ? byLines
-        : raw
-            .split(',')
-            .map(s => s.trim())
-            .filter(Boolean);
-
-    // 한 줄에 "Word 뜻 Word 뜻 ..." 형태로 붙여 보낼 때를 대비한 보정.
-    if (primaryTokens.length === 1) {
-        const compact = String(primaryTokens[0] || '').replace(/\s+/g, ' ').trim();
-        const looksPacked = (compact.match(/[A-Za-z][A-Za-z\-']*\s+[가-힣]/g) || []).length >= 2;
-        if (looksPacked) {
-            const packedSplit = compact
-                .split(/\s+(?=[A-Z][A-Za-z\-']*(?:\s+[a-z][A-Za-z\-']*){0,4}\s+[~\(\[]*[가-힣])/)
-                .map((v) => v.trim())
-                .filter(Boolean);
-            if (packedSplit.length > 1) {
-                primaryTokens = packedSplit;
-            }
-        }
-    }
-
-    const expanded = [];
-    for (const token of primaryTokens) {
-        const parts = String(token).split(/\s+\/\s+/).map((s) => s.trim()).filter(Boolean);
-        if (parts.length <= 1) {
-            expanded.push(token);
-            continue;
-        }
-        expanded.push(...parts);
-    }
-    return expanded;
-}
-
-function stripListPrefix(token) {
-    return String(token || '')
-        .replace(/^\s*[\-\*\u2022]+\s*/, '')
-        .replace(/^\s*\d+\s*[\.\)]\s*/, '')
-        .trim();
-}
-
-function normalizeWordParseInput(token) {
-    return String(token || '')
-        .replace(/[’‘`´]/g, "'")
-        .replace(/[–—]/g, '-')
-        .replace(/\u00A0/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function normalizeHintParseInput(hint) {
-    return String(hint || '')
-        .replace(/^[~\s]+/, '')
-        .replace(/[()[\]{}<>]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function parseWordToken(token) {
-    const clean = normalizeWordParseInput(stripListPrefix(token));
-    if (!clean) return null;
-
-    // 명시 구분자 우선 (:, |, " - ")
-    const explicit = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s*(?:[:：|]| - )\s*(.+)$/);
-    if (explicit) {
-        return {
-            word: explicit[1].trim(),
-            hint: normalizeHintParseInput(explicit[2]),
-        };
-    }
-
-    // "activate 활성화하다", "make it to ~에 참석하다", "wave (손,팔을) 흔들다" 형태 처리
-    const mixed = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s+[\(\[\{<~\s]*([가-힣].+)$/);
-    if (mixed) {
-        return {
-            word: mixed[1].trim(),
-            hint: normalizeHintParseInput(mixed[2]),
-        };
-    }
-
-    // 영어만 있으면 전체를 단어/구로 간주
-    if (/^[A-Za-z][A-Za-z\-'\s]{0,120}$/.test(clean)) {
-        return { word: clean.trim(), hint: '' };
-    }
-
-    return null;
-}
-
-function isKoreanHintFragment(token) {
-    const text = String(token || '').trim();
-    if (!text) return false;
-    if (/[A-Za-z]/.test(text)) return false;
-    if (!/[가-힣]/.test(text)) return false;
-    return /^[가-힣0-9\s,./()\-~·'"“”‘’]+$/.test(text);
-}
-
-function mergeDetachedHintTokens(tokens = []) {
-    const merged = [];
-    for (const raw of (Array.isArray(tokens) ? tokens : [])) {
-        const token = String(raw || '').trim();
-        if (!token) continue;
-
-        if (merged.length > 0 && isKoreanHintFragment(token)) {
-            const prev = String(merged[merged.length - 1] || '').trim();
-            const prevParsed = parseWordToken(prev);
-            if (prevParsed && String(prevParsed.hint || '').trim()) {
-                const joiner = /[,;]\s*$/.test(prevParsed.hint) ? ' ' : ', ';
-                const combinedHint = `${prevParsed.hint}${joiner}${token}`.trim();
-                merged[merged.length - 1] = `${prevParsed.word} ${combinedHint}`.trim();
-                continue;
-            }
-        }
-
-        merged.push(token);
-    }
-    return merged;
-}
-
-function buildToeicAnswer(word, hint) {
-    const meaning = hint || fallbackMeaning(word) || '(의미 보강 필요)';
-    return buildToeicAnswerRich(
-        word,
-        meaning,
-        fallbackExample(word),
-        '',
-        `${word} 관련 예문입니다.`,
-        'Part 5/6에서 자주 등장하는 문맥과 함께 암기하세요.',
-    );
-}
-
-async function enrichToeicWord(word, hint, options = {}) {
-    const quality = await createWordQuality(word, hint, options);
-    return {
-        meaning: quality.meaningKo,
-        example: quality.exampleEn,
-        exampleKo: quality.exampleKo,
-        toeicTip: quality.toeicTip,
-        partOfSpeech: quality.partOfSpeech || '',
-        lemma: quality.lemma || normalizeWordToken(word),
-        quality,
-    };
-}
-
-function buildToeicAnswerRich(word, meaningText, exampleText, partOfSpeech = '', exampleKo = '', toeicTip = '') {
-    const meaning = String(meaningText || '(의미 보강 필요)').trim();
-    const ex = String(exampleText || fallbackExample(word)).trim();
-    const pos = partOfSpeech ? `품사: ${partOfSpeech}<br>` : '';
-    const ko = String(exampleKo || `${word} 관련 예문입니다.`).trim();
-    const tip = String(toeicTip || 'Part 5/6 문맥에서 함께 출제되는 표현까지 암기하세요.').trim();
-    return [
-        `뜻: <b>${meaning}</b>`,
-        '<hr>',
-        `${pos}예문: <i>${ex}</i>`,
-        `예문 해석: ${ko}`,
-        '<hr>',
-        `💡 <b>TOEIC TIP:</b> ${tip}`,
-    ].join('<br>');
-}
-
-const OPS_ALLOWED_TARGETS = {
-    dev: 'moltbot-dev',
-    anki: 'moltbot-anki',
-    research: 'moltbot-research',
-    daily: 'moltbot-daily',
-    dev_bak: 'moltbot-dev-bak',
-    anki_bak: 'moltbot-anki-bak',
-    research_bak: 'moltbot-research-bak',
-    daily_bak: 'moltbot-daily-bak',
-    // Legacy aliases
-    main: 'moltbot-dev',
-    sub1: 'moltbot-anki',
-    main_bak: 'moltbot-dev-bak',
-    sub1_bak: 'moltbot-anki-bak',
-    proxy: 'moltbot-proxy',
-    webproxy: 'moltbot-web-proxy',
-    tunnel: 'moltbot-dev-tunnel',
-    prompt: 'moltbot-prompt-web',
-    web: ['moltbot-prompt-web', 'moltbot-web-proxy'],
-    all: [
-        'moltbot-dev',
-        'moltbot-anki',
-        'moltbot-research',
-        'moltbot-daily',
-        'moltbot-dev-bak',
-        'moltbot-anki-bak',
-        'moltbot-research-bak',
-        'moltbot-daily-bak',
-        'moltbot-prompt-web',
-        'moltbot-proxy',
-        'moltbot-web-proxy',
-        'moltbot-dev-tunnel',
-    ],
-};
-
-function normalizeOpsAction(value) {
-    const v = String(value || '').trim().toLowerCase();
-    if (/(재시작|restart|reboot)/.test(v)) return 'restart';
-    if (/(상태|status|health|check)/.test(v)) return 'status';
-    if (/(파일|file|fs|git)/.test(v)) return 'file';
-    if (/(실행|exec|shell|terminal|command)/.test(v)) return 'exec';
-    if (/(메일|mail|email)/.test(v)) return 'mail';
-    if (/(사진|photo|image|camera|cam)/.test(v)) return 'photo';
-    if (/(일정|스케줄|schedule|calendar)/.test(v)) return 'schedule';
-    if (/(브라우저|browser|웹자동화)/.test(v)) return 'browser';
-    if (/(페르소나|persona|캐릭터|tone|스타일)/.test(v)) return 'persona';
-    if (/(토큰조회|승인조회|토큰|token)/.test(v)) return 'token';
-    if (/(승인|approve)/.test(v)) return 'approve';
-    if (/(거부|deny)/.test(v)) return 'deny';
-    return null;
-}
-
-const OPS_CAPABILITY_POLICY = Object.freeze({
-    mail: Object.freeze({
-        list: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        summary: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        send: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-    }),
-    photo: Object.freeze({
-        capture: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        list: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        cleanup: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-    }),
-    schedule: Object.freeze({
-        list: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        create: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-        update: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-        delete: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-    }),
-    browser: Object.freeze({
-        open: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        list: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        click: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        type: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        wait: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        screenshot: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-        checkout: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-        post: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-        send: { risk_tier: 'HIGH', requires_approval: true, mutating: true },
-    }),
-    exec: Object.freeze({
-        run: { risk_tier: 'MEDIUM', requires_approval: false, mutating: false },
-    }),
-});
-
-function normalizeOpsCapabilityAction(capability, value) {
-    const raw = String(value || '').trim().toLowerCase();
-    if (capability === 'mail') {
-        if (/(list|목록|조회|inbox|메일함)/.test(raw)) return 'list';
-        if (/(summary|요약|digest)/.test(raw)) return 'summary';
-        if (/(send|전송|발송|보내기)/.test(raw)) return 'send';
-        return 'list';
-    }
-    if (capability === 'photo') {
-        if (/(capture|snap|shoot|촬영|캡처)/.test(raw)) return 'capture';
-        if (/(list|목록|조회)/.test(raw)) return 'list';
-        if (/(cleanup|정리|clean|삭제)/.test(raw)) return 'cleanup';
-        return 'list';
-    }
-    if (capability === 'schedule') {
-        if (/(list|목록|조회)/.test(raw)) return 'list';
-        if (/(create|add|등록|추가)/.test(raw)) return 'create';
-        if (/(update|edit|수정|변경)/.test(raw)) return 'update';
-        if (/(delete|remove|삭제)/.test(raw)) return 'delete';
-        return 'list';
-    }
-    if (capability === 'browser') {
-        if (/(open|열기|navigate|접속|이동)/.test(raw)) return 'open';
-        if (/(list|목록|조회)/.test(raw)) return 'list';
-        if (/(click|클릭)/.test(raw)) return 'click';
-        if (/(type|입력)/.test(raw)) return 'type';
-        if (/(wait|대기)/.test(raw)) return 'wait';
-        if (/(screenshot|캡처|스크린샷)/.test(raw)) return 'screenshot';
-        if (/(checkout|결제)/.test(raw)) return 'checkout';
-        if (/(post|요청|전송요청)/.test(raw)) return 'post';
-        if (/(send|보내기|발송)/.test(raw)) return 'send';
-        return 'list';
-    }
-    if (capability === 'exec') {
-        return 'run';
-    }
-    return null;
-}
-
-function buildCapabilityPayload(fields = {}) {
-    return {
-        target: String(fields.대상 || '').trim(),
-        reason: String(fields.사유 || '').trim(),
-        path: String(fields.경로 || '').trim(),
-        target_path: String(fields.대상경로 || '').trim(),
-        pattern: String(fields.패턴 || '').trim(),
-        account: String(fields.계정 || '').trim(),
-        recipient: String(fields.수신자 || '').trim(),
-        subject: String(fields.제목 || '').trim(),
-        body: String(fields.본문 || '').trim(),
-        content: String(fields.내용 || '').trim(),
-        when: String(fields.시간 || '').trim(),
-        attachment: String(fields.첨부 || '').trim(),
-        device: String(fields.장치 || '').trim(),
-        identifier: String(fields.식별자 || '').trim(),
-        url: String(fields.URL || '').trim(),
-        selector: String(fields.셀렉터 || '').trim(),
-        key: String(fields.키 || '').trim(),
-        value: String(fields.값 || '').trim(),
-        method: String(fields.메서드 || '').trim(),
-        command: String(fields.명령 || '').trim(),
-    };
-}
-
-function normalizeOpsTarget(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    const map = {
-        'dev': 'dev',
-        '개발': 'dev',
-        'main': 'dev',
-        '메인': 'dev',
-        'anki': 'anki',
-        '안키': 'anki',
-        'sub': 'anki',
-        'sub1': 'anki',
-        '서브': 'anki',
-        'research': 'research',
-        '리서치': 'research',
-        '리서쳐': 'research',
-        'daily': 'daily',
-        '일상': 'daily',
-        'dev_bak': 'dev_bak',
-        'dev-bak': 'dev_bak',
-        'main_bak': 'dev_bak',
-        'main-bak': 'dev_bak',
-        '개발백업': 'dev_bak',
-        'anki_bak': 'anki_bak',
-        'anki-bak': 'anki_bak',
-        'sub1_bak': 'anki_bak',
-        'sub1-bak': 'anki_bak',
-        '안키백업': 'anki_bak',
-        'research_bak': 'research_bak',
-        'research-bak': 'research_bak',
-        '리서쳐백업': 'research_bak',
-        'daily_bak': 'daily_bak',
-        'daily-bak': 'daily_bak',
-        '일상백업': 'daily_bak',
-        'proxy': 'proxy',
-        '프록시': 'proxy',
-        'webproxy': 'webproxy',
-        '웹프록시': 'webproxy',
-        'tunnel': 'tunnel',
-        '터널': 'tunnel',
-        'prompt': 'prompt',
-        '프롬프트': 'prompt',
-        'web': 'web',
-        '웹': 'web',
-        'all': 'all',
-        '전체': 'all',
-    };
-    return map[raw] || null;
-}
-
-function execDocker(args) {
-    const res = spawnSync('docker', args, { encoding: 'utf8' });
-    return {
-        ok: !res.error && res.status === 0,
-        code: res.status == null ? 1 : res.status,
-        stdout: String(res.stdout || '').trim(),
-        stderr: String(res.stderr || '').trim(),
-        error: res.error ? String(res.error.message || res.error) : '',
-    };
-}
-
-function resolvePathFromEnv(envName, fallback) {
-    const raw = String(process.env[envName] || '').trim();
-    if (!raw) return fallback;
-    return path.isAbsolute(raw) ? raw : path.resolve(raw);
-}
-
-const OPS_QUEUE_PATH = resolvePathFromEnv(
-    'OPS_QUEUE_PATH',
-    path.join(__dirname, '..', 'data', 'runtime', 'ops_requests.jsonl'),
-);
-const OPS_SNAPSHOT_PATH = resolvePathFromEnv(
-    'OPS_SNAPSHOT_PATH',
-    path.join(__dirname, '..', 'data', 'runtime', 'ops_snapshot.json'),
-);
-const PROJECT_BOOTSTRAP_STATE_PATH = resolvePathFromEnv(
-    'OPS_PROJECT_BOOTSTRAP_STATE_PATH',
-    path.join(__dirname, '..', 'data', 'runtime', 'project_bootstrap_last.json'),
-);
-const PENDING_APPROVALS_STATE_PATH = resolvePathFromEnv(
-    'OPS_PENDING_APPROVALS_STATE_PATH',
-    path.join(__dirname, '..', 'data', 'state', 'pending_approvals.json'),
-);
-const LAST_APPROVAL_HINTS_PATH = resolvePathFromEnv(
-    'OPS_LAST_APPROVAL_HINTS_PATH',
-    path.join(__dirname, '..', 'data', 'runtime', 'ops_last_approval_hints.json'),
-);
-const BOT_PERSONA_MAP_PATH = resolvePathFromEnv(
-    'OPS_BOT_PERSONA_MAP_PATH',
-    path.join(__dirname, '..', 'data', 'policy', 'bot_persona_map.json'),
-);
-
-const OPS_PERSONA_TARGET_TO_BOT = Object.freeze({
-    dev: 'bot-dev',
-    anki: 'bot-anki',
-    research: 'bot-research',
-    daily: 'bot-daily',
-    main: 'bot-daily',
-    dev_bak: 'bot-dev-bak',
-    anki_bak: 'bot-anki-bak',
-    research_bak: 'bot-research-bak',
-    daily_bak: 'bot-daily-bak',
-    'bot-main': 'bot-daily',
-    'moltbot-main': 'bot-daily',
-    'moltbot-dev': 'bot-dev',
-    'moltbot-anki': 'bot-anki',
-    'moltbot-research': 'bot-research',
-    'moltbot-daily': 'bot-daily',
-    'moltbot-dev-bak': 'bot-dev-bak',
-    'moltbot-anki-bak': 'bot-anki-bak',
-    'moltbot-research-bak': 'bot-research-bak',
-    'moltbot-daily-bak': 'bot-daily-bak',
-    'bot-dev': 'bot-dev',
-    'bot-anki': 'bot-anki',
-    'bot-research': 'bot-research',
-    'bot-daily': 'bot-daily',
-    'bot-dev-bak': 'bot-dev-bak',
-    'bot-anki-bak': 'bot-anki-bak',
-    'bot-research-bak': 'bot-research-bak',
-    'bot-daily-bak': 'bot-daily-bak',
-});
-
-function parseTransportEnvelopeContext(text) {
-    const raw = String(text || '').trim();
-    const envelope = raw.match(/^\s*\[(Telegram|WhatsApp|Discord|Slack|Signal|Line|Matrix|KakaoTalk|Kakao|iMessage|SMS)\b([^\]]*)\]\s*/i);
-    if (!envelope) return null;
-    const provider = String(envelope[1] || '').trim().toLowerCase();
-    const header = String(envelope[2] || '').trim();
-    const userIdMatch = header.match(/\bid\s*[:=]\s*([0-9-]{3,})/i);
-    const groupIdMatch = header.match(/\b(?:group|chat|chat_id)\s*[:=]\s*([0-9-]{3,})/i);
-    return {
-        provider,
-        userId: userIdMatch ? String(userIdMatch[1]).trim() : '',
-        groupId: groupIdMatch ? String(groupIdMatch[1]).trim() : '',
-        header,
-    };
-}
-
-function writeJsonFileSafe(filePath, payload) {
-    try {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-        return true;
-    } catch (_) {
-        return false;
-    }
-}
-
-function readJsonFileSafe(filePath) {
-    try {
-        if (!fs.existsSync(filePath)) return null;
-        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    } catch (_) {
-        return null;
-    }
-}
-
-function saveLastProjectBootstrap(fields = {}, bootstrap = null) {
-    if (!fields || typeof fields !== 'object') return false;
-    if (!bootstrap || typeof bootstrap !== 'object') return false;
-    const snapshot = {
-        savedAt: new Date().toISOString(),
-        fields: {
-            프로젝트명: String(fields.프로젝트명 || '').trim(),
-            목표: String(fields.목표 || '').trim(),
-            스택: String(fields.스택 || '').trim(),
-            경로: String(fields.경로 || '').trim(),
-            완료기준: String(fields.완료기준 || '').trim(),
-            초기화: String(fields.초기화 || bootstrap.initMode || 'plan').trim(),
-        },
-        bootstrap: {
-            projectName: String(bootstrap.projectName || '').trim(),
-            targetPath: String(bootstrap.targetPath || '').trim(),
-            template: String(bootstrap.template || '').trim(),
-            templateLabel: String(bootstrap.templateLabel || '').trim(),
-            initMode: String(bootstrap.initMode || '').trim(),
-            pathAllowed: Boolean(bootstrap.pathPolicy && bootstrap.pathPolicy.allowed),
-        },
-    };
-    return writeJsonFileSafe(PROJECT_BOOTSTRAP_STATE_PATH, snapshot);
-}
-
-function loadLastProjectBootstrap(maxAgeHours = 48) {
-    const parsed = readJsonFileSafe(PROJECT_BOOTSTRAP_STATE_PATH);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const savedAt = Date.parse(String(parsed.savedAt || ''));
-    if (!Number.isFinite(savedAt)) return null;
-    const ageMs = Date.now() - savedAt;
-    if (ageMs < 0 || ageMs > maxAgeHours * 60 * 60 * 1000) return null;
-    const fields = parsed.fields && typeof parsed.fields === 'object' ? parsed.fields : {};
-    if (!String(fields.프로젝트명 || '').trim()) return null;
-    return parsed;
-}
-
-function resolveDefaultProjectBasePath() {
-    return path.resolve('/Users/moltbot/Projects');
-}
-
-function toProjectTemplatePayload(fields = {}, { forceExecute = false } = {}) {
-    const projectName = sanitizeProjectName(fields.프로젝트명 || fields.projectName || 'rust-tap-game');
-    const goal = String(fields.목표 || fields.goal || '모바일에서 실행 가능한 Rust 웹게임 템플릿 생성').trim();
-    const stack = String(fields.스택 || fields.stack || 'rust wasm web').trim();
-    const basePathRaw = String(fields.경로 || fields.path || resolveDefaultProjectBasePath()).trim();
-    const done = String(fields.완료기준 || fields.done || '프로젝트 폴더와 기본 Rust/WASM 파일 생성').trim();
-    const initRaw = String(fields.초기화 || fields.initMode || 'execute').trim();
-    const initMode = forceExecute ? 'execute' : (initRaw || 'execute');
-    return [
-        `프로젝트명: ${projectName}`,
-        `목표: ${goal}`,
-        `스택: ${stack}`,
-        `경로: ${basePathRaw}`,
-        `완료기준: ${done}`,
-        `초기화: ${initMode}`,
-    ].join('; ');
-}
-
-function resolveHubDelegationTarget(route) {
-    if (!HUB_DELEGATION_ACTIVE) return null;
-    const key = String(route || '').trim().toLowerCase();
-    if (!key || key === 'none') return null;
-    const target = String(HUB_DELEGATION.routeToProfile[key] || '').trim().toLowerCase();
-    if (!target) return null;
-    if (target === 'daily' || target === 'local' || target === 'self') return null;
-    return target;
-}
-
-function enqueueHubDelegationCommand({ route, payload, originalMessage, rawText, telegramContext }) {
-    const targetProfile = resolveHubDelegationTarget(route);
-    if (!targetProfile) return null;
-    const normalizedOriginal = String(originalMessage || '').trim();
-    if (!normalizedOriginal) return null;
-    const requestedBy = opsFileControl.normalizeRequester(telegramContext, 'hub:auto');
-    const queued = enqueueCapabilityCommand({
-        phase: 'plan',
-        capability: 'bot',
-        action: 'dispatch',
-        requested_by: requestedBy,
-        telegram_context: telegramContext || parseTransportEnvelopeContext(rawText || ''),
-        reason: `hub_delegation:${route}`,
-        risk_tier: 'MEDIUM',
-        requires_approval: false,
-        payload: {
-            route: String(route || '').trim().toLowerCase(),
-            route_payload: String(payload || '').trim(),
-            original_message: normalizedOriginal,
-            target_profile: targetProfile,
-            target: targetProfile,
-        },
-    });
-    return {
-        route: String(route || '').trim().toLowerCase() || 'none',
-        delegated: true,
-        targetProfile,
-        queued: true,
-        phase: 'plan',
-        capability: 'bot',
-        capabilityAction: 'dispatch',
-        requestId: queued.requestId,
-        telegramContext: telegramContext || null,
-        telegramReply: [
-            `허브 위임 접수: ${route} -> ${targetProfile}`,
-            `- request: ${queued.requestId}`,
-            '- 결과는 역할 봇 처리 후 자동 회신됩니다.',
-        ].join('\n'),
-    };
-}
-
-function resolveOpsFilePolicy() {
-    const baseConfig = (config && typeof config === 'object') ? config : {};
-    const policyPatch = {
-        ...((baseConfig.opsFileControlPolicy && typeof baseConfig.opsFileControlPolicy === 'object')
-            ? baseConfig.opsFileControlPolicy
-            : {}),
-    };
-    if (baseConfig.telegramGuard && typeof baseConfig.telegramGuard === 'object') {
-        policyPatch.telegramGuard = {
-            ...((policyPatch.telegramGuard && typeof policyPatch.telegramGuard === 'object') ? policyPatch.telegramGuard : {}),
-            ...baseConfig.telegramGuard,
-        };
-    }
-    return opsFileControl.loadPolicy({
-        ...baseConfig,
-        opsFileControlPolicy: policyPatch,
-    });
-}
-
-function isUnifiedApprovalEnabled() {
-    const envRaw = String(process.env.MOLTBOT_DISABLE_APPROVAL_TOKENS || '').trim().toLowerCase();
-    if (envRaw === '1' || envRaw === 'true' || envRaw === 'on') return false;
-    if (envRaw === '0' || envRaw === 'false' || envRaw === 'off') return true;
-    return !(
-        config
-        && typeof config === 'object'
-        && config.opsUnifiedApprovals
-        && typeof config.opsUnifiedApprovals === 'object'
-        && config.opsUnifiedApprovals.enabled === false
-    );
-}
-
-function normalizeOpsOptionFlags(value) {
-    return opsFileControl.normalizeApprovalFlags(value);
-}
-
-function normalizeOpsFileIntent(value) {
-    return opsFileControl.normalizeIntentAction(value);
-}
-
-function isFileControlAction(action) {
-    return action === 'file';
-}
-
-function enforceFileControlTelegramGuard(telegramContext, policy) {
-    const guard = (policy && policy.telegramGuard) || {};
-    if (guard.enabled === false) return { ok: true };
-    if (guard.requireContext !== false && (!telegramContext || !telegramContext.provider)) {
-        return {
-            ok: false,
-            code: 'TELEGRAM_CONTEXT_REQUIRED',
-            message: '파일 제어 요청은 Telegram 컨텍스트가 필요합니다.',
-        };
-    }
-    if (!telegramContext || String(telegramContext.provider || '').toLowerCase() !== 'telegram') {
-        return {
-            ok: false,
-            code: 'TELEGRAM_PROVIDER_REQUIRED',
-            message: '파일 제어 요청은 Telegram 채널에서만 허용됩니다.',
-        };
-    }
-
-    const userId = String(telegramContext.userId || '').trim();
-    const groupId = String(telegramContext.groupId || '').trim();
-    const allowedUsers = Array.isArray(guard.allowedUserIds) ? guard.allowedUserIds.map((x) => String(x)) : [];
-    const allowedGroups = Array.isArray(guard.allowedGroupIds) ? guard.allowedGroupIds.map((x) => String(x)) : [];
-
-    if (allowedUsers.length > 0 && !allowedUsers.includes(userId)) {
-        if (!userId) {
-            return {
-                ok: false,
-                code: 'TELEGRAM_USER_REQUIRED',
-                message: 'Telegram 사용자 ID가 없어 파일 제어 요청을 거부합니다.',
-            };
-        }
-        return {
-            ok: false,
-            code: 'TELEGRAM_USER_NOT_ALLOWED',
-            message: `허용되지 않은 Telegram 사용자입니다: ${userId || 'unknown'}`,
-        };
-    }
-
-    if (allowedGroups.length > 0 && !groupId) {
-        return {
-            ok: false,
-            code: 'TELEGRAM_GROUP_REQUIRED',
-            message: 'Telegram 그룹 ID가 없어 파일 제어 요청을 거부합니다.',
-        };
-    }
-
-    if (allowedGroups.length > 0 && groupId && !allowedGroups.includes(groupId)) {
-        return {
-            ok: false,
-            code: 'TELEGRAM_GROUP_NOT_ALLOWED',
-            message: `허용되지 않은 Telegram 그룹입니다: ${groupId}`,
-        };
-    }
-
-    return { ok: true };
-}
-
-function isApprovalGrantEnabled(policy) {
-    return Boolean(
-        policy
-        && policy.approvalGrantPolicy
-        && typeof policy.approvalGrantPolicy === 'object'
-        && policy.approvalGrantPolicy.enabled,
-    );
-}
-
-function parseApproveShorthand(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-    const conversationalApprove = /^(?:(?:응|네|예|그래|좋아|오케이|ㅇㅋ|ok|okay)\s*)?(?:승인(?:해|해줘|해주세요|해요|합니다)?|진행(?:해|해줘|해주세요|해요|합니다)?|go\s*ahead)\s*[.!~…]*$/i;
-    const explicitApprove = /^\/?approve\b/i.test(raw);
-    const conversational = conversationalApprove.test(raw);
-    const tokenMatch = raw.match(/\bapv_[a-f0-9]{16}\b/i);
-    const token = tokenMatch ? String(tokenMatch[0] || '').trim() : '';
-    if (!explicitApprove && !conversational) return null;
-
-    const tail = explicitApprove
-        ? raw.replace(/^\/?approve\b/i, '').trim()
-        : raw;
-    const flagSource = token
-        ? String(tail.replace(token, ' ') || '').trim()
-        : tail;
-    const flags = explicitApprove
-        ? normalizeOpsOptionFlags(flagSource)
-        : normalizeOpsOptionFlags((String(flagSource || '').match(/--[a-z0-9_-]+/gi) || []).join(' '));
-    const flagText = flags.length > 0
-        ? `; 옵션: ${flags.map((flag) => `--${flag}`).join(' ')}`
-        : '';
-    return {
-        token,
-        flags,
-        normalizedPayload: token
-            ? `액션: 승인; 토큰: ${token}${flagText}`
-            : `액션: 승인${flagText}`,
-    };
-}
-
-function parseDenyShorthand(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return null;
-    const explicitDeny = /^\/?deny\b/i.test(raw);
-    const conversationalDeny = /^(?:(?:응|네|예|그래|오케이|ㅇㅋ|ok|okay)\s*)?(?:거부|거절|취소)(?:해|해줘|해주세요|해요|합니다)?\s*[.!~…]*$/i.test(raw);
-    const tokenMatch = raw.match(/\bapv_[a-f0-9]{16}\b/i);
-    const token = tokenMatch ? String(tokenMatch[0] || '').trim() : '';
-    if (!explicitDeny && !conversationalDeny) return null;
-    return {
-        token,
-        normalizedPayload: token ? `액션: 거부; 토큰: ${token}` : '액션: 거부',
-    };
-}
-
-function parseNaturalApprovalShorthand(text) {
-    const raw = String(text || '')
-        .trim()
-        .replace(/[.!?~]+$/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-    if (!raw) return null;
-    if (raw.includes(':') || raw.includes('：') || raw.includes('/')) return null;
-
-    if (/^(응\s*)?(승인|승인해|승인할게|진행|진행해|진행할게|오케이|ok|ㅇㅋ|ㅇㅇ)$/.test(raw)) {
-        return { decision: 'approve', normalizedPayload: '액션: 승인' };
-    }
-    if (/^(응\s*)?(거부|거부해|취소|취소해|중지|멈춰|스탑|stop)$/.test(raw)) {
-        return { decision: 'deny', normalizedPayload: '액션: 거부' };
-    }
-    return null;
-}
-
-function normalizeOpsPayloadText(text) {
-    const approve = parseApproveShorthand(text);
-    if (approve) {
-        return {
-            payloadText: approve.normalizedPayload,
-            approveShorthand: approve,
-            denyShorthand: null,
-        };
-    }
-    const deny = parseDenyShorthand(text);
-    if (deny) {
-        return {
-            payloadText: deny.normalizedPayload,
-            approveShorthand: null,
-            denyShorthand: deny,
-        };
-    }
-    return {
-        payloadText: String(text || '').trim(),
-        approveShorthand: null,
-        denyShorthand: null,
-    };
-}
-
-function enqueueFileControlCommand(command = {}) {
-    const normalized = {
-        schema_version: '1.0',
-        request_id: opsCommandQueue.makeRequestId('opsfc'),
-        phase: String(command.phase || 'plan'),
-        intent_action: String(command.intent_action || '').trim(),
-        requested_by: String(command.requested_by || '').trim() || 'unknown',
-        telegram_context: (command.telegram_context && typeof command.telegram_context === 'object')
-            ? command.telegram_context
-            : null,
-        payload: (command.payload && typeof command.payload === 'object') ? command.payload : {},
-        created_at: new Date().toISOString(),
-    };
-    return opsCommandQueue.enqueueCommand(normalized);
-}
-
-function enqueueCapabilityCommand(command = {}) {
-    const capability = String(command.capability || '').trim().toLowerCase();
-    const action = String(command.action || '').trim().toLowerCase();
-    const payload = (command.payload && typeof command.payload === 'object')
-        ? { ...command.payload }
-        : {};
-    const originBotId = String(command.origin_bot_id || process.env.MOLTBOT_BOT_ID || '').trim();
-    if (originBotId && !String(payload.origin_bot_id || '').trim()) {
-        payload.origin_bot_id = originBotId;
-    }
-    const normalized = {
-        schema_version: '1.0',
-        request_id: opsCommandQueue.makeRequestId('opsc'),
-        command_kind: 'capability',
-        phase: String(command.phase || 'plan').trim().toLowerCase(),
-        capability,
-        action,
-        intent_action: `capability:${capability}:${action}`,
-        risk_tier: String(command.risk_tier || 'MEDIUM').trim().toUpperCase(),
-        requires_approval: Boolean(command.requires_approval),
-        requested_by: String(command.requested_by || '').trim() || 'unknown',
-        telegram_context: (command.telegram_context && typeof command.telegram_context === 'object')
-            ? command.telegram_context
-            : null,
-        reason: String(command.reason || '').trim(),
-        payload,
-        created_at: new Date().toISOString(),
-    };
-    return opsCommandQueue.enqueueCommand(normalized);
-}
-
-function isDockerPermissionError(errText) {
-    return /(EACCES|permission denied|Cannot connect to the Docker daemon|is the docker daemon running)/i.test(String(errText || ''));
-}
-
-function queueOpsRequest(action, targetKey, targets, reason = '') {
-    const id = `ops-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const row = {
-        id,
-        createdAt: new Date().toISOString(),
-        action,
-        target: targetKey,
-        targets,
-        reason: String(reason || '').trim(),
-        status: 'pending',
-    };
-    const dir = path.dirname(OPS_QUEUE_PATH);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(OPS_QUEUE_PATH, `${JSON.stringify(row)}\n`, 'utf8');
-    return row;
-}
-
-function isInlineApprovalExecutionEnabled() {
-    const raw = String(process.env.BRIDGE_INLINE_APPROVAL_EXECUTE || 'true').trim().toLowerCase();
-    return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
-}
-
-function triggerInlineOpsWorker() {
-    if (!isInlineApprovalExecutionEnabled()) {
-        return { enabled: false, triggered: false, ok: false, error: '' };
-    }
-    const run = spawnSync('node', ['scripts/ops_host_worker.js'], {
-        cwd: path.resolve(__dirname, '..'),
-        encoding: 'utf8',
-        timeout: 20000,
-        maxBuffer: 1024 * 1024,
-    });
-    const ok = !run.error && run.status === 0;
-    return {
-        enabled: true,
-        triggered: true,
-        ok,
-        error: ok ? '' : String(run.error ? run.error.message || run.error : (run.stderr || run.stdout || 'ops_host_worker failed')).trim(),
-    };
-}
-
-function readOpsSnapshot() {
-    try {
-        const raw = fs.readFileSync(OPS_SNAPSHOT_PATH, 'utf8');
-        const json = JSON.parse(raw);
-        if (!json || !Array.isArray(json.containers)) return null;
-        return json;
-    } catch (_) {
-        return null;
-    }
-}
-
-function readPendingApprovalsState() {
-    try {
-        if (!fs.existsSync(PENDING_APPROVALS_STATE_PATH)) return [];
-        const raw = fs.readFileSync(PENDING_APPROVALS_STATE_PATH, 'utf8');
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed && parsed.pending) ? parsed.pending : [];
-    } catch (_) {
-        return [];
-    }
-}
-
-function readBotPersonaMap() {
-    try {
-        if (!fs.existsSync(BOT_PERSONA_MAP_PATH)) return {};
-        const raw = fs.readFileSync(BOT_PERSONA_MAP_PATH, 'utf8');
-        const parsed = JSON.parse(raw);
-        return (parsed && typeof parsed === 'object') ? parsed : {};
-    } catch (_) {
-        return {};
-    }
-}
-
-function writeBotPersonaMap(map = {}) {
-    try {
-        fs.mkdirSync(path.dirname(BOT_PERSONA_MAP_PATH), { recursive: true });
-        fs.writeFileSync(BOT_PERSONA_MAP_PATH, `${JSON.stringify(map, null, 2)}\n`, 'utf8');
-        return true;
-    } catch (_) {
-        return false;
-    }
-}
-
-function normalizePersonaTarget(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    if (!raw) return '';
-    if (OPS_PERSONA_TARGET_TO_BOT[raw]) return OPS_PERSONA_TARGET_TO_BOT[raw];
-    return '';
-}
-
-function readLastApprovalHints() {
-    return readLastApprovalHintsCore({
-        fsModule: fs,
-        hintsPath: LAST_APPROVAL_HINTS_PATH,
-    });
-}
-
-function writeLastApprovalHints(hints = {}) {
-    return writeLastApprovalHintsCore(hints, {
-        fsModule: fs,
-        pathModule: path,
-        hintsPath: LAST_APPROVAL_HINTS_PATH,
-    });
-}
-
-function buildApprovalOwnerKey(requestedBy = '', telegramContext = null) {
-    return buildApprovalOwnerKeyCore(requestedBy, telegramContext);
-}
-
-function rememberLastApprovalHint({
-    requestedBy = '',
-    telegramContext = null,
-    requestId = '',
-    capability = '',
-    action = '',
-} = {}) {
-    return rememberLastApprovalHintCore({
-        requestedBy,
-        telegramContext,
-        requestId,
-        capability,
-        action,
-    }, {
-        readLastApprovalHints,
-        writeLastApprovalHints,
-    });
-}
-
-function readLastApprovalHint(requestedBy = '', telegramContext = null) {
-    return readLastApprovalHintCore(requestedBy, telegramContext, {
-        readLastApprovalHints,
-    });
-}
-
-function clearLastApprovalHint(requestedBy = '', telegramContext = null) {
-    return clearLastApprovalHintCore(requestedBy, telegramContext, {
-        readLastApprovalHints,
-        writeLastApprovalHints,
-    });
-}
-
-function hasAnyApprovalHint() {
-    return hasAnyApprovalHintCore({
-        readLastApprovalHints,
-    });
-}
-
-function findPendingApprovalByRequestId(requestId = '', rows = []) {
-    return findPendingApprovalByRequestIdCore(requestId, rows);
-}
-
-function resolveApprovalTokenFromHint(requestedBy = '', telegramContext = null) {
-    return resolveApprovalTokenFromHintCore(requestedBy, telegramContext, {
-        readLastApprovalHint,
-        readPendingApprovalsState,
-    });
-}
-
-function findApprovalTokenCandidates(query = '') {
-    return findApprovalTokenCandidatesCore(query, {
-        readPendingApprovalsState,
-    });
-}
-
-function sortPendingApprovalsNewestFirst(rows = []) {
-    return sortPendingApprovalsNewestFirstCore(rows);
-}
-
-function resolveApprovalTokenSelection({
-    query = '',
-    requestedBy = '',
-    telegramContext = null,
-} = {}) {
-    return resolveApprovalTokenSelectionCore({
-        query,
-        requestedBy,
-        telegramContext,
-    }, {
-        readPendingApprovalsState,
-        findApprovalTokenCandidates,
-        sortPendingApprovalsNewestFirst,
-    });
-}
-
-function mergeUniqueLower(items = []) {
-    return mergeUniqueLowerCore(items);
-}
-
-function resolveApprovalFlagsForToken(token = '', providedFlags = []) {
-    return resolveApprovalFlagsForTokenCore(token, providedFlags, {
-        readPendingToken: (key) => opsApprovalStore.readPendingToken(key),
-    });
-}
-
-function normalizeOpsStateBucket(state, statusText) {
-    return normalizeOpsStateBucketCore(state, statusText);
-}
-
-function buildOpsStatusRowsFromDocker(rawLines, targets) {
-    return buildOpsStatusRowsFromDockerCore(rawLines, targets);
-}
-
-function buildOpsStatusRowsFromSnapshot(snapshot, targets) {
-    return buildOpsStatusRowsFromSnapshotCore(snapshot, targets);
-}
-
-function buildOpsStatusReply(rows, options = {}) {
-    return buildOpsStatusReplyCore(rows, options);
-}
-
-function splitOpsBatchPayloads(payloadText) {
-    return splitOpsBatchPayloadsCore(payloadText);
-}
-
-function runOpsCommand(payloadText, options = {}) {
-    return runOpsCommandCore(payloadText, options, {
-        runOpsCommandSingle,
-    });
-}
-
-function handleOpsTokenAction(parsed) {
-    return handleOpsTokenActionCore(parsed, {
-        isUnifiedApprovalEnabled,
-        findApprovalTokenCandidates,
-    });
-}
-
-function handleOpsPersonaAction(parsed, requestedBy) {
-    return handleOpsPersonaActionCore(parsed, requestedBy, {
-        normalizePersonaTarget,
-        readBotPersonaMap,
-        writeBotPersonaMap,
-        readDailyPersonaState: () => readDailyPersonaState(DAILY_PERSONA_BASE_CONFIG, {
-            env: process.env,
-        }),
-        writeDailyPersonaState: (stateInput) => writeDailyPersonaState(DAILY_PERSONA_BASE_CONFIG, stateInput, {
-            env: process.env,
-        }),
-        applyDailyPersonaStateToConfig: (stateInput) => applyDailyPersonaStateToConfig(DAILY_PERSONA_BASE_CONFIG, stateInput),
-        resolvePresetProfileId: (value) => resolvePresetProfileId(DAILY_PERSONA_BASE_CONFIG, value),
-        dailyPersonaTargetBotIds: ['bot-daily'],
-        dailyPersonaStateModes: DAILY_PERSONA_STATE_MODES,
-        dailyPersonaDefaultTitle: String((DAILY_PERSONA_BASE_CONFIG && DAILY_PERSONA_BASE_CONFIG.defaultTitle) || '인호님').trim() || '인호님',
-    });
-}
-
-function handleOpsApproveAction(parsed, normalized, requestedBy, telegramContext, policy) {
-    return handleOpsApproveActionCore({
-        parsed,
-        normalized,
-        requestedBy,
-        telegramContext,
-        policy,
-    }, {
-        isUnifiedApprovalEnabled,
-        normalizeOpsOptionFlags,
-        triggerInlineOpsWorker,
-        resolveApprovalTokenFromHint,
-        resolveApprovalTokenSelection,
-        resolveApprovalFlagsForToken,
-        enqueueFileControlCommand,
-        normalizeOpsFileIntent,
-        clearLastApprovalHint,
-        isApprovalGrantEnabled,
-    });
-}
-
-function handleOpsDenyAction(parsed, normalized, requestedBy, telegramContext) {
-    return handleOpsDenyActionCore({
-        parsed,
-        normalized,
-        requestedBy,
-        telegramContext,
-    }, {
-        isUnifiedApprovalEnabled,
-        triggerInlineOpsWorker,
-        resolveApprovalTokenFromHint,
-        resolveApprovalTokenSelection,
-        enqueueFileControlCommand,
-        clearLastApprovalHint,
-    });
-}
-
-function handleOpsRestartAction(action, targetKey, parsed) {
-    return handleOpsRestartActionCore({
-        action,
-        targetKey,
-        parsed,
-    }, {
-        allowedTargets: OPS_ALLOWED_TARGETS,
-        queueOpsRequest,
-    });
-}
-
-function handleOpsFileAction(action, parsed, requestedBy, telegramContext) {
-    return handleOpsFileActionCore({
-        action,
-        parsed,
-        requestedBy,
-        telegramContext,
-    }, {
-        isUnifiedApprovalEnabled,
-        normalizeOpsFileIntent,
-        normalizeOpsOptionFlags,
-        enqueueFileControlCommand,
-    });
-}
-
-function handleOpsCapabilityAction(action, parsed, requestedBy, telegramContext, policy) {
-    return handleOpsCapabilityActionCore({
-        action,
-        parsed,
-        requestedBy,
-        telegramContext,
-        policy,
-    }, {
-        isUnifiedApprovalEnabled,
-        normalizeOpsCapabilityAction,
-        capabilityPolicyMap: OPS_CAPABILITY_POLICY,
-        buildCapabilityPayload,
-        normalizeOpsOptionFlags,
-        enqueueCapabilityCommand,
-        rememberLastApprovalHint,
-        isApprovalGrantEnabled,
-    });
-}
-
-function runOpsCommandSingle(payloadText, options = {}) {
-    const normalized = normalizeOpsPayloadText(payloadText);
-    const parsed = parseStructuredCommand('ops', normalized.payloadText);
-    if (!parsed.ok) {
-        return { route: 'ops', templateValid: false, ...parsed };
-    }
-
-    const action = normalizeOpsAction(parsed.fields.액션);
-    const targetKey = normalizeOpsTarget(parsed.fields.대상);
-    const telegramContext = options.telegramContext || parseTransportEnvelopeContext(options.rawText || '');
-    const policy = resolveOpsFilePolicy();
-    const requestedBy = opsFileControl.normalizeRequester(telegramContext, options.requestedBy || '');
-
-    if (!action) {
-        return {
-            route: 'ops',
-            templateValid: false,
-            error: '지원하지 않는 액션입니다.',
-            telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `실행`, `메일`, `사진`, `일정`, `브라우저`, `페르소나`, `토큰`, `승인`, `거부`만 지원합니다.',
-        };
-    }
-
-    if (isFileControlAction(action)) {
-        const guard = enforceFileControlTelegramGuard(telegramContext, policy);
-        if (!guard.ok) {
-            return {
-                route: 'ops',
-                templateValid: true,
-                success: false,
-                action,
-                errorCode: guard.code,
-                telegramReply: `파일 제어 정책 차단: ${guard.message}`,
-            };
-        }
-    }
-
-    if (action === 'status') {
-        if (!targetKey || !OPS_ALLOWED_TARGETS[targetKey]) {
-            return {
-                route: 'ops',
-                templateValid: false,
-                error: '지원하지 않는 대상입니다.',
-                telegramReply: '운영 대상은 dev/anki/research/daily/dev_bak/anki_bak/research_bak/daily_bak/proxy/webproxy/tunnel/prompt/web/all 만 지원합니다. (legacy: main/sub1 지원)',
-            };
-        }
-        const targets = Array.isArray(OPS_ALLOWED_TARGETS[targetKey])
-            ? OPS_ALLOWED_TARGETS[targetKey]
-            : [OPS_ALLOWED_TARGETS[targetKey]];
-        const ps = execDocker(['ps', '-a', '--format', '{{.Names}}\t{{.State}}\t{{.Status}}']);
-        if (!ps.ok) {
-            if (isDockerPermissionError(ps.stderr || ps.error)) {
-                const snap = readOpsSnapshot();
-                const tunnelUrl = targetKey === 'tunnel' || targetKey === 'all' ? getTunnelPublicBaseUrl() : null;
-                if (snap && Array.isArray(snap.containers)) {
-                    const rows = buildOpsStatusRowsFromSnapshot(snap, targets);
-                    return {
-                        route: 'ops',
-                        templateValid: true,
-                        success: true,
-                        action,
-                        target: targetKey,
-                        source: 'snapshot',
-                        snapshotUpdatedAt: snap.updatedAt || null,
-                        results: rows.map((row) => `${row.name}\t${row.statusText}`),
-                        rows,
-                        telegramReply: buildOpsStatusReply(rows, {
-                            snapshotUpdatedAt: snap.updatedAt || '',
-                            tunnelUrl,
-                        }),
-                    };
-                }
-            }
-            return {
-                route: 'ops',
-                templateValid: true,
-                success: false,
-                action,
-                target: targetKey,
-                telegramReply: `운영 상태 조회 실패: ${ps.stderr || ps.error || 'unknown error'}`,
-            };
-        }
-        const rows = buildOpsStatusRowsFromDocker(ps.stdout, targets);
-        const tunnelUrl = targetKey === 'tunnel' || targetKey === 'all' ? getTunnelPublicBaseUrl() : null;
-        return {
-            route: 'ops',
-            templateValid: true,
-            success: true,
-            action,
-            target: targetKey,
-            results: rows.map((row) => `${row.name}\t${row.statusText}`),
-            rows,
-            telegramReply: buildOpsStatusReply(rows, { tunnelUrl }),
-        };
-    }
-
-    if (action === 'token') {
-        return handleOpsTokenAction(parsed);
-    }
-
-    if (action === 'persona') {
-        return handleOpsPersonaAction(parsed, requestedBy);
-    }
-
-    if (action === 'restart') {
-        return handleOpsRestartAction(action, targetKey, parsed);
-    }
-
-    if (action === 'file') {
-        return handleOpsFileAction(action, parsed, requestedBy, telegramContext);
-    }
-
-    if (action === 'mail' || action === 'photo' || action === 'schedule' || action === 'browser' || action === 'exec') {
-        return handleOpsCapabilityAction(action, parsed, requestedBy, telegramContext, policy);
-    }
-
-    if (action === 'approve') {
-        return handleOpsApproveAction(parsed, normalized, requestedBy, telegramContext, policy);
-    }
-
-    if (action === 'deny') {
-        return handleOpsDenyAction(parsed, normalized, requestedBy, telegramContext);
-    }
-
-    return {
-        route: 'ops',
-        templateValid: false,
-        success: false,
-        action,
-        errorCode: 'UNSUPPORTED_OPS_ACTION',
-        telegramReply: '지원하지 않는 운영 액션입니다.',
-    };
-}
-
-function normalizeHttpsBase(v) {
-    const out = String(v || '').trim().replace(/\/+$/, '');
-    return /^https:\/\/[a-z0-9.-]+$/i.test(out) ? out : null;
-}
-
-function getTunnelPublicBaseUrl() {
-    // Backward-compat helper for legacy callers.
-    const bases = getPublicBases();
-    return bases.promptBase || bases.genericBase || null;
-}
-
-function getPublicBases() {
-    const promptEnv = normalizeHttpsBase(process.env.PROMPT_PUBLIC_BASE_URL || '');
-    const genericEnv = normalizeHttpsBase(process.env.DEV_TUNNEL_PUBLIC_BASE_URL || '');
-
-    if (promptEnv || genericEnv) {
-        return {
-            promptBase: promptEnv || genericEnv || null,
-            genericBase: genericEnv || null,
-        };
-    }
-
-    // Host-side tunnel manager writes latest URL to a shared state file.
-    try {
-        const statePath = path.join(__dirname, '..', 'data', 'runtime', 'tunnel_state.json');
-        const raw = fs.readFileSync(statePath, 'utf8');
-        const json = JSON.parse(raw);
-        const candidate = normalizeHttpsBase(json && json.publicUrl ? json.publicUrl : '');
-        if (candidate) {
-            return {
-                promptBase: candidate,
-                genericBase: candidate,
-            };
-        }
-    } catch (_) {
-        // no-op: fall through to docker logs probing
-    }
-
-    // Fallback: probe tunnel container logs (works on host bridge execution path).
-    const logs = execDocker(['logs', '--tail', '200', 'moltbot-dev-tunnel']);
-    if (!logs.ok) return { promptBase: null, genericBase: null };
-    const m = String(`${logs.stdout}\n${logs.stderr}`).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi);
-    if (!m || !m.length) return { promptBase: null, genericBase: null };
-    const base = m[m.length - 1];
-    return {
-        promptBase: base,
-        genericBase: base,
-    };
-}
-
-function buildExternalLinksText() {
-    const { promptBase } = getPublicBases();
-    if (!promptBase) return null;
-    const lines = ['외부 확인 링크'];
-    if (promptBase) lines.push(`- 프롬프트: ${promptBase}/prompt/`);
-    return lines.join('\n');
-}
-
-function rewriteLocalLinks(text, bases) {
-    const raw = String(text || '');
-    const promptBase = String((bases && bases.promptBase) || '').trim().replace(/\/+$/, '');
-    if (!promptBase) return raw;
-
-    let out = raw;
-    if (promptBase) {
-        out = out
-            .replace(/https?:\/\/127\.0\.0\.1:18788\/prompt\/?/gi, `${promptBase}/prompt/`)
-            .replace(/https?:\/\/localhost:18788\/prompt\/?/gi, `${promptBase}/prompt/`)
-            .replace(/https?:\/\/127\.0\.0\.1:18787\/prompt\/?/gi, `${promptBase}/prompt/`)
-            .replace(/https?:\/\/localhost:18787\/prompt\/?/gi, `${promptBase}/prompt/`);
-    }
-    return out;
-}
-
-function appendExternalLinks(reply) {
-    const bases = getPublicBases();
-    const rewritten = rewriteLocalLinks(reply, bases);
-    const links = buildExternalLinksText();
-    if (!links) return rewritten;
-    if (/(^|\n)외부 확인 링크(\n|$)/.test(String(rewritten || ''))) {
-        return String(rewritten || '').trim();
-    }
-    return `${String(rewritten || '').trim()}\n\n${links}`.trim();
-}
-
-function parseReportModeCommand(text) {
-    return parseReportModeCommandCore(text);
-}
-
-function parsePersonaInfoCommand(text) {
-    const normalized = normalizeIncomingCommandText(text);
-    if (/^\s*(?:운영|ops)\s*[:：]/i.test(normalized)) {
-        return { matched: false };
-    }
-    return parsePersonaInfoCommandCore(text, { normalizeIncomingCommandText });
-}
-
-function buildPersonaStatusReply(context = {}) {
-    const runtimeBotId = String(context.botId || process.env.MOLTBOT_BOT_ID || '').trim().toLowerCase();
-    const runtimeProfile = String(context.profile || process.env.MOLTBOT_PROFILE || process.env.OPENCLAW_PROFILE || '').trim().toLowerCase();
-    const botPersonaMap = readBotPersonaMap();
-    const personaRuntime = resolveDailyPersonaRuntimeContext();
-    return buildDailyPersonaStatusReply({
-        config: personaRuntime.config,
-        botId: runtimeBotId,
-        profile: runtimeProfile,
-        route: String(context.route || '').trim().toLowerCase(),
-        botPersonaMap,
-        personaState: personaRuntime.state,
-        personaStateMeta: personaRuntime.meta,
-        personaStatePath: personaRuntime.statePath,
-        personaStateRecovered: personaRuntime.stateRecovered,
-    });
-}
-
-function finalizeTelegramBoundary(base, metaInput = {}) {
-    const personaRuntime = resolveDailyPersonaRuntimeContext();
-    return finalizeTelegramBoundaryCore(base, metaInput, {
-        applyDailyPersonaToOutput,
-        appendExternalLinks,
-        parseTransportEnvelopeContext,
-        normalizeRequester: opsFileControl.normalizeRequester,
-        finalizeTelegramReply: (text, context) => telegramFinalizer.finalizeTelegramReply(text, context),
-        sanitizeForUser: (text) => {
-            if (telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function') {
-                return telegramFinalizer.sanitizeForUser(text);
-            }
-            const raw = String(text || '').trim();
-            return raw || '실패\n원인: 내부 실행 오류가 발생했어.\n다음 조치: 잠시 후 다시 시도해줘.';
-        },
-        enforcePersonaReply,
-        dailyPersonaConfig: personaRuntime.config,
-        env: process.env,
-    });
-}
-
-function isExternalLinkRequest(text) {
-    return isExternalLinkRequestCore(text);
-}
-
-function buildLinkOnlyReply(text) {
-    return buildLinkOnlyReplyCore(text, {
-        getPublicBases,
-        buildLinkDiagnosticsText,
-    });
-}
-
-function probeUrlStatus(url) {
-    return probeUrlStatusCore(url, { spawnSync });
-}
-
-function buildLinkDiagnosticsText() {
-    return buildLinkDiagnosticsTextCore({
-        bridgeDir: __dirname,
-        pathModule: path,
-        spawnSync,
-        getPublicBases,
-        probeUrlStatus,
-    });
-}
-
-function buildQuickStatusReply(payload) {
-    return buildQuickStatusReplyCore(payload, {
-        runOpsCommand,
-        buildLinkDiagnosticsText,
-        appendExternalLinks,
-    });
-}
-
-function buildNoPrefixGuide() {
-    return buildNoPrefixGuideCore();
-}
-
-function inferPathListReply(inputText) {
-    return inferPathListReplyCore(inputText, {
-        normalizeIncomingCommandText,
-        extractPreferredProjectBasePath,
-        readDirectoryListPreview,
-    });
-}
-
-function isLegacyPersonaSwitchAttempt(text) {
-    return isLegacyPersonaSwitchAttemptCore(text);
-}
-
-function buildDailyCasualNoPrefixReply(inputText) {
-    return buildDailyCasualNoPrefixReplyCore(inputText, {
-        normalizeIncomingCommandText,
-        buildPersonaStatusReply,
-        inferPathListReply,
-    });
-}
-
-function buildDuelModeMeta() {
-    return {
-        enabled: true,
-        mode: 'two-pass',
-        maxRounds: 1,
-        timeoutMs: 120000,
-        logPath: MODEL_DUEL_LOG_PATH,
-    };
-}
-
-function buildCodexDegradedMeta() {
-    const safeMode = String(process.env.RATE_LIMIT_SAFE_MODE || '').trim().toLowerCase() === 'true';
-    if (!safeMode) return { enabled: false };
-    return {
-        enabled: true,
-        reason: 'rate_limit_safe_mode',
-        notice: 'Codex unavailable or intentionally throttled. Falling back to non-codex route.',
-    };
-}
-
-function buildApiRoutingMeta({ route, routeHint = '', commandText = '', templateFields = {} }) {
-    const decision = decideApiLane({
-        route,
-        routeHint,
-        commandText,
-        templateFields,
-    });
-    return {
-        apiLane: decision.apiLane,
-        apiAuthMode: decision.authMode,
-        apiReason: decision.reason,
-        apiBlocked: Boolean(decision.blocked),
-        apiBlockReason: decision.blockReason || '',
-        apiFallbackLane: decision.fallbackLane || null,
-        apiCapabilities: Array.isArray(decision.capabilities) ? decision.capabilities : [],
-    };
-}
-
-function withApiMeta(base, metaInput) {
-    const prepared = finalizeTelegramBoundary(base, metaInput);
-    return {
-        ...prepared,
-        ...buildApiRoutingMeta(metaInput),
-        ...allowlistMeta(),
-    };
-}
-
-function pickPreferredModelMeta(result, fallbackAlias = 'fast', fallbackReasoning = 'low') {
-    const source = (result && typeof result === 'object') ? result : {};
-    const alias = String(source.preferredModelAlias || '').trim() || String(fallbackAlias || 'fast').trim() || 'fast';
-    const reasoningRaw = String(source.preferredReasoning || '').trim().toLowerCase();
-    const fallbackRaw = String(fallbackReasoning || 'low').trim().toLowerCase();
-    const allowed = new Set(['low', 'medium', 'high']);
-    const reasoning = allowed.has(reasoningRaw)
-        ? reasoningRaw
-        : (allowed.has(fallbackRaw) ? fallbackRaw : 'low');
-    return {
-        preferredModelAlias: alias,
-        preferredReasoning: reasoning,
-    };
-}
-
-function clampPreview(value, maxLen = 600) {
-    return clampPreviewCore(value, maxLen);
-}
-
-function executeProjectBootstrapScript(bootstrap) {
-    return executeProjectBootstrapScriptCore(bootstrap, {
-        redact: (text) => opsLogger.redact(String(text || '')),
-        spawnSync,
-        timeoutMs: Number(process.env.PROJECT_BOOTSTRAP_TIMEOUT_MS || 180000),
-    });
-}
-
-function readDirectoryListPreview(targetPath, maxLen = 1600) {
-    return readDirectoryListPreviewCore(targetPath, maxLen, {
-        redact: (text) => opsLogger.redact(String(text || '')),
-        spawnSync,
-    });
-}
-
-function buildProjectRoutePayload(parsed) {
-    return buildProjectRoutePayloadCore(parsed, {
-        buildProjectBootstrapPlan,
-        saveLastProjectBootstrap,
-        appendExternalLinks,
-        executeProjectBootstrapScript,
-        readDirectoryListPreview,
-    });
-}
-
-function parseStructuredCommand(route, payloadText) {
-    return parseStructuredCommandCore(route, payloadText);
-}
-
-function resolveWorkspaceRootHint() {
-    return resolveWorkspaceRootHintCore({
-        env: process.env,
-        fsModule: fs,
-        pathModule: path,
-        fallbackWorkspaceRoot: path.resolve(__dirname, '..'),
-    });
-}
-
-function normalizeIncomingCommandText(text) {
-    return normalizeIncomingCommandTextCore(text, { resolveWorkspaceRootHint });
-}
-
-function normalizeNewsCommandPayload(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return '';
-    const lower = raw.toLowerCase();
-
-    if (lower === '상태' || lower === 'status') return '상태';
-    if (lower === '지금요약' || lower === '요약' || lower === 'summary') return '지금요약';
-    if (lower === '트렌드' || lower === 'trend') return '지금요약';
-    if (lower === '이벤트' || lower === 'event') return '이벤트';
-    if (lower === '도움말' || lower === 'help') return '도움말';
-
-    // Natural phrases like "테크 트렌드 요약" should map to digest.
-    if (lower.includes('요약') && (lower.includes('트렌드') || lower.includes('테크'))) {
-        return '지금요약';
-    }
-    if (lower.includes('트렌드') || lower.includes('trend')) {
-        return '지금요약';
-    }
-
-    return raw;
-}
-
-function normalizeReportNewsPayload(text) {
-    const normalized = String(normalizeNewsCommandPayload(text) || '').trim();
-    if (!normalized) return '지금요약';
-    if (/^(상태|지금요약|이벤트|도움말)$/i.test(normalized)) return normalized;
-    if (/^(키워드|소스)\b/i.test(normalized)) return normalized;
-    return '지금요약';
-}
-
-function normalizeMonthToken(rawValue) {
-    return normalizeMonthTokenCore(rawValue);
-}
-
-function extractMemoStatsPayload(text) {
-    return extractMemoStatsPayloadCore(text, { normalizeMonthToken });
-}
-
-function isLikelyMemoJournalBlock(text) {
-    return isLikelyMemoJournalBlockCore(text);
-}
-
-function stripNaturalMemoLead(text) {
-    return stripNaturalMemoLeadCore(text);
-}
-
-function inferMemoIntentPayload(text) {
-    return inferMemoIntentPayloadCore(text, {
-        extractMemoStatsPayload,
-        isLikelyMemoJournalBlock,
-        stripNaturalMemoLead,
-    });
-}
-
-function inferFinanceIntentPayload(text) {
-    return inferFinanceIntentPayloadCore(text);
-}
-
-function inferTodoIntentPayload(text) {
-    return inferTodoIntentPayloadCore(text);
-}
-
-function inferRoutineIntentPayload(text) {
-    return inferRoutineIntentPayloadCore(text);
-}
-
-function inferWorkoutIntentPayload(text) {
-    return inferWorkoutIntentPayloadCore(text);
-}
-
-function inferPersonaIntentPayload(text) {
-    return inferPersonaIntentPayloadCore(text, {
-        defaultTarget: 'daily',
-    });
-}
-
-function inferWorkIntentPayload(text) {
-    return inferWorkIntentPayloadCore(text);
-}
-
-function inferInspectIntentPayload(text) {
-    return inferInspectIntentPayloadCore(text);
-}
-
-function inferBrowserIntentPayload(text) {
-    return inferBrowserIntentPayloadCore(text);
-}
-
-function inferScheduleIntentPayload(text) {
-    return inferScheduleIntentPayloadCore(text);
-}
-
-function inferGogLookupIntentPayload(text) {
-    return inferGogLookupIntentPayloadCore(text);
-}
-
-function inferStatusIntentPayload(text) {
-    return inferStatusIntentPayloadCore(text);
-}
-
-function inferLinkIntentPayload(text) {
-    return inferLinkIntentPayloadCore(text, { isExternalLinkRequest });
-}
-
-function inferReportIntentPayload(text) {
-    return inferReportIntentPayloadCore(text);
-}
-
-function extractPreferredProjectBasePath(text) {
-    return extractPreferredProjectBasePathCore(text, { resolveWorkspaceRootHint, pathModule: path });
-}
-
-function inferProjectIntentPayload(text) {
-    return inferProjectIntentPayloadCore(text, {
-        extractPreferredProjectBasePath,
-        loadLastProjectBootstrap,
-        resolveDefaultProjectBasePath,
-        toProjectTemplatePayload,
-    });
-}
-
-function inferNaturalLanguageRoute(text, options = {}) {
-    return inferNaturalLanguageRouteCore(text, options, {
-        NATURAL_LANGUAGE_ROUTING,
-        isHubRuntime,
-        isResearchRuntime,
-        normalizeIncomingCommandText,
-        inferMemoIntentPayload,
-        inferFinanceIntentPayload,
-        inferTodoIntentPayload,
-        inferRoutineIntentPayload,
-        inferWorkoutIntentPayload,
-        inferWorkIntentPayload,
-        inferInspectIntentPayload,
-        inferBrowserIntentPayload,
-        inferScheduleIntentPayload,
-        inferGogLookupIntentPayload,
-        inferPersonaIntentPayload,
-        inferStatusIntentPayload,
-        inferLinkIntentPayload,
-        inferProjectIntentPayload,
-        inferReportIntentPayload,
-    });
-}
-
-function routeByPrefix(text) {
-    return routeByPrefixCore(text, {
-        commandPrefixes: config.commandPrefixes || {},
-        normalizeIncomingCommandText,
-        parseApproveShorthand,
-        parseDenyShorthand,
-        parseNaturalApprovalShorthand,
-        readPendingApprovalsState,
-        hasAnyApprovalHint,
-        inferNaturalLanguageRoute,
-        env: process.env,
-    });
-}
-
 function toValidDate(input = null) {
-    const date = input ? new Date(input) : new Date();
+    const date = input instanceof Date ? new Date(input.getTime()) : new Date(input || Date.now());
     if (Number.isFinite(date.getTime())) return date;
     return new Date();
 }
@@ -2591,6 +559,1193 @@ function handleWordReadCommand(text, options = {}) {
     return null;
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetriableError(error) {
+    const text = String(
+        (error && (error.code || error.message || error.toString && error.toString())) || '',
+    ).toLowerCase();
+    return /(timed?out|etimedout|econnreset|eai_again|429|503|rate limit|temporar)/i.test(text);
+}
+
+function uniqueNormalizedList(values) {
+    return uniqueNormalizedListCore(values);
+}
+
+function parseAllowlistEnvList(value) {
+    return parseAllowlistEnvListCore(value, {
+        uniqueNormalizedList,
+    });
+}
+
+function parseBooleanEnv(value) {
+    return parseBooleanEnvCore(value);
+}
+
+function normalizeAllowlistConfig(rawConfig, env = process.env) {
+    return normalizeAllowlistConfigCore(rawConfig, env, {
+        defaultCommandAllowlist: DEFAULT_COMMAND_ALLOWLIST,
+        uniqueNormalizedList,
+        parseAllowlistEnvList,
+        parseBooleanEnv,
+    });
+}
+
+function normalizeHubDelegationConfig(rawConfig) {
+    return normalizeHubDelegationConfigCore(rawConfig, {
+        defaultHubDelegation: DEFAULT_HUB_DELEGATION,
+    });
+}
+
+function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env) {
+    return normalizeNaturalLanguageRoutingConfigCore(rawConfig, env, {
+        defaultNaturalLanguageRouting: DEFAULT_NATURAL_LANGUAGE_ROUTING,
+        parseBooleanEnv,
+    });
+}
+
+function isHubRuntime(env = process.env) {
+    return isHubRuntimeCore(env);
+}
+
+function isResearchRuntime(env = process.env) {
+    return isResearchRuntimeCore(env);
+}
+
+function isWordRuntime(env = process.env) {
+    return isWordRuntimeCore(env);
+}
+
+const COMMAND_ALLOWLIST = normalizeAllowlistConfig(config.commandAllowlist, process.env);
+const HUB_DELEGATION = normalizeHubDelegationConfig(config.hubDelegation);
+const HUB_DELEGATION_ACTIVE = HUB_DELEGATION.enabled && isHubRuntime(process.env);
+const BRIDGE_BLOCK_HINT = String(process.env.BRIDGE_BLOCK_HINT || '').trim();
+const NATURAL_LANGUAGE_ROUTING = normalizeNaturalLanguageRoutingConfig(config.naturalLanguageRouting, process.env);
+
+function allowlistMeta() {
+    return {
+        allowlistEnabled: COMMAND_ALLOWLIST.enabled,
+        ...(COMMAND_ALLOWLIST.warning ? { allowlistWarning: COMMAND_ALLOWLIST.warning } : {}),
+    };
+}
+
+function isDirectCommandAllowed(command) {
+    if (!COMMAND_ALLOWLIST.enabled) return true;
+    const key = String(command || '').trim().toLowerCase();
+    if (!key) return false;
+    return COMMAND_ALLOWLIST.directCommands.includes(key);
+}
+
+function isAutoRouteAllowed(route) {
+    if (!COMMAND_ALLOWLIST.enabled) return true;
+    const key = String(route || '').trim().toLowerCase();
+    if (!key || key === 'none') return true;
+    return COMMAND_ALLOWLIST.autoRoutes.includes(key);
+}
+
+function buildAllowlistBlockedResponse({ requestedCommand = '', requestedRoute = '' } = {}) {
+    const lines = [
+        '허용되지 않은 명령입니다.',
+        requestedCommand ? `요청 command: ${requestedCommand}` : '',
+        requestedRoute ? `요청 route: ${requestedRoute}` : '',
+        `허용 direct: ${COMMAND_ALLOWLIST.directCommands.join(', ')}`,
+        `허용 auto route: ${COMMAND_ALLOWLIST.autoRoutes.join(', ')}`,
+        BRIDGE_BLOCK_HINT ? `안내: ${BRIDGE_BLOCK_HINT}` : '',
+    ].filter(Boolean);
+    const out = {
+        route: 'blocked',
+        blocked: true,
+        errorCode: 'COMMAND_NOT_ALLOWED',
+        requestedCommand: requestedCommand || undefined,
+        requestedRoute: requestedRoute || undefined,
+        telegramReply: lines.join('\n'),
+        ...allowlistMeta(),
+    };
+    return finalizeTelegramBoundary(out, { route: 'blocked' });
+}
+
+function captureConversationSafe({ route = 'none', message = '', source = 'user', skillHint = '' } = {}) {
+    const text = String(message || '').trim();
+    if (!text) return;
+    try {
+        captureConversation({
+            route,
+            source,
+            message: text,
+            skillHint: skillHint || route,
+            approvalState: 'staged',
+            bot_id: process.env.MOLTBOT_BOT_ID,
+            profile: process.env.MOLTBOT_PROFILE || process.env.OPENCLAW_PROFILE,
+        });
+    } catch (_) {
+        // Capture failures must not break bridge responses.
+    }
+}
+
+function splitWords(text) {
+    const raw = String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        // Telegram/bridge에서 literal "\\n"으로 들어온 경우도 실제 개행으로 취급
+        .replace(/\\n/g, '\n');
+
+    const byLines = raw
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+    let primaryTokens = byLines.length > 1
+        ? byLines
+        : raw
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+
+    if (primaryTokens.length === 1) {
+        const bySemicolon = String(primaryTokens[0] || '')
+            .split(/\s*[;；]\s*/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        if (bySemicolon.length > 1) {
+            primaryTokens = bySemicolon;
+        }
+    }
+
+    // 한 줄에 "Word 뜻 Word 뜻 ..." 형태로 붙여 보낼 때를 대비한 보정.
+    if (primaryTokens.length === 1) {
+        const compact = String(primaryTokens[0] || '').replace(/\s+/g, ' ').trim();
+        const looksPacked = (compact.match(/[A-Za-z][A-Za-z\-']*\s+[가-힣]/g) || []).length >= 2;
+        if (looksPacked) {
+            const packedSplit = compact
+                .split(/\s+(?=[A-Z][A-Za-z\-']*(?:\s+[a-z][A-Za-z\-']*){0,4}\s+[~\(\[]*[가-힣])/)
+                .map((v) => v.trim())
+                .filter(Boolean);
+            if (packedSplit.length > 1) {
+                primaryTokens = packedSplit;
+            }
+        }
+    }
+
+    const expanded = [];
+    for (const token of primaryTokens) {
+        const parts = String(token).split(/\s+\/\s+/).map((s) => s.trim()).filter(Boolean);
+        if (parts.length <= 1) {
+            expanded.push(token);
+            continue;
+        }
+        expanded.push(...parts);
+    }
+    return expanded;
+}
+
+function stripListPrefix(token) {
+    return String(token || '')
+        .replace(/^\s*[\-\*\u2022]+\s*/, '')
+        .replace(/^\s*\d+\s*[\.\)]\s*/, '')
+        .trim();
+}
+
+function normalizeWordParseInput(token) {
+    return String(token || '')
+        .replace(/[’‘`´]/g, "'")
+        .replace(/[–—]/g, '-')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeHintParseInput(hint) {
+    const normalized = String(hint || '')
+        .replace(/^[~\s]+/, '')
+        .replace(/[()[\]{}<>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized) return '';
+    if (/^[-–—~_./\\?]+$/.test(normalized)) return '';
+    const compact = normalized.replace(/\s+/g, '').toLowerCase();
+    if (new Set(['없음', '뜻없음', '모름', '몰라', 'unknown', 'none', 'null', 'na', 'n/a', 'x']).has(compact)) {
+        return '';
+    }
+    return normalized;
+}
+
+function parseWordToken(token) {
+    const clean = normalizeWordParseInput(stripListPrefix(token));
+    if (!clean) return null;
+
+    // 명시 구분자 우선 (:, |, " - ")
+    const explicit = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s*(?:[:：|=]|\s+-\s+)\s*(.+)$/);
+    if (explicit) {
+        return {
+            word: explicit[1].trim(),
+            hint: normalizeHintParseInput(explicit[2]),
+        };
+    }
+
+    // "word -", "word:", "word |" 같이 뜻이 비어있는 경우도 단어로 인식
+    const trailingEmptyHint = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s*(?:[:：|=]|-)\s*$/);
+    if (trailingEmptyHint) {
+        return {
+            word: trailingEmptyHint[1].trim(),
+            hint: '',
+        };
+    }
+
+    // "activate 활성화하다", "make it to ~에 참석하다", "wave (손,팔을) 흔들다" 형태 처리
+    const mixed = clean.match(/^([A-Za-z][A-Za-z\-'\s]{0,120}?)\s+[\(\[\{<~\s]*([가-힣].+)$/);
+    if (mixed) {
+        return {
+            word: mixed[1].trim(),
+            hint: normalizeHintParseInput(mixed[2]),
+        };
+    }
+
+    // 영어만 있으면 전체를 단어/구로 간주
+    if (/^[A-Za-z][A-Za-z\-'\s]{0,120}$/.test(clean)) {
+        return { word: clean.trim(), hint: '' };
+    }
+
+    return null;
+}
+
+function isKoreanHintFragment(token) {
+    const text = String(token || '').trim();
+    if (!text) return false;
+    if (/[A-Za-z]/.test(text)) return false;
+    if (!/[가-힣]/.test(text)) return false;
+    return /^[가-힣0-9\s,./()\-~·'"“”‘’]+$/.test(text);
+}
+
+function mergeDetachedHintTokens(tokens = []) {
+    const merged = [];
+    for (const raw of (Array.isArray(tokens) ? tokens : [])) {
+        const token = String(raw || '').trim();
+        if (!token) continue;
+
+        if (merged.length > 0 && isKoreanHintFragment(token)) {
+            const prev = String(merged[merged.length - 1] || '').trim();
+            const prevParsed = parseWordToken(prev);
+            if (prevParsed && String(prevParsed.hint || '').trim()) {
+                const joiner = /[,;]\s*$/.test(prevParsed.hint) ? ' ' : ', ';
+                const combinedHint = `${prevParsed.hint}${joiner}${token}`.trim();
+                merged[merged.length - 1] = `${prevParsed.word} ${combinedHint}`.trim();
+                continue;
+            }
+        }
+
+        merged.push(token);
+    }
+    return merged;
+}
+
+function buildToeicAnswer(word, hint) {
+    const meaning = hint || fallbackMeaning(word) || '(의미 보강 필요)';
+    return buildToeicAnswerRich(
+        word,
+        meaning,
+        fallbackExample(word),
+        '',
+        `${word} 관련 예문입니다.`,
+        'Part 5/6에서 자주 등장하는 문맥과 함께 암기하세요.',
+    );
+}
+
+async function enrichToeicWord(word, hint, options = {}) {
+    const quality = await createWordQuality(word, hint, options);
+    return {
+        meaning: quality.meaningKo,
+        example: quality.exampleEn,
+        exampleKo: quality.exampleKo,
+        toeicTip: quality.toeicTip,
+        partOfSpeech: quality.partOfSpeech || '',
+        lemma: quality.lemma || normalizeWordToken(word),
+        quality,
+    };
+}
+
+function buildToeicAnswerRich(word, meaningText, exampleText, partOfSpeech = '', exampleKo = '', toeicTip = '') {
+    const meaning = String(meaningText || '(의미 보강 필요)').trim();
+    const ex = String(exampleText || fallbackExample(word)).trim();
+    const pos = partOfSpeech ? `품사: ${partOfSpeech}<br>` : '';
+    const ko = String(exampleKo || `${word} 관련 예문입니다.`).trim();
+    const tip = String(toeicTip || 'Part 5/6 문맥에서 함께 출제되는 표현까지 암기하세요.').trim();
+    return [
+        `뜻: <b>${meaning}</b>`,
+        '<hr>',
+        `${pos}예문: <i>${ex}</i>`,
+        `예문 해석: ${ko}`,
+        '<hr>',
+        `💡 <b>TOEIC TIP:</b> ${tip}`,
+    ].join('<br>');
+}
+
+const OPS_ALLOWED_TARGETS = OPS_ALLOWED_TARGETS_CORE;
+const OPS_CAPABILITY_POLICY = OPS_CAPABILITY_POLICY_CORE;
+
+function normalizeOpsAction(value) {
+    return normalizeOpsActionCore(value);
+}
+
+function normalizeOpsCapabilityAction(capability, value) {
+    return normalizeOpsCapabilityActionCore(capability, value);
+}
+
+function buildCapabilityPayload(fields = {}) {
+    return buildCapabilityPayloadCore(fields);
+}
+
+function normalizeOpsTarget(value) {
+    return normalizeOpsTargetCore(value);
+}
+
+function execDocker(args) {
+    const res = spawnSync('docker', args, { encoding: 'utf8' });
+    return {
+        ok: !res.error && res.status === 0,
+        code: res.status == null ? 1 : res.status,
+        stdout: String(res.stdout || '').trim(),
+        stderr: String(res.stderr || '').trim(),
+        error: res.error ? String(res.error.message || res.error) : '',
+    };
+}
+
+function resolvePathFromEnv(envName, fallback) {
+    const raw = String(process.env[envName] || '').trim();
+    if (!raw) return fallback;
+    return path.isAbsolute(raw) ? raw : path.resolve(raw);
+}
+
+const OPS_QUEUE_PATH = resolvePathFromEnv(
+    'OPS_QUEUE_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'ops_requests.jsonl'),
+);
+const OPS_SNAPSHOT_PATH = resolvePathFromEnv(
+    'OPS_SNAPSHOT_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'ops_snapshot.json'),
+);
+const PROJECT_BOOTSTRAP_STATE_PATH = resolvePathFromEnv(
+    'OPS_PROJECT_BOOTSTRAP_STATE_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'project_bootstrap_last.json'),
+);
+const PENDING_APPROVALS_STATE_PATH = resolvePathFromEnv(
+    'OPS_PENDING_APPROVALS_STATE_PATH',
+    path.join(__dirname, '..', 'data', 'state', 'pending_approvals.json'),
+);
+const LAST_APPROVAL_HINTS_PATH = resolvePathFromEnv(
+    'OPS_LAST_APPROVAL_HINTS_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'ops_last_approval_hints.json'),
+);
+const FOLLOWUP_STATE_PATH = resolvePathFromEnv(
+    'BRIDGE_FOLLOWUP_STATE_PATH',
+    path.join(__dirname, '..', 'data', 'runtime', 'bridge_followup_state.json'),
+);
+const ROUTING_ADAPTIVE_KEYWORDS_PATH = resolvePathFromEnv(
+    'ROUTING_ADAPTIVE_KEYWORDS_PATH',
+    path.join(__dirname, '..', 'data', 'policy', 'routing_adaptive_keywords.json'),
+);
+
+function parsePositiveIntEnv(envName, fallback, minimum = 1) {
+    const parsed = Number(process.env[envName]);
+    if (!Number.isFinite(parsed) || parsed < minimum) return fallback;
+    return Math.floor(parsed);
+}
+
+const FOLLOWUP_TTL_MS = parsePositiveIntEnv('BRIDGE_FOLLOWUP_TTL_MS', DEFAULT_FOLLOWUP_TTL_MS, 1000);
+const FOLLOWUP_MAX_ENTRIES_PER_SESSION = parsePositiveIntEnv(
+    'BRIDGE_FOLLOWUP_MAX_ENTRIES_PER_SESSION',
+    DEFAULT_FOLLOWUP_MAX_ENTRIES_PER_SESSION,
+    1,
+);
+const FOLLOWUP_MAX_SESSIONS = parsePositiveIntEnv(
+    'BRIDGE_FOLLOWUP_MAX_SESSIONS',
+    DEFAULT_FOLLOWUP_MAX_SESSIONS,
+    1,
+);
+
+function parseTransportEnvelopeContext(text) {
+    return parseTransportEnvelopeContextCore(text);
+}
+
+function writeJsonFileSafe(filePath, payload) {
+    return writeJsonFileSafeCore(filePath, payload, {
+        fsModule: fs,
+        pathModule: path,
+    });
+}
+
+function readJsonFileSafe(filePath) {
+    return readJsonFileSafeCore(filePath, {
+        fsModule: fs,
+    });
+}
+
+function normalizeAdaptiveKeywordList(values) {
+    const source = Array.isArray(values) ? values : [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of source) {
+        const token = String(raw || '').trim();
+        if (!token) continue;
+        const key = token.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(token);
+    }
+    return out;
+}
+
+function loadRoutingAdaptiveKeywords() {
+    const raw = readJsonFileSafe(ROUTING_ADAPTIVE_KEYWORDS_PATH);
+    const data = raw && typeof raw === 'object' ? raw : {};
+    return {
+        todoStatsKeywords: normalizeAdaptiveKeywordList(data.todoStatsKeywords),
+        followupResultKeywords: normalizeAdaptiveKeywordList(data.followupResultKeywords),
+        inspectRootCauseKeywords: normalizeAdaptiveKeywordList(data.inspectRootCauseKeywords),
+        inspectImproveKeywords: normalizeAdaptiveKeywordList(data.inspectImproveKeywords),
+    };
+}
+
+function saveLastProjectBootstrap(fields = {}, bootstrap = null) {
+    return saveLastProjectBootstrapCore(fields, bootstrap, {
+        statePath: PROJECT_BOOTSTRAP_STATE_PATH,
+        writeJsonFileSafe,
+    });
+}
+
+function loadLastProjectBootstrap(maxAgeHours = 48) {
+    return loadLastProjectBootstrapCore(maxAgeHours, {
+        statePath: PROJECT_BOOTSTRAP_STATE_PATH,
+        readJsonFileSafe,
+    });
+}
+
+function resolveDefaultProjectBasePath() {
+    return resolveDefaultProjectBasePathCore({ pathModule: path });
+}
+
+function toProjectTemplatePayload(fields = {}, { forceExecute = false } = {}) {
+    return toProjectTemplatePayloadCore(fields, { forceExecute }, {
+        sanitizeProjectName,
+        resolveDefaultProjectBasePath,
+    });
+}
+
+function resolveHubDelegationTarget(route) {
+    return resolveHubDelegationTargetCore(route, {
+        active: HUB_DELEGATION_ACTIVE,
+        routeToProfile: HUB_DELEGATION.routeToProfile,
+    });
+}
+
+function enqueueHubDelegationCommand({ route, payload, originalMessage, rawText, telegramContext }) {
+    return enqueueHubDelegationCommandCore({
+        route,
+        payload,
+        originalMessage,
+        rawText,
+        telegramContext,
+    }, {
+        resolveHubDelegationTarget,
+        normalizeRequester: (context, fallback) => opsFileControl.normalizeRequester(context, fallback),
+        enqueueCapabilityCommand,
+        parseTransportEnvelopeContext,
+    });
+}
+
+function resolveOpsFilePolicy() {
+    return resolveOpsFilePolicyCore(config, {
+        loadPolicy: (inputConfig) => opsFileControl.loadPolicy(inputConfig),
+    });
+}
+
+function isUnifiedApprovalEnabled() {
+    return isUnifiedApprovalEnabledCore(config, process.env);
+}
+
+function normalizeOpsOptionFlags(value) {
+    return normalizeOpsOptionFlagsCore(value, {
+        normalizeApprovalFlags: (input) => opsFileControl.normalizeApprovalFlags(input),
+    });
+}
+
+function normalizeOpsFileIntent(value) {
+    return normalizeOpsFileIntentCore(value, {
+        normalizeIntentAction: (input) => opsFileControl.normalizeIntentAction(input),
+    });
+}
+
+function isFileControlAction(action) {
+    return isFileControlActionCore(action);
+}
+
+function enforceFileControlTelegramGuard(telegramContext, policy) {
+    return enforceFileControlTelegramGuardCore(telegramContext, policy);
+}
+
+function isApprovalGrantEnabled(policy) {
+    return isApprovalGrantEnabledCore(policy);
+}
+
+function parseApproveShorthand(text) {
+    return parseApproveShorthandCore(text, { normalizeOpsOptionFlags });
+}
+
+function parseDenyShorthand(text) {
+    return parseDenyShorthandCore(text);
+}
+
+function parseNaturalApprovalShorthand(text) {
+    return parseNaturalApprovalShorthandCore(text);
+}
+
+function normalizeOpsPayloadText(text) {
+    return normalizeOpsPayloadTextCore(text, {
+        parseApproveShorthand,
+        parseDenyShorthand,
+    });
+}
+
+function enqueueFileControlCommand(command = {}) {
+    return enqueueFileControlCommandCore(command, {
+        makeRequestId: (prefix) => opsCommandQueue.makeRequestId(prefix),
+        enqueueCommand: (payload) => opsCommandQueue.enqueueCommand(payload),
+    });
+}
+
+function enqueueCapabilityCommand(command = {}) {
+    return enqueueCapabilityCommandCore(command, {
+        makeRequestId: (prefix) => opsCommandQueue.makeRequestId(prefix),
+        enqueueCommand: (payload) => opsCommandQueue.enqueueCommand(payload),
+        env: process.env,
+    });
+}
+
+function isDockerPermissionError(errText) {
+    return /(EACCES|permission denied|Cannot connect to the Docker daemon|is the docker daemon running)/i.test(String(errText || ''));
+}
+
+function queueOpsRequest(action, targetKey, targets, reason = '') {
+    return queueOpsRequestCore(action, targetKey, targets, reason, {
+        fsModule: fs,
+        pathModule: path,
+        queuePath: OPS_QUEUE_PATH,
+    });
+}
+
+function isInlineApprovalExecutionEnabled() {
+    return isInlineApprovalExecutionEnabledCore(process.env);
+}
+
+function triggerInlineOpsWorker() {
+    return triggerInlineOpsWorkerCore({
+        env: process.env,
+        isInlineApprovalExecutionEnabled,
+        spawnSync,
+        pathModule: path,
+        bridgeDir: __dirname,
+    });
+}
+
+function readOpsSnapshot() {
+    return readOpsSnapshotCore(OPS_SNAPSHOT_PATH, {
+        fsModule: fs,
+    });
+}
+
+function readPendingApprovalsState() {
+    return readPendingApprovalsStateCore(PENDING_APPROVALS_STATE_PATH, {
+        fsModule: fs,
+    });
+}
+
+const {
+    readLastApprovalHints,
+    writeLastApprovalHints,
+    buildApprovalOwnerKey,
+    rememberLastApprovalHint,
+    readLastApprovalHint,
+    clearLastApprovalHint,
+    hasAnyApprovalHint,
+    findPendingApprovalByRequestId,
+    resolveApprovalTokenFromHint,
+    findApprovalTokenCandidates,
+    sortPendingApprovalsNewestFirst,
+    resolveApprovalTokenSelection,
+    mergeUniqueLower,
+    resolveApprovalFlagsForToken,
+} = createApprovalHintBindings({
+    readLastApprovalHintsCore,
+    writeLastApprovalHintsCore,
+    buildApprovalOwnerKeyCore,
+    rememberLastApprovalHintCore,
+    readLastApprovalHintCore,
+    clearLastApprovalHintCore,
+    hasAnyApprovalHintCore,
+    findPendingApprovalByRequestIdCore,
+    resolveApprovalTokenFromHintCore,
+    findApprovalTokenCandidatesCore,
+    sortPendingApprovalsNewestFirstCore,
+    resolveApprovalTokenSelectionCore,
+    mergeUniqueLowerCore,
+    resolveApprovalFlagsForTokenCore,
+}, {
+    fsModule: fs,
+    pathModule: path,
+    hintsPath: LAST_APPROVAL_HINTS_PATH,
+    readPendingApprovalsState: () => readPendingApprovalsState(),
+    readPendingToken: (key) => opsApprovalStore.readPendingToken(key),
+});
+
+function normalizeOpsStateBucket(state, statusText) {
+    return normalizeOpsStateBucketCore(state, statusText);
+}
+
+function buildOpsStatusRowsFromDocker(rawLines, targets) {
+    return buildOpsStatusRowsFromDockerCore(rawLines, targets);
+}
+
+function buildOpsStatusRowsFromSnapshot(snapshot, targets) {
+    return buildOpsStatusRowsFromSnapshotCore(snapshot, targets);
+}
+
+function buildOpsStatusReply(rows, options = {}) {
+    return buildOpsStatusReplyCore(rows, options);
+}
+
+function splitOpsBatchPayloads(payloadText) {
+    return splitOpsBatchPayloadsCore(payloadText);
+}
+
+function runOpsCommand(payloadText, options = {}) {
+    return runOpsCommandCore(payloadText, options, {
+        runOpsCommandSingle,
+    });
+}
+
+function handleOpsTokenAction(parsed) {
+    return handleOpsTokenActionCore(parsed, {
+        isUnifiedApprovalEnabled,
+        findApprovalTokenCandidates,
+    });
+}
+
+function handleOpsStatusAction(action, targetKey) {
+    return handleOpsStatusActionCore({
+        action,
+        targetKey,
+    }, {
+        allowedTargets: OPS_ALLOWED_TARGETS,
+        execDocker,
+        isDockerPermissionError,
+        readOpsSnapshot,
+        getTunnelPublicBaseUrl,
+        buildOpsStatusRowsFromSnapshot,
+        buildOpsStatusRowsFromDocker,
+        buildOpsStatusReply,
+    });
+}
+
+function handleOpsApproveAction(parsed, normalized, requestedBy, telegramContext, policy) {
+    return handleOpsApproveActionCore({
+        parsed,
+        normalized,
+        requestedBy,
+        telegramContext,
+        policy,
+    }, {
+        isUnifiedApprovalEnabled,
+        normalizeOpsOptionFlags,
+        triggerInlineOpsWorker,
+        resolveApprovalTokenFromHint,
+        resolveApprovalTokenSelection,
+        resolveApprovalFlagsForToken,
+        enqueueFileControlCommand,
+        normalizeOpsFileIntent,
+        clearLastApprovalHint,
+        isApprovalGrantEnabled,
+    });
+}
+
+function handleOpsDenyAction(parsed, normalized, requestedBy, telegramContext) {
+    return handleOpsDenyActionCore({
+        parsed,
+        normalized,
+        requestedBy,
+        telegramContext,
+    }, {
+        isUnifiedApprovalEnabled,
+        triggerInlineOpsWorker,
+        resolveApprovalTokenFromHint,
+        resolveApprovalTokenSelection,
+        enqueueFileControlCommand,
+        clearLastApprovalHint,
+    });
+}
+
+function handleOpsRestartAction(action, targetKey, parsed) {
+    return handleOpsRestartActionCore({
+        action,
+        targetKey,
+        parsed,
+    }, {
+        allowedTargets: OPS_ALLOWED_TARGETS,
+        queueOpsRequest,
+    });
+}
+
+function handleOpsFileAction(action, parsed, requestedBy, telegramContext) {
+    return handleOpsFileActionCore({
+        action,
+        parsed,
+        requestedBy,
+        telegramContext,
+    }, {
+        isUnifiedApprovalEnabled,
+        normalizeOpsFileIntent,
+        normalizeOpsOptionFlags,
+        enqueueFileControlCommand,
+    });
+}
+
+function handleOpsCapabilityAction(action, parsed, requestedBy, telegramContext, policy) {
+    return handleOpsCapabilityActionCore({
+        action,
+        parsed,
+        requestedBy,
+        telegramContext,
+        policy,
+    }, {
+        isUnifiedApprovalEnabled,
+        normalizeOpsCapabilityAction,
+        capabilityPolicyMap: OPS_CAPABILITY_POLICY,
+        buildCapabilityPayload,
+        normalizeOpsOptionFlags,
+        enqueueCapabilityCommand,
+        rememberLastApprovalHint,
+        isApprovalGrantEnabled,
+    });
+}
+
+function prepareOpsCommandContext(payloadText, options = {}) {
+    return prepareOpsCommandContextCore(payloadText, options, {
+        normalizeOpsPayloadText,
+        parseStructuredCommand,
+        normalizeOpsAction,
+        normalizeOpsTarget,
+        parseTransportEnvelopeContext,
+        resolveOpsFilePolicy,
+        normalizeRequester: (telegramContext, requestedBy) => opsFileControl.normalizeRequester(telegramContext, requestedBy),
+        isFileControlAction,
+        enforceFileControlTelegramGuard,
+    });
+}
+
+function dispatchOpsAction(context) {
+    return dispatchOpsActionCore(context, {
+        handleOpsStatusAction,
+        handleOpsTokenAction,
+        handleOpsRestartAction,
+        handleOpsFileAction,
+        handleOpsCapabilityAction,
+        handleOpsApproveAction,
+        handleOpsDenyAction,
+    });
+}
+
+function runOpsCommandSingle(payloadText, options = {}) {
+    const prepared = prepareOpsCommandContext(payloadText, options);
+    if (!prepared.ok) {
+        return prepared.result;
+    }
+    return dispatchOpsAction(prepared.context);
+}
+
+function normalizeHttpsBase(v) {
+    return normalizeHttpsBaseCore(v);
+}
+
+function getTunnelPublicBaseUrl() {
+    return getTunnelPublicBaseUrlCore({ getPublicBases });
+}
+
+function getPublicBases() {
+    return getPublicBasesCore({
+        env: process.env,
+        pathModule: path,
+        fsModule: fs,
+        bridgeDir: __dirname,
+        execDocker,
+    });
+}
+
+function buildExternalLinksText() {
+    return buildExternalLinksTextCore({ getPublicBases });
+}
+
+function rewriteLocalLinks(text, bases) {
+    return rewriteLocalLinksCore(text, bases);
+}
+
+function appendExternalLinks(reply) {
+    return appendExternalLinksCore(reply, {
+        getPublicBases,
+        rewriteLocalLinks,
+        buildExternalLinksText,
+    });
+}
+
+function parseReportModeCommand(text) {
+    return parseReportModeCommandCore(text);
+}
+
+function finalizeTelegramBoundary(base, metaInput = {}) {
+    return finalizeTelegramBoundaryCore(base, metaInput, {
+        appendExternalLinks,
+        parseTransportEnvelopeContext,
+        normalizeRequester: opsFileControl.normalizeRequester,
+        finalizeTelegramReply: (text, context) => telegramFinalizer.finalizeTelegramReply(text, context),
+        sanitizeForUser: (text) => {
+            if (telegramFinalizer && typeof telegramFinalizer.sanitizeForUser === 'function') {
+                return telegramFinalizer.sanitizeForUser(text);
+            }
+            const raw = String(text || '').trim();
+            return raw || '실패\n원인: 내부 실행 오류가 발생했어.\n다음 조치: 잠시 후 다시 시도해줘.';
+        },
+        env: process.env,
+    });
+}
+
+function isExternalLinkRequest(text) {
+    return isExternalLinkRequestCore(text);
+}
+
+function buildLinkOnlyReply(text) {
+    return buildLinkOnlyReplyCore(text, {
+        getPublicBases,
+        buildLinkDiagnosticsText,
+    });
+}
+
+function probeUrlStatus(url) {
+    return probeUrlStatusCore(url, { spawnSync });
+}
+
+function buildLinkDiagnosticsText() {
+    return buildLinkDiagnosticsTextCore({
+        bridgeDir: __dirname,
+        pathModule: path,
+        spawnSync,
+        getPublicBases,
+        probeUrlStatus,
+    });
+}
+
+function buildQuickStatusReply(payload) {
+    return buildQuickStatusReplyCore(payload, {
+        runOpsCommand,
+        buildLinkDiagnosticsText,
+        appendExternalLinks,
+    });
+}
+
+function buildNoPrefixGuide() {
+    return buildNoPrefixGuideCore();
+}
+
+function inferPathListReply(inputText) {
+    return inferPathListReplyCore(inputText, {
+        normalizeIncomingCommandText,
+        extractPreferredProjectBasePath,
+        readDirectoryListPreview,
+    });
+}
+
+function buildDailyCasualNoPrefixReply(inputText) {
+    return buildDailyCasualNoPrefixReplyCore(inputText, {
+        normalizeIncomingCommandText,
+        inferPathListReply,
+    });
+}
+
+function buildDuelModeMeta() {
+    return {
+        enabled: true,
+        mode: 'two-pass',
+        maxRounds: 1,
+        timeoutMs: 120000,
+        logPath: MODEL_DUEL_LOG_PATH,
+    };
+}
+
+function buildCodexDegradedMeta() {
+    const safeMode = String(process.env.RATE_LIMIT_SAFE_MODE || '').trim().toLowerCase() === 'true';
+    if (!safeMode) return { enabled: false };
+    return {
+        enabled: true,
+        reason: 'rate_limit_safe_mode',
+        notice: 'Codex unavailable or intentionally throttled. Falling back to non-codex route.',
+    };
+}
+
+function buildApiRoutingMeta({ route, routeHint = '', commandText = '', templateFields = {} }) {
+    const decision = decideApiLane({
+        route,
+        routeHint,
+        commandText,
+        templateFields,
+    });
+    return {
+        apiLane: decision.apiLane,
+        apiAuthMode: decision.authMode,
+        apiReason: decision.reason,
+        apiBlocked: Boolean(decision.blocked),
+        apiBlockReason: decision.blockReason || '',
+        apiFallbackLane: decision.fallbackLane || null,
+        apiCapabilities: Array.isArray(decision.capabilities) ? decision.capabilities : [],
+    };
+}
+
+function withApiMeta(base, metaInput) {
+    const prepared = finalizeTelegramBoundary(base, metaInput);
+    return {
+        ...prepared,
+        ...buildApiRoutingMeta(metaInput),
+        ...allowlistMeta(),
+    };
+}
+
+function pickPreferredModelMeta(result, fallbackAlias = 'fast', fallbackReasoning = 'low') {
+    const source = (result && typeof result === 'object') ? result : {};
+    const alias = String(source.preferredModelAlias || '').trim() || String(fallbackAlias || 'fast').trim() || 'fast';
+    const reasoningRaw = String(source.preferredReasoning || '').trim().toLowerCase();
+    const fallbackRaw = String(fallbackReasoning || 'low').trim().toLowerCase();
+    const allowed = new Set(['low', 'medium', 'high']);
+    const reasoning = allowed.has(reasoningRaw)
+        ? reasoningRaw
+        : (allowed.has(fallbackRaw) ? fallbackRaw : 'low');
+    return {
+        preferredModelAlias: alias,
+        preferredReasoning: reasoning,
+    };
+}
+
+function clampPreview(value, maxLen = 600) {
+    return clampPreviewCore(value, maxLen);
+}
+
+function executeProjectBootstrapScript(bootstrap) {
+    return executeProjectBootstrapScriptCore(bootstrap, {
+        redact: (text) => opsLogger.redact(String(text || '')),
+        spawnSync,
+        timeoutMs: Number(process.env.PROJECT_BOOTSTRAP_TIMEOUT_MS || 180000),
+    });
+}
+
+function readDirectoryListPreview(targetPath, maxLen = 1600) {
+    return readDirectoryListPreviewCore(targetPath, maxLen, {
+        redact: (text) => opsLogger.redact(String(text || '')),
+        spawnSync,
+    });
+}
+
+function buildProjectRoutePayload(parsed) {
+    return buildProjectRoutePayloadCore(parsed, {
+        buildProjectBootstrapPlan,
+        saveLastProjectBootstrap,
+        appendExternalLinks,
+        executeProjectBootstrapScript,
+        readDirectoryListPreview,
+    });
+}
+
+function parseStructuredCommand(route, payloadText) {
+    return parseStructuredCommandCore(route, payloadText);
+}
+
+function resolveWorkspaceRootHint() {
+    return resolveWorkspaceRootHintCore({
+        env: process.env,
+        fsModule: fs,
+        pathModule: path,
+        fallbackWorkspaceRoot: path.resolve(__dirname, '..'),
+    });
+}
+
+function normalizeIncomingCommandText(text) {
+    return normalizeIncomingCommandTextCore(text, { resolveWorkspaceRootHint });
+}
+
+function normalizeNewsCommandPayload(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return '';
+    const lower = raw.toLowerCase();
+
+    if (lower === '상태' || lower === 'status') return '상태';
+    if (lower === '지금요약' || lower === '요약' || lower === 'summary') return '지금요약';
+    if (lower === '트렌드' || lower === 'trend') return '지금요약';
+    if (lower === '이벤트' || lower === 'event') return '이벤트';
+    if (lower === '도움말' || lower === 'help') return '도움말';
+
+    // Natural phrases like "테크 트렌드 요약" should map to digest.
+    if (lower.includes('요약') && (lower.includes('트렌드') || lower.includes('테크'))) {
+        return '지금요약';
+    }
+    if (lower.includes('트렌드') || lower.includes('trend')) {
+        return '지금요약';
+    }
+
+    return raw;
+}
+
+function normalizeReportNewsPayload(text) {
+    const normalized = String(normalizeNewsCommandPayload(text) || '').trim();
+    if (!normalized) return '지금요약';
+    if (/^(상태|지금요약|이벤트|도움말)$/i.test(normalized)) return normalized;
+    if (/^(키워드|소스)\b/i.test(normalized)) return normalized;
+    return '지금요약';
+}
+
+function normalizeMonthToken(rawValue) {
+    return normalizeMonthTokenCore(rawValue);
+}
+
+function extractMemoStatsPayload(text) {
+    return extractMemoStatsPayloadCore(text, { normalizeMonthToken });
+}
+
+function isLikelyMemoJournalBlock(text) {
+    return isLikelyMemoJournalBlockCore(text);
+}
+
+function stripNaturalMemoLead(text) {
+    return stripNaturalMemoLeadCore(text);
+}
+
+function inferMemoIntentPayload(text) {
+    return inferMemoIntentPayloadCore(text, {
+        extractMemoStatsPayload,
+        isLikelyMemoJournalBlock,
+        stripNaturalMemoLead,
+    });
+}
+
+function inferWordIntentPayload(text) {
+    return inferWordIntentPayloadCore(text);
+}
+
+function inferFinanceIntentPayload(text) {
+    return inferFinanceIntentPayloadCore(text);
+}
+
+function inferTodoIntentPayload(text) {
+    const adaptive = loadRoutingAdaptiveKeywords();
+    return inferTodoIntentPayloadCore(text, {
+        adaptiveKeywords: adaptive.todoStatsKeywords,
+    });
+}
+
+function inferRoutineIntentPayload(text) {
+    return inferRoutineIntentPayloadCore(text);
+}
+
+function inferWorkoutIntentPayload(text) {
+    return inferWorkoutIntentPayloadCore(text);
+}
+
+function inferWorkIntentPayload(text) {
+    const adaptive = loadRoutingAdaptiveKeywords();
+    return inferWorkIntentPayloadCore(text, {
+        inspectRootCauseKeywords: adaptive.inspectRootCauseKeywords,
+        inspectImproveKeywords: adaptive.inspectImproveKeywords,
+    });
+}
+
+function inferInspectIntentPayload(text) {
+    const adaptive = loadRoutingAdaptiveKeywords();
+    return inferInspectIntentPayloadCore(text, {
+        inspectRootCauseKeywords: adaptive.inspectRootCauseKeywords,
+        inspectImproveKeywords: adaptive.inspectImproveKeywords,
+    });
+}
+
+function inferBrowserIntentPayload(text) {
+    return inferBrowserIntentPayloadCore(text);
+}
+
+function inferScheduleIntentPayload(text) {
+    return inferScheduleIntentPayloadCore(text);
+}
+
+function inferGogLookupIntentPayload(text) {
+    return inferGogLookupIntentPayloadCore(text);
+}
+
+function inferStatusIntentPayload(text) {
+    return inferStatusIntentPayloadCore(text);
+}
+
+function inferLinkIntentPayload(text) {
+    return inferLinkIntentPayloadCore(text, { isExternalLinkRequest });
+}
+
+function inferReportIntentPayload(text) {
+    return inferReportIntentPayloadCore(text);
+}
+
+function extractPreferredProjectBasePath(text) {
+    return extractPreferredProjectBasePathCore(text, { resolveWorkspaceRootHint, pathModule: path });
+}
+
+function inferProjectIntentPayload(text) {
+    return inferProjectIntentPayloadCore(text, {
+        extractPreferredProjectBasePath,
+        loadLastProjectBootstrap,
+        resolveDefaultProjectBasePath,
+        toProjectTemplatePayload,
+    });
+}
+
+function inferNaturalLanguageRoute(text, options = {}) {
+    return inferNaturalLanguageRouteCore(text, options, {
+        NATURAL_LANGUAGE_ROUTING,
+        isHubRuntime,
+        isResearchRuntime,
+        isWordRuntime,
+        normalizeIncomingCommandText,
+        inferWordIntentPayload,
+        inferMemoIntentPayload,
+        inferFinanceIntentPayload,
+        inferTodoIntentPayload,
+        inferRoutineIntentPayload,
+        inferWorkoutIntentPayload,
+        inferWorkIntentPayload,
+        inferInspectIntentPayload,
+        inferBrowserIntentPayload,
+        inferScheduleIntentPayload,
+        inferGogLookupIntentPayload,
+        inferStatusIntentPayload,
+        inferLinkIntentPayload,
+        inferProjectIntentPayload,
+        inferReportIntentPayload,
+    });
+}
+
+function routeByPrefix(text) {
+    return routeByPrefixCore(text, {
+        commandPrefixes: config.commandPrefixes || {},
+        normalizeIncomingCommandText,
+        parseApproveShorthand,
+        parseDenyShorthand,
+        parseNaturalApprovalShorthand,
+        readPendingApprovalsState,
+        hasAnyApprovalHint,
+        inferNaturalLanguageRoute,
+        env: process.env,
+    });
+}
+
 function buildGogNoPrefixGuide(inputText) {
     const raw = normalizeIncomingCommandText(inputText) || String(inputText || '').trim();
     if (!raw) return '';
@@ -2646,9 +1801,6 @@ function isWeakEnrichment(word, hint, enriched, threshold = DEFAULT_QUALITY_POLI
             'tip_not_specific',
             'tip_lacks_detail',
         ];
-        if (!hasHint) {
-            criticalWarningPrefixes.push('example_not_toeic_context', 'example_missing_target');
-        }
         const effectiveThreshold = hasHint
             ? Math.min(Number(threshold || DEFAULT_QUALITY_POLICY.qualityThreshold || 0.82), 0.45)
             : Number(threshold || DEFAULT_QUALITY_POLICY.qualityThreshold || 0.82);
@@ -2671,6 +1823,12 @@ function safeRecordVocabLog(row, options = {}) {
 }
 
 async function processWordTokens(text, toeicDeck, toeicTags, options = {}) {
+    const wordReadResult = handleWordReadCommand(text, {
+        ...options,
+        dbPath: options.dbPath || process.env.PERSONAL_DB_PATH,
+    });
+    if (wordReadResult) return wordReadResult;
+
     const configuredPolicy = normalizeQualityPolicy(config.ankiQualityPolicy || {});
     const runtimePolicy = normalizeQualityPolicy(options.qualityPolicy || configuredPolicy);
     const dedupeMode = String(options.dedupeMode || config.ankiQualityPolicy?.dedupeMode || 'allow').toLowerCase();
@@ -3043,6 +2201,67 @@ async function handlePersonalRoute(route, payload, options = {}) {
     };
 }
 
+function buildDispatchDepsForMain(opsContext) {
+    const adaptiveKeywords = loadRoutingAdaptiveKeywords();
+    return buildBridgeDispatchDeps({
+        opsContext,
+    }, {
+        opsLogger,
+        handleDirectBridgeCommand,
+        engine,
+        anki,
+        config,
+        parseStructuredCommand,
+        appendExternalLinks,
+        withApiMeta,
+        buildCodexDegradedMeta,
+        buildDuelModeMeta,
+        buildProjectRoutePayload,
+        parseTransportEnvelopeContext,
+        runOpsCommand,
+        handlePersonalRoute,
+        processWordTokens,
+        normalizeNewsCommandPayload,
+        pickPreferredModelMeta,
+        handlePromptPayload,
+        loadNewsDigest: () => require('./news_digest'),
+        handleAutoBridgeCommand,
+        normalizeIncomingCommandText,
+        normalizeRequester: opsFileControl.normalizeRequester,
+        handleCodexBotAutoCommand,
+        parseReportModeCommand,
+        writeReportMode: telegramFinalizer.writeReportMode,
+        routeByPrefix,
+        captureConversationSafe,
+        isResultFollowupQuery: isResultFollowupQueryCore,
+        resolveRecentResult: resolveRecentResultCore,
+        rememberActionableResult: rememberActionableResultCore,
+        followupStatePath: FOLLOWUP_STATE_PATH,
+        followupTtlMs: FOLLOWUP_TTL_MS,
+        followupMaxEntriesPerSession: FOLLOWUP_MAX_ENTRIES_PER_SESSION,
+        followupMaxSessions: FOLLOWUP_MAX_SESSIONS,
+        followupResultKeywords: adaptiveKeywords.followupResultKeywords,
+        isAutoRouteAllowed,
+        buildAllowlistBlockedResponse,
+        enqueueHubDelegationCommand,
+        handleAutoRoutedCommand,
+        normalizeReportNewsPayload,
+        isResearchRuntime,
+        buildLinkOnlyReply,
+        buildQuickStatusReply,
+        inferPathListReply,
+        buildGogNoPrefixGuide,
+        buildNoPrefixReply: buildNoPrefixReplyCore,
+        isHubRuntime,
+        buildDailyCasualNoPrefixReply,
+        buildNoPrefixGuide,
+        loadMemoJournal: () => require('./memo_journal'),
+        loadBlogPublisher: () => require('./blog_publish_from_reports'),
+        loadWeeklyReport: () => require('./weekly_report'),
+        loadDailySummary: () => require('./daily_summary'),
+    });
+}
+
 async function main() {
     const [, , command, ...args] = process.argv;
     const fullText = args.join(' ');
@@ -3051,569 +2270,73 @@ async function main() {
     const toeicTags = Array.isArray(config.ankiPolicy?.autoTags) ? config.ankiPolicy.autoTags : ['moltbot', 'toeic_ai'];
     const maxAttempts = RETRY_SAFE_COMMANDS.has(normalizedCommand) ? 3 : 1;
     let attempt = 1;
-    let finalError = null;
-    let finalStatus = 'ok';
-    let finalSeverity = 'P3';
-    let finalMessage = 'Run completed successfully.';
-    const opsContext = opsLogger.startRun({
-        component: 'bridge',
-        action: normalizedCommand || 'unknown',
-        max_attempts: maxAttempts,
-        message: 'Bridge command run started.',
-        metrics: {
-            args_count: args.length,
-        },
+    const runOutcome = createBridgeRunOutcome();
+    const lifecycle = startBridgeRunLifecycle({
+        normalizedCommand,
+        maxAttempts,
+        argsCount: args.length,
+    }, {
+        opsLogger,
     });
-    const stopHeartbeat = opsLogger.startHeartbeatTicker(opsContext, {
-        interval_ms: 5 * 60 * 1000,
-        component: 'bridge',
-        action: 'bridge_heartbeat',
-        message: 'Bridge run heartbeat.',
-    });
+    const { opsContext, stopHeartbeat } = lifecycle;
 
     try {
-        opsLogger.logStep(opsContext, {
-            component: 'bridge',
-            action: 'command_received',
-            message: `Command received: ${normalizedCommand || 'none'}.`,
-            metrics: { args_count: args.length },
+        const execution = await executeBridgeMainExecution({
+            normalizedCommand,
+            fullText,
+            argsCount: args.length,
+            maxAttempts,
+            attempt,
+            command,
+            args,
+            toeicDeck,
+            toeicTags,
+            env: process.env,
+            opsContext,
+            runOutcome,
+        }, {
+            opsLogger,
+            runBridgePreflight,
+            captureConversationSafe,
+            knownDirectCommands: KNOWN_DIRECT_COMMANDS,
+            isDirectCommandAllowed,
+            buildAllowlistBlockedResponse,
+            markCommandAllowlistBlocked,
+            emitOutput: (output) => console.log(JSON.stringify(output)),
+            buildDispatchDeps: (contextOps) => buildDispatchDepsForMain(contextOps),
+            executeBridgeRunLoop,
+            dispatchBridgeCommandOnce,
+            markAutoRouteAllowlistBlocked,
+            markRunSuccess,
+            isRetriableError,
+            buildBridgeRetryLogPayload,
+            sleep,
+            retryBackoffMs: RETRY_BACKOFF_MS,
         });
-
-        if (normalizedCommand && normalizedCommand !== 'auto') {
-            const rawCommandText = fullText
-                ? `${normalizedCommand}: ${fullText}`
-                : normalizedCommand;
-            captureConversationSafe({
-                route: normalizedCommand,
-                message: rawCommandText,
-                source: 'user',
-                skillHint: normalizedCommand,
-            });
-        }
-
-        if (KNOWN_DIRECT_COMMANDS.has(normalizedCommand) && !isDirectCommandAllowed(normalizedCommand)) {
-            console.log(JSON.stringify(buildAllowlistBlockedResponse({
-                requestedCommand: normalizedCommand,
-            })));
-            finalStatus = 'warn';
-            finalSeverity = 'P3';
-            finalMessage = 'Command blocked by allowlist policy.';
+        attempt = execution.attempt;
+        if (execution.blocked) {
             return;
         }
-
-        while (attempt <= maxAttempts) {
-            try {
-                if (attempt > 1) {
-                    opsLogger.logStep(opsContext, {
-                        component: 'bridge',
-                        action: 'retry_dispatch',
-                        message: `Retry dispatch attempt ${attempt}/${maxAttempts}.`,
-                        status: 'warn',
-                        severity: 'P3',
-                        attempt,
-                        max_attempts: maxAttempts,
-                    });
-                } else {
-                    opsLogger.logStep(opsContext, {
-                        component: 'bridge',
-                        action: 'dispatch',
-                        message: `Dispatching command ${normalizedCommand || 'none'}.`,
-                        attempt,
-                        max_attempts: maxAttempts,
-                    });
-                }
-
-                switch (normalizedCommand) {
-            case 'checklist': {
-                const checkResult = await engine.recordActivity(fullText);
-                console.log(JSON.stringify(checkResult));
-                break;
-            }
-
-            case 'summary': {
-                const summary = await engine.getTodaySummary();
-                console.log(JSON.stringify(summary));
-                break;
-            }
-
-            case 'work': {
-                // usage: node bridge.js work "요청: ...; 대상: ...; 완료기준: ..."
-                const parsed = parseStructuredCommand('work', fullText);
-                const telegramReply = appendExternalLinks(parsed.telegramReply || '');
-                const degradedMode = buildCodexDegradedMeta();
-                const routeHint = 'complex-workload';
-                console.log(JSON.stringify(withApiMeta({
-                    route: 'work',
-                    templateValid: parsed.ok,
-                    ...parsed,
-                    telegramReply,
-                    duelMode: buildDuelModeMeta(),
-                    degradedMode,
-                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                    preferredReasoning: 'high',
-                    routeHint,
-                }, {
-                    route: 'work',
-                    routeHint,
-                    commandText: fullText,
-                    templateFields: parsed.fields || {},
-                })));
-                break;
-            }
-
-            case 'inspect': {
-                // usage: node bridge.js inspect "대상: ...; 체크항목: ..."
-                const parsed = parseStructuredCommand('inspect', fullText);
-                const telegramReply = appendExternalLinks(parsed.telegramReply || '');
-                const degradedMode = buildCodexDegradedMeta();
-                const routeHint = 'inspection';
-                console.log(JSON.stringify(withApiMeta({
-                    route: 'inspect',
-                    templateValid: parsed.ok,
-                    ...parsed,
-                    telegramReply,
-                    degradedMode,
-                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                    preferredReasoning: 'medium',
-                    routeHint,
-                }, {
-                    route: 'inspect',
-                    routeHint,
-                    commandText: fullText,
-                    templateFields: parsed.fields || {},
-                })));
-                break;
-            }
-
-            case 'deploy': {
-                // usage: node bridge.js deploy "대상: ...; 환경: ...; 검증: ..."
-                const parsed = parseStructuredCommand('deploy', fullText);
-                const telegramReply = appendExternalLinks(parsed.telegramReply || '');
-                const degradedMode = buildCodexDegradedMeta();
-                const routeHint = 'deployment';
-                console.log(JSON.stringify(withApiMeta({
-                    route: 'deploy',
-                    templateValid: parsed.ok,
-                    ...parsed,
-                    telegramReply,
-                    degradedMode,
-                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                    preferredReasoning: 'high',
-                    routeHint,
-                }, {
-                    route: 'deploy',
-                    routeHint,
-                    commandText: fullText,
-                    templateFields: parsed.fields || {},
-                })));
-                break;
-            }
-
-            case 'project': {
-                // usage: node bridge.js project "프로젝트명: ...; 목표: ...; 스택: ...; 경로: ...; 완료기준: ..."
-                const parsed = parseStructuredCommand('project', fullText);
-                const payload = buildProjectRoutePayload(parsed);
-                const degradedMode = buildCodexDegradedMeta();
-                const routeHint = 'project-bootstrap';
-                console.log(JSON.stringify(withApiMeta({
-                    ...payload,
-                    degradedMode,
-                    preferredModelAlias: degradedMode.enabled ? 'deep' : 'codex',
-                    preferredReasoning: 'high',
-                    routeHint,
-                }, {
-                    route: 'project',
-                    routeHint,
-                    commandText: fullText,
-                    templateFields: parsed.fields || {},
-                })));
-                break;
-            }
-
-            case 'ops': {
-                const telegramContext = parseTransportEnvelopeContext(fullText);
-                const out = runOpsCommand(fullText, {
-                    rawText: fullText,
-                    telegramContext,
-                });
-                if (out && out.telegramReply) {
-                    out.telegramReply = appendExternalLinks(out.telegramReply);
-                }
-                console.log(JSON.stringify(withApiMeta(out, {
-                    route: 'ops',
-                    commandText: fullText,
-                })));
-                break;
-            }
-
-            case 'word': {
-                // usage: node bridge.js word "Activated 활성화된, Formulate"
-                const wordReadResult = handleWordReadCommand(fullText, {
-                    dbPath: process.env.PERSONAL_DB_PATH,
-                });
-                const wordResult = wordReadResult || await processWordTokens(fullText, toeicDeck, toeicTags, {
-                    source: 'telegram',
-                    rawText: `단어: ${fullText}`,
-                });
-                console.log(JSON.stringify(withApiMeta({
-                    route: 'word',
-                    ...wordResult,
-                    preferredModelAlias: 'gpt',
-                    preferredReasoning: wordReadResult ? 'low' : 'high',
-                }, {
-                    route: 'word',
-                    commandText: fullText,
-                })));
-                break;
-            }
-
-            case 'finance':
-            case 'todo':
-            case 'routine':
-            case 'workout':
-            case 'media':
-            case 'place': {
-                const out = await handlePersonalRoute(normalizedCommand, fullText, {
-                    source: 'telegram',
-                });
-                console.log(JSON.stringify(withApiMeta(out, {
-                    route: normalizedCommand,
-                    commandText: fullText,
-                })));
-                break;
-            }
-
-            case 'news': {
-                // usage: node bridge.js news "상태|지금요약|키워드 추가 ..."
-                try {
-                    const newsDigest = require('./news_digest');
-                    const payload = [args[0], ...args.slice(1)].join(' ').trim() || fullText;
-                    const normalizedPayload = normalizeNewsCommandPayload(payload);
-                    const result = await newsDigest.handleNewsCommand(normalizedPayload);
-                    const modelMeta = pickPreferredModelMeta(result, 'fast', 'low');
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'news',
-                        ...result,
-                        ...modelMeta,
-                    }, {
-                        route: 'news',
-                        commandText: normalizedPayload,
-                    })));
-                } catch (error) {
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'news',
-                        success: false,
-                        errorCode: error && error.code ? error.code : 'NEWS_ROUTE_LOAD_FAILED',
-                        error: String(error && error.message ? error.message : error),
-                        telegramReply: `소식 모듈 로드 실패: ${error && error.message ? error.message : error}`,
-                        preferredModelAlias: 'fast',
-                        preferredReasoning: 'low',
-                    }, {
-                        route: 'news',
-                        commandText: fullText,
-                    })));
-                }
-                break;
-            }
-
-            case 'prompt': {
-                // usage:
-                // node bridge.js prompt "목적: ..."
-                // node bridge.js prompt "답변 pf_xxx | 출력형식: 표"
-                // node bridge.js prompt "완성 pf_xxx"
-                const out = handlePromptPayload(fullText);
-                if (out && out.telegramReply) {
-                    out.telegramReply = appendExternalLinks(out.telegramReply);
-                }
-                console.log(JSON.stringify(withApiMeta({
-                    route: 'prompt',
-                    ...out,
-                }, {
-                    route: 'prompt',
-                    commandText: fullText,
-                })));
-                break;
-            }
-
-            case 'anki': {
-                // usage: node bridge.js anki add "deckName" "Front" "Back" "tag1,tag2"
-                // usage: node bridge.js anki decks
-                const subCmd = args[0];
-                if (subCmd === 'add') {
-                    const deck = args[1];
-                    const front = args[2];
-                    let back = args[3];
-                    const tags = args[4]
-                        ? args[4].split(',').map((v) => v.trim()).filter(Boolean)
-                        : toeicTags;
-
-                    if (!front || !back) {
-                        throw new Error('Usage: anki add <deck> <front> <back> [tags]');
-                    }
-
-                    const finalDeck = deck || toeicDeck;
-                    back = back.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
-
-                    const dedupeMode = String(config.ankiQualityPolicy?.dedupeMode || 'allow').toLowerCase();
-                    const result = await anki.addCard(finalDeck, front, back, tags, { dedupeMode });
-                    const noteMeta = typeof result === 'object' ? result : { noteId: result };
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'anki',
-                        success: true,
-                        deck: finalDeck,
-                        ...noteMeta,
-                    }, {
-                        route: 'anki',
-                        commandText: fullText,
-                    })));
-                } else if (subCmd === 'decks') {
-                    const decks = await anki.getDeckNames();
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'anki',
-                        decks,
-                    }, {
-                        route: 'anki',
-                        commandText: fullText,
-                    })));
-                } else {
-                    throw new Error(`Unknown anki command: ${subCmd}`);
-                }
-                break;
-            }
-
-            case 'auto': {
-                // usage: node bridge.js auto "단어: activate 활성화하다"
-                const normalizedAutoMessage = normalizeIncomingCommandText(fullText) || String(fullText || '').trim();
-                const autoTelegramContext = parseTransportEnvelopeContext(fullText);
-                const autoRequestedBy = opsFileControl.normalizeRequester(autoTelegramContext, 'bridge:auto');
-                const personaInfoCommand = parsePersonaInfoCommand(normalizedAutoMessage);
-                if (personaInfoCommand.matched) {
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'none',
-                        success: true,
-                        telegramContext: autoTelegramContext,
-                        requestedBy: autoRequestedBy,
-                        telegramReply: buildPersonaStatusReply({
-                            telegramContext: autoTelegramContext,
-                            requestedBy: autoRequestedBy,
-                        }),
-                    }, {
-                        route: 'none',
-                        routeHint: 'persona-status',
-                        commandText: fullText,
-                        telegramContext: autoTelegramContext,
-                        requestedBy: autoRequestedBy,
-                    })));
-                    break;
-                }
-                const reportModeCommand = parseReportModeCommand(normalizedAutoMessage);
-                if (reportModeCommand.matched) {
-                    if (!reportModeCommand.valid) {
-                        console.log(JSON.stringify(withApiMeta({
-                            route: 'report',
-                            success: false,
-                            telegramContext: autoTelegramContext,
-                            requestedBy: autoRequestedBy,
-                            telegramReply: '지원하지 않는 REPORT_MODE 입니다. 사용 가능: /report ko 또는 /report ko+en',
-                        }, {
-                            route: 'report',
-                            routeHint: 'report-mode',
-                            commandText: fullText,
-                            telegramContext: autoTelegramContext,
-                            requestedBy: autoRequestedBy,
-                        })));
-                        break;
-                    }
-                    telegramFinalizer.writeReportMode({
-                        telegramContext: autoTelegramContext,
-                        requestedBy: autoRequestedBy,
-                        mode: reportModeCommand.mode,
-                    });
-                    console.log(JSON.stringify(withApiMeta({
-                        route: 'report',
-                        success: true,
-                        telegramContext: autoTelegramContext,
-                        requestedBy: autoRequestedBy,
-                        telegramReply: `REPORT_MODE=${reportModeCommand.mode} 로 설정됨`,
-                    }, {
-                        route: 'report',
-                        routeHint: 'report-mode',
-                        commandText: fullText,
-                        telegramContext: autoTelegramContext,
-                        requestedBy: autoRequestedBy,
-                    })));
-                    break;
-                }
-                const routed = routeByPrefix(normalizedAutoMessage);
-                opsLogger.logStep(opsContext, {
-                    component: 'router',
-                    action: 'auto_route',
-                    message: `Auto route resolved to ${routed.route || 'none'}.`,
-                });
-                captureConversationSafe({
-                    route: routed.route || 'none',
-                    message: fullText,
-                    source: 'user',
-                    skillHint: routed.route || 'none',
-                });
-                if (!isAutoRouteAllowed(routed.route)) {
-                    console.log(JSON.stringify(buildAllowlistBlockedResponse({
-                        requestedCommand: 'auto',
-                        requestedRoute: routed.route,
-                    })));
-                    finalStatus = 'warn';
-                    finalSeverity = 'P3';
-                    finalMessage = 'Auto route blocked by allowlist policy.';
-                    break;
-                }
-                const delegated = enqueueHubDelegationCommand({
-                    route: routed.route,
-                    payload: routed.payload,
-                    originalMessage: normalizedAutoMessage,
-                    rawText: fullText,
-                    telegramContext: autoTelegramContext,
-                });
-                if (delegated) {
-                    console.log(JSON.stringify(withApiMeta(delegated, {
-                        route: routed.route,
-                        routeHint: `hub-delegation:${delegated.targetProfile}`,
-                        commandText: normalizedAutoMessage,
-                    })));
-                    break;
-                }
-                const autoRouteResult = await handleAutoRoutedCommand({
-                    routed,
-                    fullText,
-                    toeicDeck,
-                    toeicTags,
-                    env: process.env,
-                }, {
-                    withApiMeta,
-                    appendExternalLinks,
-                    pickPreferredModelMeta,
-                    normalizeNewsCommandPayload,
-                    normalizeReportNewsPayload,
-                    isResearchRuntime,
-                    parseStructuredCommand,
-                    buildCodexDegradedMeta,
-                    buildDuelModeMeta,
-                    buildProjectRoutePayload,
-                    handlePromptPayload,
-                    buildLinkOnlyReply,
-                    buildQuickStatusReply,
-                    parseTransportEnvelopeContext,
-                    runOpsCommand,
-                    inferPathListReply,
-                    buildGogNoPrefixGuide,
-                    buildNoPrefixReply: (text) => buildNoPrefixReplyCore(text, {
-                        isHubRuntime: isHubRuntime(process.env),
-                    }, {
-                        buildDailyCasualNoPrefixReply,
-                        buildNoPrefixGuide,
-                    }),
-                    handlePersonalRoute,
-                    processWordTokens: async (text, deck, tags, options = {}) => {
-                        const readOnlyResult = handleWordReadCommand(text, {
-                            dbPath: process.env.PERSONAL_DB_PATH,
-                        });
-                        if (readOnlyResult) return readOnlyResult;
-                        return processWordTokens(text, deck, tags, options);
-                    },
-                    handleMemoCommand: async (text) => {
-                        const memoJournal = require('./memo_journal');
-                        return memoJournal.handleMemoCommand(text);
-                    },
-                    handleNewsCommand: async (text) => {
-                        const newsDigest = require('./news_digest');
-                        return newsDigest.handleNewsCommand(text);
-                    },
-                    publishFromReports: async () => {
-                        const blog = require('./blog_publish_from_reports');
-                        return blog.publishFromReports();
-                    },
-                    buildWeeklyReport: async () => {
-                        const weekly = require('./weekly_report');
-                        return weekly.buildWeeklyReport();
-                    },
-                    buildDailySummary: async () => {
-                        const daily = require('./daily_summary');
-                        return daily.buildDailySummary();
-                    },
-                });
-                console.log(JSON.stringify(autoRouteResult));
-                break;
-            }
-
-            default:
-                throw new Error(`Unknown command: ${command}`);
-                }
-
-                if (finalStatus !== 'warn') {
-                    finalStatus = attempt > 1 ? 'warn' : 'ok';
-                    finalSeverity = 'P3';
-                    finalMessage = attempt > 1
-                        ? 'Run completed after retry.'
-                        : 'Run completed successfully.';
-                }
-                break;
-            } catch (attemptError) {
-                const retriable = isRetriableError(attemptError);
-                if (attempt < maxAttempts && retriable) {
-                    opsLogger.logRetry(opsContext, {
-                        component: 'bridge',
-                        action: normalizedCommand || 'unknown',
-                        message: `Retrying after transient error on attempt ${attempt}.`,
-                        attempt: attempt + 1,
-                        max_attempts: maxAttempts,
-                        error: {
-                            type: attemptError && (attemptError.name || attemptError.type) ? String(attemptError.name || attemptError.type) : 'Error',
-                            code: attemptError && attemptError.code ? String(attemptError.code) : '',
-                            message: attemptError && attemptError.message ? String(attemptError.message) : String(attemptError),
-                            stack: attemptError && attemptError.stack ? String(attemptError.stack) : '',
-                        },
-                    });
-                    await sleep(RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)]);
-                    attempt += 1;
-                    continue;
-                }
-                throw attemptError;
-            }
-        }
     } catch (error) {
-        finalError = error;
-        finalStatus = 'error';
-        finalSeverity = /(eacces|permission denied)/i.test(String(error && (error.code || error.message || error)))
-            ? 'P1'
-            : 'P2';
-        finalMessage = 'Run failed with error.';
+        markRunFailure(runOutcome, error);
         console.error('Error:', error);
     } finally {
-        stopHeartbeat();
-        opsLogger.logEnd(opsContext, {
-            status: finalStatus,
-            severity: finalSeverity,
-            component: 'bridge',
-            action: normalizedCommand || 'unknown',
-            message: finalMessage,
+        finishBridgeRunLifecycle({
+            opsContext,
+            stopHeartbeat,
+            runOutcome,
+            normalizedCommand,
+            maxAttempts,
             attempt,
-            max_attempts: maxAttempts,
-            error: finalError
-                ? {
-                    type: finalError.name || 'Error',
-                    code: finalError.code || '',
-                    message: finalError.message || String(finalError),
-                    stack: finalError.stack || '',
-                    retriable: isRetriableError(finalError),
-                }
-                : undefined,
-            metrics: {
-                command: normalizedCommand || '',
-                full_text_chars: fullText.length,
-            },
+            fullText,
+        }, {
+            opsLogger,
+            buildBridgeRunEndPayload,
+            isRetriableError,
         });
     }
 
-    if (finalError) {
+    if (runOutcome.finalError) {
         process.exit(1);
     }
 }
@@ -3648,6 +2371,4 @@ module.exports = {
     isWeakEnrichment,
     normalizeQualityPolicy,
     QUALITY_STYLE_VERSION,
-    detectWordReadMode,
-    handleWordReadCommand,
 };
