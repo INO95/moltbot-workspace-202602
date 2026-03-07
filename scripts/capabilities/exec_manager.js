@@ -25,7 +25,35 @@ const GOG_DEFAULT_CONTAINERS = Object.freeze([
     'moltbot-research',
     'moltbot-anki',
 ]);
-const DEFAULT_EXEC_CWD = String(process.env.EXEC_CAPABILITY_DEFAULT_CWD || '/Users/inho-baek/Projects').trim() || '/Users/inho-baek/Projects';
+function isExistingDirectory(targetPath) {
+    const value = String(targetPath || '').trim();
+    if (!value) return false;
+    try {
+        return fs.statSync(value).isDirectory();
+    } catch (_) {
+        return false;
+    }
+}
+
+function resolveDefaultExecCwd() {
+    const candidates = [
+        process.env.EXEC_CAPABILITY_DEFAULT_CWD,
+        process.env.OPENCLAW_WORKSPACE_ROOT,
+        process.env.WORKSPACE_ROOT,
+        '/workspace',
+        '/home/node/.openclaw/workspace',
+        '/Users/inho-baek/Projects',
+        ROOT,
+        process.cwd(),
+    ];
+    for (const candidate of candidates) {
+        const normalized = stripOuterQuotes(candidate || '');
+        if (isExistingDirectory(normalized)) return normalized;
+    }
+    return ROOT;
+}
+
+const DEFAULT_EXEC_CWD = resolveDefaultExecCwd();
 
 function resolveAllowlistPath() {
     const section = (config && typeof config.opsUnifiedApprovals === 'object')
@@ -346,7 +374,7 @@ function resolveGogContainers(payload = {}) {
 function resolveExecCwd(payload = {}) {
     const source = payload && typeof payload === 'object' ? payload : {};
     const raw = String(source.cwd || source.workdir || source.dir || '').trim();
-    if (raw) return raw;
+    if (isExistingDirectory(raw)) return raw;
     return DEFAULT_EXEC_CWD;
 }
 
