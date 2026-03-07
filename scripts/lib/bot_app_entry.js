@@ -5,7 +5,7 @@ const path = require('path');
 const KNOWN_ROUTES = new Set([
   'auto', 'work', 'inspect', 'deploy', 'project', 'ops',
   'word', 'news', 'prompt', 'finance', 'todo', 'routine',
-  'workout', 'media', 'place', 'status', 'link', 'memo', 'report',
+  'workout', 'media', 'place', 'status', 'link', 'memo', 'report', 'codex',
 ]);
 
 function parseRoutePayload(argv, defaultRoute) {
@@ -33,9 +33,10 @@ function runBotEntry({ botId, route: defaultRoute }) {
     console.error(`Usage: npm run start -- "[route] <message>" (bot=${botId}, defaultRoute=${defaultRoute})`);
     process.exit(1);
   }
+  const runtimeBotId = String(process.env.MOLTBOT_BOT_ID || '').trim() || botId;
   const env = {
     ...process.env,
-    MOLTBOT_BOT_ID: botId,
+    MOLTBOT_BOT_ID: runtimeBotId,
   };
   const result = spawnSync('node', [bridge, parsed.route, payload], {
     cwd: root,

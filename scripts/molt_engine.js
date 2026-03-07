@@ -6,6 +6,18 @@ const config = require('../data/config.json');
 const { sendCommand } = require('./ag_bridge_client');
 
 function loadGoogleCreds() {
+    const envJson = String(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '').trim();
+    if (envJson) {
+        try {
+            const parsed = JSON.parse(envJson);
+            if (parsed && parsed.client_email && parsed.private_key) {
+                return parsed;
+            }
+        } catch (_) {
+            // Fall through to file-based lookup.
+        }
+    }
+
     const candidates = [
         process.env.MOLTBOT_GOOGLE_CREDS_PATH,
         path.join(__dirname, '../data/secure/google_creds.json'),
@@ -20,26 +32,23 @@ function loadGoogleCreds() {
                 return parsed;
             }
         } catch (_) {
-            // try next candidate
+            // Try the next candidate path.
         }
     }
 
     return null;
 }
 
-const creds = loadGoogleCreds();
-
 class MoltEngine {
     constructor() {
         this.config = config;
-        this.initialized = false;
+        this.creds = loadGoogleCreds();
         this.doc = null;
         this.remoteReady = false;
-
-        if (creds && creds.client_email && creds.private_key && this.config.spreadsheetId) {
+        if (this.creds && this.config.spreadsheetId) {
             const auth = new JWT({
-                email: creds.client_email,
-                key: creds.private_key,
+                email: this.creds.client_email,
+                key: this.creds.private_key,
                 scopes: [
                     'https://www.googleapis.com/auth/spreadsheets',
                     'https://www.googleapis.com/auth/drive',
@@ -48,12 +57,15 @@ class MoltEngine {
             this.doc = new GoogleSpreadsheet(config.spreadsheetId, auth);
             this.remoteReady = true;
         }
+        this.initialized = false;
     }
 
     async init() {
         if (this.initialized) return;
         if (!this.remoteReady || !this.doc) {
-            throw new Error('Google credentials are unavailable. Set MOLTBOT_GOOGLE_CREDS_PATH or provide data/secure/google_creds.json');
+            throw new Error(
+                'Google credentials are unavailable. Set GOOGLE_SERVICE_ACCOUNT_JSON, MOLTBOT_GOOGLE_CREDS_PATH, or provide data/secure/google_creds.json',
+            );
         }
         await this.doc.loadInfo();
         console.log(`✅ Connected to: ${this.doc.title}`);
