@@ -1,0 +1,6 @@
+{
+  "name": "@moltbot/core-policy",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/bridge_defaults.js"
+}

@@ -2,10 +2,13 @@ const fs = require('fs');
 const path = require('path');
 
 const FIXED_PROJECTS_ROOT = '/Users/inho-baek/Projects';
-const ROOT_CANDIDATES = [FIXED_PROJECTS_ROOT];
+const ROOT_CANDIDATES = [
+  String(process.env.OPENCLAW_PROJECTS_ROOT || '').trim(),
+  FIXED_PROJECTS_ROOT,
+].filter(Boolean);
 
 function pickDefaultProjectsRoot() {
-  return path.resolve(FIXED_PROJECTS_ROOT);
+  return path.resolve(ROOT_CANDIDATES[0] || FIXED_PROJECTS_ROOT);
 }
 
 const DEFAULT_PROJECTS_ROOT = pickDefaultProjectsRoot();
@@ -296,6 +299,7 @@ function buildProjectBootstrapPlan(fields = {}) {
     warnings.push(`생성 경로가 허용 루트 밖입니다: ${targetPath}`);
   }
   const approvalReasons = [];
+  if (initMode === 'execute') approvalReasons.push('init_mode_execute');
   if (!policy.allowed) approvalReasons.push('path_outside_allowed_root');
 
   return {

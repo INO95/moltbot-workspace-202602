@@ -20,6 +20,10 @@ PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 # News Digest fixed slot (daily 08:00, bot-research entrypoint)
 0 8 * * * cd /Users/inho-baek/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-08" -- "NEWS_WINDOW_MINUTES=1440 npm run -s cron:research:news-send" >> logs/cron.log 2>&1
+0 19 * * * cd /Users/inho-baek/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-digest-19" -- "NEWS_WINDOW_MINUTES=360 npm run -s cron:research:news-send" >> logs/cron.log 2>&1
+
+# News event-only checks (hourly in daytime; send only when threshold is exceeded)
+0 9-21 * * * cd /Users/inho-baek/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "news-event-hourly" -- "npm run -s cron:research:news-event" >> logs/cron.log 2>&1
 
 # Daily Summary
 55 23 * * * cd /Users/inho-baek/Projects/Moltbot_Workspace && node scripts/cron_guard.js --job "daily-summary" -- "node scripts/daily_summary.js" >> logs/cron.log 2>&1

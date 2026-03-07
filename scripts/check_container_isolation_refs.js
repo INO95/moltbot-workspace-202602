@@ -23,6 +23,7 @@ const ALLOWLIST = new Set([
   'scripts/check_container_isolation_refs.js',
   'scripts/openclaw_backup_sync.sh',
   'scripts/openclaw_backup_verify.sh',
+  'scripts/openclaw_sync_runtime_config.sh',
 ]);
 
 function walk(dirPath, out = []) {

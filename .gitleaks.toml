@@ -1,0 +1,7 @@
+title = "Moltbot Gitleaks Config"
+
+[[allowlists]]
+description = "Ignore redacted ops command completion artifacts"
+paths = [
+  '''^ops/commands/state/completed/.*$''',
+]

@@ -347,9 +347,13 @@ if (cfg.plugins.entries.github) {
   }
 }
 
-// Remove stale Google auth plugin entries so OpenClaw stops warning on load.
-delete cfg.plugins.entries['google-antigravity-auth'];
-delete cfg.plugins.entries['google-gemini-cli-auth'];
+// Hard-disable Google auth plugins for this workspace policy.
+if (cfg.plugins.entries['google-antigravity-auth']) {
+  cfg.plugins.entries['google-antigravity-auth'].enabled = false;
+}
+if (cfg.plugins.entries['google-gemini-cli-auth']) {
+  cfg.plugins.entries['google-gemini-cli-auth'].enabled = false;
+}
 
 cfg.tools = cfg.tools || {};
 cfg.tools.exec = cfg.tools.exec || {};

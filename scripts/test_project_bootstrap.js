@@ -16,9 +16,9 @@ function main() {
     assert.strictEqual(nextPlan.targetPath, '/Users/inho-baek/Projects/my-new-app');
     assert.strictEqual(nextPlan.packageManager, 'pnpm');
     assert.strictEqual(nextPlan.initMode, 'execute');
-    assert.strictEqual(nextPlan.requiresApproval, false);
+    assert.strictEqual(nextPlan.requiresApproval, true);
     assert.ok(Array.isArray(nextPlan.approvalReasons));
-    assert.ok(!nextPlan.approvalReasons.includes('init_mode_execute'));
+    assert.ok(nextPlan.approvalReasons.includes('init_mode_execute'));
     assert.ok(Array.isArray(nextPlan.commands) && nextPlan.commands.length > 0);
     assert.ok(nextPlan.commands.some((cmd) => cmd.includes('create next-app')));
     assert.ok(Array.isArray(nextPlan.qualityGates) && nextPlan.qualityGates.length >= 3);
