@@ -43,7 +43,7 @@ function prepareOpsCommandContext(payloadText, options = {}, deps = {}) {
           route: 'ops',
           templateValid: false,
           error: '지원하지 않는 액션입니다.',
-          telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `실행`, `코덱스`, `메일`, `사진`, `일정`, `브라우저`, `토큰`, `승인`, `거부`만 지원합니다.',
+          telegramReply: '운영 템플릿 액션은 `재시작`, `상태`, `파일`, `실행`, `코덱스`, `메일`, `사진`, `일정`, `브라우저`, `토큰`, `페르소나`, `승인`, `거부`만 지원합니다.',
         },
       };
   }
@@ -85,6 +85,7 @@ function dispatchOpsAction(context = {}, deps = {}) {
   const handleOpsRestartAction = deps.handleOpsRestartAction;
   const handleOpsFileAction = deps.handleOpsFileAction;
   const handleOpsCapabilityAction = deps.handleOpsCapabilityAction;
+  const handleOpsPersonaAction = deps.handleOpsPersonaAction;
   const handleOpsApproveAction = deps.handleOpsApproveAction;
   const handleOpsDenyAction = deps.handleOpsDenyAction;
 
@@ -93,6 +94,7 @@ function dispatchOpsAction(context = {}, deps = {}) {
       || typeof handleOpsRestartAction !== 'function'
       || typeof handleOpsFileAction !== 'function'
       || typeof handleOpsCapabilityAction !== 'function'
+      || typeof handleOpsPersonaAction !== 'function'
       || typeof handleOpsApproveAction !== 'function'
       || typeof handleOpsDenyAction !== 'function') {
     throw new Error('dispatchOpsAction dependencies are incomplete');
@@ -111,6 +113,9 @@ function dispatchOpsAction(context = {}, deps = {}) {
   }
   if (action === 'token') {
     return handleOpsTokenAction(parsed);
+  }
+  if (action === 'persona') {
+    return handleOpsPersonaAction(parsed, requestedBy);
   }
   if (action === 'restart') {
     return handleOpsRestartAction(action, targetKey, parsed);

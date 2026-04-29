@@ -109,6 +109,9 @@ const {
     handleOpsTokenAction: handleOpsTokenActionCore,
 } = require('./lib/bridge_ops_token');
 const {
+    handleOpsPersonaAction: handleOpsPersonaActionCore,
+} = require('./lib/bridge_ops_persona_token');
+const {
     handleOpsApproveAction: handleOpsApproveActionCore,
     handleOpsDenyAction: handleOpsDenyActionCore,
 } = require('./lib/bridge_ops_approval_actions');
@@ -1231,6 +1234,75 @@ function handleOpsTokenAction(parsed) {
     });
 }
 
+const BOT_PERSONA_MAP_PATH = path.join(__dirname, '..', 'data', 'policy', 'bot_persona_map.json');
+
+function normalizePersonaTarget(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    const map = {
+        daily: 'bot-daily',
+        일상: 'bot-daily',
+        daily_bak: 'bot-daily-bak',
+        'daily-bak': 'bot-daily-bak',
+        일상백업: 'bot-daily-bak',
+        main: 'main',
+        메인: 'main',
+        dev: 'bot-dev',
+        개발: 'bot-dev',
+        dev_bak: 'bot-dev-bak',
+        'dev-bak': 'bot-dev-bak',
+        개발백업: 'bot-dev-bak',
+        anki: 'bot-anki',
+        안키: 'bot-anki',
+        anki_bak: 'bot-anki-bak',
+        'anki-bak': 'bot-anki-bak',
+        안키백업: 'bot-anki-bak',
+        research: 'bot-research',
+        리서치: 'bot-research',
+        research_bak: 'bot-research-bak',
+        'research-bak': 'bot-research-bak',
+        리서치백업: 'bot-research-bak',
+        codex: 'bot-codex',
+        코덱스: 'bot-codex',
+    };
+    if (map[raw]) return map[raw];
+    if (/^bot-[a-z0-9_-]+$/.test(raw)) return raw;
+    return '';
+}
+
+function readBotPersonaMap() {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(BOT_PERSONA_MAP_PATH, 'utf8'));
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function writeBotPersonaMap(map) {
+    const tmpPath = `${BOT_PERSONA_MAP_PATH}.tmp-${process.pid}-${Date.now()}`;
+    try {
+        fs.mkdirSync(path.dirname(BOT_PERSONA_MAP_PATH), { recursive: true });
+        fs.writeFileSync(tmpPath, `${JSON.stringify(map && typeof map === 'object' ? map : {}, null, 2)}\n`, 'utf8');
+        fs.renameSync(tmpPath, BOT_PERSONA_MAP_PATH);
+        return true;
+    } catch (_) {
+        try {
+            fs.rmSync(tmpPath, { force: true });
+        } catch (__) {
+            // Ignore cleanup errors after a failed persona write.
+        }
+        return false;
+    }
+}
+
+function handleOpsPersonaAction(parsed, requestedBy) {
+    return handleOpsPersonaActionCore(parsed, requestedBy, {
+        normalizePersonaTarget,
+        readBotPersonaMap,
+        writeBotPersonaMap,
+    });
+}
+
 function handleOpsStatusAction(action, targetKey) {
     return handleOpsStatusActionCore({
         action,
@@ -1349,6 +1421,7 @@ function dispatchOpsAction(context) {
         handleOpsRestartAction,
         handleOpsFileAction,
         handleOpsCapabilityAction,
+        handleOpsPersonaAction,
         handleOpsApproveAction,
         handleOpsDenyAction,
     });

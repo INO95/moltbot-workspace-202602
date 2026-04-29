@@ -683,6 +683,7 @@ function enqueueBridgeNotification({
   };
 
   if (!policyDecision.notify) {
+    enqueueBridgePayload(payload, { writeLatest: false });
     maybeEnqueueSuppressedSummary({
       ok,
       errorCode,
