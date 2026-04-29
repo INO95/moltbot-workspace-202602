@@ -206,6 +206,7 @@ function parseBoolean(input, fallback = false) {
 }
 
 function execPolicyFor(profile) {
+  if (profile === 'daily') return { ask: 'on-miss' };
   // Backup daily bot runs fully inside container; avoid node-pairing requirement.
   if (profile === 'daily_bak') return { host: 'sandbox', ask: 'off' };
   return null;

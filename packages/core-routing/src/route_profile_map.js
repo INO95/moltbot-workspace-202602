@@ -17,6 +17,7 @@ const DEFAULT_ROUTE_PROFILE_MAP = Object.freeze({
   workout: 'daily',
   media: 'daily',
   place: 'daily',
+  job: 'daily',
 });
 
 module.exports = {

@@ -134,6 +134,130 @@ CREATE TABLE IF NOT EXISTS media_place_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_media_place_kind_date ON media_place_logs(kind, visit_date DESC, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS job_companies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  name TEXT NOT NULL UNIQUE,
+  website TEXT,
+  country TEXT,
+  location TEXT,
+  work_mode TEXT,
+  industry TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_companies_name ON job_companies(name);
+
+CREATE TABLE IF NOT EXISTS job_opportunities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  company_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  team_or_project TEXT,
+  employment_type TEXT,
+  tech_stack TEXT,
+  salary_min REAL,
+  salary_max REAL,
+  currency TEXT,
+  jd_url TEXT,
+  source TEXT,
+  source_message TEXT,
+  fit_score REAL,
+  interest_score REAL,
+  pass_probability REAL,
+  priority INTEGER,
+  location TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(company_id) REFERENCES job_companies(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_opportunities_company ON job_opportunities(company_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_opportunities_title ON job_opportunities(title);
+
+CREATE TABLE IF NOT EXISTS job_application_processes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  opportunity_id INTEGER NOT NULL UNIQUE,
+  current_stage TEXT NOT NULL DEFAULT 'wishlist',
+  status TEXT NOT NULL DEFAULT 'active',
+  applied_at TEXT,
+  last_contact_at TEXT,
+  next_action_at TEXT,
+  owner_note TEXT,
+  result_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(opportunity_id) REFERENCES job_opportunities(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_processes_stage ON job_application_processes(current_stage, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_processes_next_action ON job_application_processes(next_action_at);
+
+CREATE TABLE IF NOT EXISTS job_contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  company_id INTEGER NOT NULL,
+  opportunity_id INTEGER,
+  name TEXT,
+  role TEXT,
+  channel TEXT,
+  contact_url_or_email TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(company_id) REFERENCES job_companies(id),
+  FOREIGN KEY(opportunity_id) REFERENCES job_opportunities(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_contacts_company ON job_contacts(company_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS job_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  target_type TEXT NOT NULL,
+  target_id INTEGER NOT NULL,
+  company_id INTEGER,
+  opportunity_id INTEGER,
+  content TEXT NOT NULL,
+  tags_json TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_notes_company ON job_notes(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_notes_opportunity ON job_notes(opportunity_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS job_timeline_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  opportunity_id INTEGER NOT NULL,
+  company_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  event_at TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  raw_text TEXT,
+  meta_json TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(opportunity_id) REFERENCES job_opportunities(id),
+  FOREIGN KEY(company_id) REFERENCES job_companies(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_timeline_opportunity ON job_timeline_events(opportunity_id, event_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_job_timeline_company ON job_timeline_events(company_id, event_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS job_next_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT,
+  opportunity_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  due_at TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  priority INTEGER NOT NULL DEFAULT 3,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  FOREIGN KEY(opportunity_id) REFERENCES job_opportunities(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_next_actions_due ON job_next_actions(status, due_at, priority);
+CREATE INDEX IF NOT EXISTS idx_job_next_actions_opportunity ON job_next_actions(opportunity_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS sync_audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id TEXT,

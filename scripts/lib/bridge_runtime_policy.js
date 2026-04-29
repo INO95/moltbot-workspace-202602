@@ -149,6 +149,7 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env, dep
   let inferTodo = pickBool('inferTodo', Boolean(defaults.inferTodo));
   let inferRoutine = pickBool('inferRoutine', Boolean(defaults.inferRoutine));
   let inferWorkout = pickBool('inferWorkout', Boolean(defaults.inferWorkout));
+  let inferJob = pickBool('inferJob', Boolean(defaults.inferJob));
   let inferBrowser = pickBool('inferBrowser', Boolean(defaults.inferBrowser));
   let inferSchedule = pickBool('inferSchedule', Boolean(defaults.inferSchedule));
   let inferStatus = pickBool('inferStatus', Boolean(defaults.inferStatus));
@@ -189,6 +190,10 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env, dep
   if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_WORKOUT')) {
     const parsed = parseBool(env.BRIDGE_NL_INFER_WORKOUT);
     if (parsed != null) inferWorkout = parsed;
+  }
+  if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_JOB')) {
+    const parsed = parseBool(env.BRIDGE_NL_INFER_JOB);
+    if (parsed != null) inferJob = parsed;
   }
   if (Object.prototype.hasOwnProperty.call(env, 'BRIDGE_NL_INFER_BROWSER')) {
     const parsed = parseBool(env.BRIDGE_NL_INFER_BROWSER);
@@ -232,6 +237,7 @@ function normalizeNaturalLanguageRoutingConfig(rawConfig, env = process.env, dep
     inferTodo,
     inferRoutine,
     inferWorkout,
+    inferJob,
     inferBrowser,
     inferSchedule,
     inferStatus,

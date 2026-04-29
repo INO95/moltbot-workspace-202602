@@ -194,7 +194,8 @@ async function handleDirectBridgeCommand(context = {}, deps = {}) {
     case 'routine':
     case 'workout':
     case 'media':
-    case 'place': {
+    case 'place':
+    case 'job': {
         const out = await handlePersonalRoute(normalizedCommand, fullText, {
             source: 'telegram',
         });

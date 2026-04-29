@@ -45,7 +45,7 @@
     "news:event": "node scripts/news_digest.js event",
     "news:status": "node scripts/news_digest.js status",
     "test:news-target": "node scripts/test_news_digest_target.js",
-    "test:personal": "node scripts/test_personal_storage.js && node scripts/test_personal_finance.js && node scripts/test_personal_todo.js && node scripts/test_personal_routine.js && node scripts/test_personal_workout.js && node scripts/test_personal_media_place.js && node scripts/test_personal_migrate_legacy.js",
+    "test:personal": "node scripts/test_personal_storage.js && node scripts/test_personal_finance.js && node scripts/test_personal_todo.js && node scripts/test_personal_routine.js && node scripts/test_personal_workout.js && node scripts/test_personal_media_place.js && node scripts/test_personal_job_pipeline.js && node scripts/test_personal_migrate_legacy.js",
     "test:no-prefix-routing-report": "node scripts/test_no_prefix_routing_report.js",
     "test:v1-release": "node scripts/test_oai_api_router.js && node scripts/test_bridge_natural_language_routing.js && npm run -s test:no-prefix-routing-report && node scripts/test_bridge_allowlist.js && node scripts/test_bridge_hub_delegation.js && node scripts/test_bridge_record_route.js && node scripts/test_bridge_news_route.js && node scripts/test_bridge_report_default_by_runtime.js && node scripts/test_bridge_word_typo_reask.js && node scripts/test_word_enrichment.js && npm run -s test:personal",
     "ops:standby-check": "node scripts/standby_cutover_check.js",

@@ -16,6 +16,12 @@ function main() {
     });
     assert.deepStrictEqual(prefixed, { route: 'memo', payload: '오늘 회고' });
 
+    const jobPrefixed = routeByPrefix('지원처 추가 회사명=Acme 포지션=Backend Engineer', {
+        commandPrefixes: {},
+        normalizeIncomingCommandText: (text) => String(text || '').trim(),
+    });
+    assert.deepStrictEqual(jobPrefixed, { route: 'job', payload: '추가 회사명=Acme 포지션=Backend Engineer' });
+
     const approve = routeByPrefix('승인 abc123', {
         normalizeIncomingCommandText: (text) => String(text || '').trim(),
         parseApproveShorthand: () => ({ normalizedPayload: '액션: 승인; 토큰: abc123' }),

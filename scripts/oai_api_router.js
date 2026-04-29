@@ -35,6 +35,7 @@ const DEFAULT_POLICY = {
         workout: 'local-only',
         media: 'local-only',
         place: 'local-only',
+        job: 'local-only',
         status: 'local-only',
         link: 'local-only',
         ops: 'local-only',
@@ -58,6 +59,7 @@ const ROUTE_PREFIXES = [
     { route: 'workout', prefixes: ['운동:'] },
     { route: 'media', prefixes: ['콘텐츠:'] },
     { route: 'place', prefixes: ['식당:', '맛집:'] },
+    { route: 'job', prefixes: ['지원:', '지원처:', '채용:', 'job:'] },
     { route: 'report', prefixes: ['리포트:', '요약:'] },
     { route: 'work', prefixes: ['작업:', '실행:'] },
     { route: 'inspect', prefixes: ['점검:', '검토:'] },
@@ -298,6 +300,12 @@ function inferRouteFromCommand(commandText, options = {}) {
             return {
                 route: rule.route,
                 prefixes: [configPrefixes.place, configPrefixes.restaurant].filter(Boolean),
+            };
+        }
+        if (rule.route === 'job') {
+            return {
+                route: rule.route,
+                prefixes: [configPrefixes.job, configPrefixes.jobPipeline, configPrefixes.recruiting, configPrefixes.jobEn].filter(Boolean),
             };
         }
         if (rule.route === 'status') {

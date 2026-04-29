@@ -36,6 +36,7 @@ function buildRoutingRules(prefixes = {}) {
     { route: 'workout', prefixes: listPrefixes(prefixes.workout || '운동:') },
     { route: 'media', prefixes: listPrefixes(prefixes.media || '콘텐츠:') },
     { route: 'place', prefixes: listPrefixes(prefixes.place || '식당:').concat(listPrefixes(prefixes.restaurant || '맛집:')) },
+    { route: 'job', prefixes: listPrefixes(prefixes.job || '지원:').concat(listPrefixes(prefixes.jobPipeline || '지원처:'), listPrefixes(prefixes.recruiting || '채용:'), listPrefixes(prefixes.jobEn || 'job:')) },
     { route: 'news', prefixes: listPrefixes(prefixes.news || '소식:') },
     { route: 'report', prefixes: listPrefixes(prefixes.report || '리포트:').concat(listPrefixes(prefixes.summary || '요약:')) },
     { route: 'work', prefixes: listPrefixes(prefixes.work || '작업:').concat(listPrefixes(prefixes.do || '실행:')) },

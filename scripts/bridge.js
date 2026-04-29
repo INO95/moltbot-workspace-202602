@@ -32,6 +32,7 @@ const { handleTodoCommand } = require('./personal_todo');
 const { handleRoutineCommand } = require('./personal_routine');
 const { handleWorkoutCommand } = require('./personal_workout');
 const { handleMediaPlaceCommand } = require('./personal_media_place');
+const { handleJobPipelineCommand } = require('./personal_job_pipeline');
 const { finalizeTelegramBoundary: finalizeTelegramBoundaryCore } = require('./lib/bridge_output_boundary');
 const {
     parseReportModeCommand: parseReportModeCommandCore,
@@ -184,6 +185,7 @@ const {
     inferTodoIntentPayload: inferTodoIntentPayloadCore,
     inferRoutineIntentPayload: inferRoutineIntentPayloadCore,
     inferWorkoutIntentPayload: inferWorkoutIntentPayloadCore,
+    inferJobIntentPayload: inferJobIntentPayloadCore,
     inferWorkIntentPayload: inferWorkIntentPayloadCore,
     inferInspectIntentPayload: inferInspectIntentPayloadCore,
     inferBrowserIntentPayload: inferBrowserIntentPayloadCore,
@@ -257,6 +259,7 @@ const KNOWN_DIRECT_COMMANDS = new Set([
     'workout',
     'media',
     'place',
+    'job',
     'anki',
     'auto',
 ]);
@@ -1727,6 +1730,10 @@ function inferWorkoutIntentPayload(text) {
     return inferWorkoutIntentPayloadCore(text);
 }
 
+function inferJobIntentPayload(text) {
+    return inferJobIntentPayloadCore(text);
+}
+
 function inferWorkIntentPayload(text) {
     const adaptive = loadRoutingAdaptiveKeywords();
     return inferWorkIntentPayloadCore(text, {
@@ -1793,6 +1800,7 @@ function inferNaturalLanguageRoute(text, options = {}) {
         inferTodoIntentPayload,
         inferRoutineIntentPayload,
         inferWorkoutIntentPayload,
+        inferJobIntentPayload,
         inferWorkIntentPayload,
         inferInspectIntentPayload,
         inferBrowserIntentPayload,
@@ -2252,6 +2260,8 @@ async function handlePersonalRoute(route, payload, options = {}) {
             ...baseOptions,
             kind: 'place',
         });
+    } else if (normalizedRoute === 'job') {
+        out = await handleJobPipelineCommand(commandText, baseOptions);
     } else {
         return {
             route: normalizedRoute || 'none',
@@ -2428,6 +2438,7 @@ module.exports = {
     inferTodoIntentPayload,
     inferRoutineIntentPayload,
     inferWorkoutIntentPayload,
+    inferJobIntentPayload,
     inferWorkIntentPayload,
     inferInspectIntentPayload,
     runOpsCommand,

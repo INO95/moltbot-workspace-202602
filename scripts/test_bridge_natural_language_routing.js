@@ -93,6 +93,16 @@ function main() {
     const workout = runRouteWithEnv('러닝 30분 5km 운동 기록해줘', inferEnv);
     assert.strictEqual(workout.route, 'workout');
 
+    const jobAdd = runRouteWithEnv('지원처 추가 회사명=Acme 포지션=Backend Engineer 링크=https://example.com/jobs/1', inferEnv);
+    assert.strictEqual(jobAdd.route, 'job');
+
+    const jobStage = runRouteWithEnv('Acme 현재 단계 interview_1로 변경', inferEnv);
+    assert.strictEqual(jobStage.route, 'job');
+    assert.strictEqual(jobStage.inferredBy, 'natural-language:job');
+
+    const jobFollowup = runRouteWithEnv('이번 주 팔로업 필요한 회사 보여줘', inferEnv);
+    assert.strictEqual(jobFollowup.route, 'job');
+
     const work = runRouteWithEnv('브릿지 라우터 리팩터링해줘', inferEnv);
     assert.strictEqual(work.route, 'work');
     assert.strictEqual(work.inferredBy, 'natural-language:work');
