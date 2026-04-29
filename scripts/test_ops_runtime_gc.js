@@ -17,10 +17,12 @@ function main() {
   const newLog = path.join(root, 'logs', 'new.log');
   const oldReport = path.join(root, 'reports', 'old.json');
   const linkPath = path.join(root, 'logs', 'old-link.log');
+  const keepFile = path.join(root, 'logs', '.gitkeep');
   try {
     touch(oldLog, 31);
     touch(newLog, 1);
     touch(oldReport, 31);
+    touch(keepFile, 31);
     fs.symlinkSync(oldLog, linkPath);
 
     const dryRun = runRuntimeGc({
@@ -34,6 +36,8 @@ function main() {
     assert.ok(dryRun.candidates.some((row) => row.path === 'logs/old.log'));
     assert.ok(dryRun.candidates.some((row) => row.path === 'reports/old.json'));
     assert.ok(!dryRun.candidates.some((row) => row.path === 'logs/new.log'));
+    assert.ok(!dryRun.candidates.some((row) => row.path === 'logs/.gitkeep'));
+    assert.ok(dryRun.skipped.some((row) => row.path === 'logs/.gitkeep' && row.reason === 'keep_file'));
     assert.ok(dryRun.skipped.some((row) => row.path === 'logs/old-link.log' && row.reason === 'symlink'));
     assert.ok(fs.existsSync(oldLog), 'dry-run should not delete old file');
     const compact = compactRuntimeGcResult(dryRun, { limit: 1 });
@@ -52,6 +56,7 @@ function main() {
     assert.ok(!fs.existsSync(oldLog), 'apply should delete old log');
     assert.ok(!fs.existsSync(oldReport), 'apply should delete old report');
     assert.ok(fs.existsSync(newLog), 'apply should keep new log');
+    assert.ok(fs.existsSync(keepFile), 'apply should keep .gitkeep');
     assert.ok(fs.lstatSync(linkPath).isSymbolicLink(), 'apply should keep symlink itself');
 
     const outside = collectRuntimeGcPlan({

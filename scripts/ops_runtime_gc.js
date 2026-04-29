@@ -14,6 +14,7 @@ const DEFAULT_TARGETS = Object.freeze([
   'ops/commands/state/completed',
   'ops/commands/state/consumed',
 ]);
+const KEEP_FILE_NAMES = new Set(['.gitkeep', '.gitignore']);
 
 function toPosix(relPath) {
   return String(relPath || '').split(path.sep).join('/');
@@ -84,6 +85,10 @@ function collectRuntimeGcPlan(options = {}) {
     }
     if (!stat.isFile()) {
       skip(absolutePath, 'not_file');
+      return;
+    }
+    if (KEEP_FILE_NAMES.has(path.basename(absolutePath))) {
+      skip(absolutePath, 'keep_file');
       return;
     }
     if (stat.mtimeMs <= cutoffMs) {
@@ -277,6 +282,7 @@ if (require.main === module) {
 
 module.exports = {
   DEFAULT_TARGETS,
+  KEEP_FILE_NAMES,
   collectRuntimeGcPlan,
   compactRuntimeGcResult,
   runRuntimeGc,
