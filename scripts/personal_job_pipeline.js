@@ -64,24 +64,50 @@ function parseScore(value) {
     return Number.isFinite(n) ? n : null;
 }
 
+function formatTimeFromRaw(text) {
+    const raw = String(text || '');
+    const match = raw.match(/(오전|오후)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분?)?/);
+    if (!match) return '';
+    const meridiem = String(match[1] || '').trim();
+    let hour = Number(match[2]);
+    const minute = Number(match[3] || 0);
+    if (!Number.isFinite(hour) || hour < 0 || hour > 24) return '';
+    if (!Number.isFinite(minute) || minute < 0 || minute > 59) return '';
+    if (meridiem === '오후' && hour < 12) hour += 12;
+    if (meridiem === '오전' && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function appendTimeIfPresent(dateText, raw) {
+    const date = String(dateText || '').trim();
+    if (!date) return '';
+    const time = formatTimeFromRaw(raw);
+    return time ? `${date} ${time}` : date;
+}
+
 function parseDateToken(text, options = {}) {
     const raw = String(text || '').trim();
     if (!raw) return '';
     const iso = raw.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-    if (iso) return iso[1];
+    if (iso) return appendTimeIfPresent(iso[1], raw);
     const compact = raw.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
-    if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+    if (compact) return appendTimeIfPresent(`${compact[1]}-${compact[2]}-${compact[3]}`, raw);
     const slash = raw.match(/\b(\d{1,2})[./](\d{1,2})\b/);
     if (slash) {
         const year = tokyoDate(options.now).slice(0, 4);
-        return `${year}-${String(slash[1]).padStart(2, '0')}-${String(slash[2]).padStart(2, '0')}`;
+        return appendTimeIfPresent(`${year}-${String(slash[1]).padStart(2, '0')}-${String(slash[2]).padStart(2, '0')}`, raw);
+    }
+    const korean = raw.match(/(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+    if (korean) {
+        const year = korean[1] || tokyoDate(options.now).slice(0, 4);
+        return appendTimeIfPresent(`${year}-${String(korean[2]).padStart(2, '0')}-${String(korean[3]).padStart(2, '0')}`, raw);
     }
     const today = tokyoDate(options.now);
-    if (/오늘/.test(raw)) return today;
-    if (/내일/.test(raw)) return addDays(today, 1);
-    if (/모레/.test(raw)) return addDays(today, 2);
-    if (/다음\s*주|next\s*week/i.test(raw)) return addDays(today, 7);
-    if (/이번\s*주|this\s*week/i.test(raw)) return addDays(today, 7);
+    if (/오늘/.test(raw)) return appendTimeIfPresent(today, raw);
+    if (/내일/.test(raw)) return appendTimeIfPresent(addDays(today, 1), raw);
+    if (/모레/.test(raw)) return appendTimeIfPresent(addDays(today, 2), raw);
+    if (/다음\s*주|next\s*week/i.test(raw)) return appendTimeIfPresent(addDays(today, 7), raw);
+    if (/이번\s*주|this\s*week/i.test(raw)) return appendTimeIfPresent(addDays(today, 7), raw);
     return '';
 }
 
@@ -199,6 +225,75 @@ function parseContactCommand(raw) {
     };
 }
 
+function stripCompanyParticle(token) {
+    return normalize(token)
+        .replace(/(?:은|는|이|가|을|를|에서|의)$/u, '')
+        .trim();
+}
+
+function inferNaturalStage(raw) {
+    if (/(탈락|불합격|리젝|rejected)/i.test(raw)) return 'rejected';
+    if (/(철회|withdrawn)/i.test(raw)) return 'withdrawn';
+    if (/(보류|on_hold)/i.test(raw)) return 'on_hold';
+    if (/(오퍼|offer|합격)/i.test(raw) && !/서류\s*합격/i.test(raw)) return 'offer';
+    if (/(최종|final)\s*면접/i.test(raw)) return 'final_interview';
+    if (/(2차|second)\s*면접/i.test(raw)) return 'interview_2';
+    if (/(1차|first)\s*면접/i.test(raw)) return 'interview_1';
+    if (/(코딩\s*테스트|코테|과제)/i.test(raw)) return 'coding_test';
+    if (/(리크루터|recruiter|채용\s*담당자).*(연락|contact)/i.test(raw)) return 'recruiter_contact';
+    if (/(서류|screening).*(통과|합격|검토|대기)/i.test(raw)) return 'screening';
+    if (/(지원\s*완료|지원했|applied)/i.test(raw)) return 'applied';
+    return '';
+}
+
+function actionTitleForStage(stage) {
+    const titles = {
+        screening: '서류 진행 확인',
+        coding_test: '코딩 테스트',
+        interview_1: '1차 면접',
+        interview_2: '2차 면접',
+        final_interview: '최종 면접',
+        offer: '오퍼 확인',
+        rejected: '결과 정리',
+        withdrawn: '철회 정리',
+        on_hold: '보류 상태 확인',
+    };
+    return titles[stage] || '지원 상태 확인';
+}
+
+function buildNaturalProcessNote(raw, stage, dueAt) {
+    const parts = [];
+    if (/서류\s*(통과|합격)/i.test(raw)) parts.push('서류 통과');
+    if (dueAt && /면접/i.test(raw)) parts.push(`${actionTitleForStage(stage)} 일정은 ${dueAt}`);
+    if (/(대기중|대기\s*중|대기)/i.test(raw) && !parts.some((part) => /대기/.test(part))) {
+        parts.push(`${actionTitleForStage(stage)} 대기중`);
+    }
+    return parts.length ? parts.join(', ') : normalize(raw);
+}
+
+function parseNaturalProcessUpdate(raw, options = {}) {
+    if (!/(서류|면접|코딩\s*테스트|코테|오퍼|탈락|불합격|보류|철회|지원\s*완료|지원했)/i.test(raw)) return null;
+    const lead = raw.match(/^([^\s,，]+)\s+(.+)$/);
+    if (!lead) return null;
+    const token = stripCompanyParticle(lead[1]);
+    const body = normalize(lead[2]);
+    if (!token || !body) return null;
+    if (/^(지원처|지원|채용|job|서류|면접|코테|코딩)$/i.test(token)) return null;
+
+    const stage = inferNaturalStage(raw);
+    const dueAt = parseDateToken(raw, options);
+    if (!stage && !dueAt) return null;
+
+    return {
+        action: 'process_update',
+        token,
+        stage,
+        nextActionTitle: dueAt ? actionTitleForStage(stage) : '',
+        dueAt,
+        note: buildNaturalProcessNote(raw, stage, dueAt),
+    };
+}
+
 function parseCommand(payload, options = {}) {
     const raw = stripLead(payload);
     if (!raw) return { action: 'empty' };
@@ -225,6 +320,7 @@ function parseCommand(payload, options = {}) {
         || parseNextActionCommand(raw, options)
         || parseNoteCommand(raw)
         || parseContactCommand(raw)
+        || parseNaturalProcessUpdate(raw, options)
         || { action: 'unknown', raw };
 }
 
@@ -316,7 +412,7 @@ function buildHelpReply() {
 }
 
 function mutationDedupeMaterial(parsed) {
-    return `job:${parsed.action}:${parsed.token || ''}:${parsed.query || ''}:${parsed.stage || ''}:${parsed.company && parsed.company.name || ''}:${parsed.opportunity && parsed.opportunity.title || ''}:${parsed.title || ''}:${parsed.content || ''}`;
+    return `job:${parsed.action}:${parsed.token || ''}:${parsed.query || ''}:${parsed.stage || ''}:${parsed.company && parsed.company.name || ''}:${parsed.opportunity && parsed.opportunity.title || ''}:${parsed.title || parsed.nextActionTitle || ''}:${parsed.dueAt || ''}:${parsed.content || parsed.note || ''}`;
 }
 
 async function handleJobPipelineCommand(payload, options = {}) {
@@ -360,7 +456,7 @@ async function handleJobPipelineCommand(payload, options = {}) {
         const summary = jobs.buildWeeklySummary(options);
         return { route: 'job', success: true, action: 'weekly_summary', summary, telegramReply: buildWeeklySummaryReply(summary) };
     }
-    if (!['add', 'stage', 'note', 'next_action', 'contact'].includes(parsed.action)) {
+    if (!['add', 'stage', 'note', 'next_action', 'contact', 'process_update'].includes(parsed.action)) {
         return {
             route: 'job',
             success: false,
@@ -493,6 +589,58 @@ async function handleJobPipelineCommand(payload, options = {}) {
                 entityId: result.contact && result.contact.id,
                 result,
                 telegramReply: `${result.detail.company_name} 연락처 저장 완료: ${result.contact.name || result.contact.role || '담당자'}`,
+            };
+        }
+        if (parsed.action === 'process_update') {
+            let stageResult = null;
+            let actionResult = null;
+            let noteResult = null;
+            if (parsed.stage) {
+                stageResult = jobs.updateStage({
+                    eventId: event.eventId,
+                    rawText: payload,
+                    token: parsed.token,
+                    stage: parsed.stage,
+                    note: parsed.note,
+                }, options);
+                if (!stageResult) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
+            }
+            if (parsed.nextActionTitle && parsed.dueAt) {
+                actionResult = jobs.setNextAction({
+                    eventId: event.eventId,
+                    rawText: payload,
+                    token: parsed.token,
+                    title: parsed.nextActionTitle,
+                    dueAt: parsed.dueAt,
+                }, options);
+                if (!actionResult) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
+            }
+            if (parsed.note) {
+                noteResult = jobs.recordNote({
+                    eventId: event.eventId,
+                    rawText: payload,
+                    token: parsed.token,
+                    content: parsed.note,
+                    eventType: 'process_note',
+                    tags: parseTags(parsed.note),
+                }, options);
+                if (!noteResult) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
+            }
+            const detail = (actionResult && actionResult.detail)
+                || (stageResult && stageResult.detail)
+                || (noteResult && noteResult.detail);
+            const lines = [`${detail.company_name} 반영 완료`];
+            if (parsed.stage) lines.push(`- 단계: ${parsed.stage}`);
+            if (parsed.nextActionTitle && parsed.dueAt) lines.push(`- 다음 액션: ${parsed.nextActionTitle} / ${parsed.dueAt}`);
+            if (parsed.note) lines.push(`- 메모: ${parsed.note}`);
+            return {
+                route: 'job',
+                success: true,
+                action: 'process_update',
+                eventId: event.eventId,
+                entityId: detail && detail.opportunity_id,
+                result: { stage: stageResult, nextAction: actionResult, note: noteResult, detail },
+                telegramReply: lines.join('\n'),
             };
         }
     } catch (error) {

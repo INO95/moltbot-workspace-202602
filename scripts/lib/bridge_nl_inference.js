@@ -296,8 +296,9 @@ function inferJobIntentPayload(text) {
   const hasStageChange = /\b(wishlist|applied|recruiter_contact|screening|coding_test|interview_1|interview_2|final_interview|offer|rejected|withdrawn|on_hold)\b/i.test(raw)
     && /(현재\s*)?단계|stage|변경/i.test(raw);
   const hasFollowupQuery = /(이번\s*주|오늘).*(팔로업|follow.?up|액션|마감).*(회사|지원|채용)?/i.test(raw);
+  const hasNaturalProcessUpdate = /(?:서류\s*(?:통과|합격|대기|검토)|(?:1차|2차|최종)\s*면접|면접\s*(?:대기|예정|일정|일|시간)|코딩\s*테스트|코테|오퍼|탈락|불합격|보류|철회)/i.test(raw);
 
-  if (!hasExplicitJobLead && !hasCompanyField && !hasStageChange && !hasFollowupQuery && !(hasJobKeyword && hasJobAction)) {
+  if (!hasExplicitJobLead && !hasCompanyField && !hasStageChange && !hasFollowupQuery && !hasNaturalProcessUpdate && !(hasJobKeyword && hasJobAction)) {
     return null;
   }
 

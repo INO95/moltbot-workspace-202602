@@ -42,6 +42,16 @@ async function main() {
         assert.strictEqual(stage.action, 'stage');
         assert.strictEqual(stage.result.detail.current_stage, 'interview_1');
 
+        const naturalInterview = await handleJobPipelineCommand('Acme 서류 통과해서 1차 면접 대기중이고 1차 면접일은 5월14일 19시야', {
+            dbPath,
+            now: '2026-04-29T00:00:00+09:00',
+        });
+        assert.strictEqual(naturalInterview.success, true);
+        assert.strictEqual(naturalInterview.action, 'process_update');
+        assert.strictEqual(naturalInterview.result.detail.current_stage, 'interview_1');
+        assert.strictEqual(naturalInterview.result.nextAction.action.due_at, '2026-05-14 19:00');
+        assert.ok(/서류 통과/.test(naturalInterview.result.note.note.content));
+
         const note = await handleJobPipelineCommand('리크루터 메모 저장 Acme 다음 주에 답장 필요 #followup', { dbPath });
         assert.strictEqual(note.success, true);
         assert.strictEqual(note.action, 'note');

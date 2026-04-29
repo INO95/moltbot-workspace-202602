@@ -103,6 +103,10 @@ function main() {
     const jobFollowup = runRouteWithEnv('이번 주 팔로업 필요한 회사 보여줘', inferEnv);
     assert.strictEqual(jobFollowup.route, 'job');
 
+    const jobNaturalInterview = runRouteWithEnv('니지박스 서류 통과해서 1차 면접 대기중이고 1차 면접일은 5월14일 19시야', inferEnv);
+    assert.strictEqual(jobNaturalInterview.route, 'job');
+    assert.strictEqual(jobNaturalInterview.inferredBy, 'natural-language:job');
+
     const work = runRouteWithEnv('브릿지 라우터 리팩터링해줘', inferEnv);
     assert.strictEqual(work.route, 'work');
     assert.strictEqual(work.inferredBy, 'natural-language:work');

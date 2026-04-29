@@ -23,6 +23,7 @@
 
 ## Telegram Router
 - Prefix and operating commands (`메모/기록/학습/단어/실행/작업/검토/점검/출시/배포/프로젝트/요약/리포트/프롬프트/질문/운영/상태/링크/지원/지원처/채용/job`) must call `scripts/bridge_cmd.sh auto "<original message>"` first.
+- Job pipeline natural-language updates that mention hiring steps (`서류/면접/코테/오퍼/탈락/팔로업/면접일`) must also call `scripts/bridge_cmd.sh auto "<original message>"` first, even without a prefix.
 - If `MOLTBOT_BOT_ID` is `bot-daily-bak` or `bot-codex`, every non-empty Telegram input must go through bridge first.
 - Also route browser/docs/library/project/install/bootstrap/persona requests through bridge first.
 - Strip transport wrappers like `[Telegram ...] ... [message_id: ...]` before routing.

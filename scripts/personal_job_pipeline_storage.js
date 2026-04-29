@@ -541,9 +541,39 @@ function setNextAction(input = {}, options = {}) {
     const now = String(input.createdAt || nowIso());
     const title = normalizeText(input.title);
     if (!title) throw new Error('next action title is required');
-    storage.runSql(
+    const existing = storage.runSqlJson(
         dbPath,
         `
+SELECT *
+FROM job_next_actions
+WHERE opportunity_id = ${sqlQuote(Number(target.opportunity_id))}
+  AND status = 'open'
+  AND LOWER(title) = LOWER(${sqlQuote(title)})
+ORDER BY id DESC
+LIMIT 1;
+`,
+    )[0] || null;
+    if (existing) {
+        const prioritySql = input.priority == null || input.priority === ''
+            ? 'priority'
+            : sqlQuote(normalizePriority(input.priority));
+        storage.runSql(
+            dbPath,
+            `
+UPDATE job_next_actions
+SET due_at = ${sqlQuote(normalizeNullable(input.dueAt))},
+    status = ${sqlQuote(String(input.status || 'open').trim().toLowerCase() || 'open')},
+    priority = ${prioritySql},
+    note = COALESCE(${sqlQuote(normalizeNullable(input.note))}, note),
+    updated_at = ${sqlQuote(now)},
+    completed_at = NULL
+WHERE id = ${sqlQuote(Number(existing.id))};
+`,
+        );
+    } else {
+        storage.runSql(
+            dbPath,
+            `
 INSERT INTO job_next_actions (
   event_id, opportunity_id, title, due_at, status, priority, note, created_at, updated_at, completed_at
 )
@@ -560,8 +590,11 @@ VALUES (
   NULL
 );
 `,
-    );
-    const action = storage.runSqlJson(dbPath, 'SELECT * FROM job_next_actions ORDER BY id DESC LIMIT 1;')[0] || null;
+        );
+    }
+    const action = existing
+        ? storage.runSqlJson(dbPath, `SELECT * FROM job_next_actions WHERE id = ${sqlQuote(Number(existing.id))} LIMIT 1;`)[0] || null
+        : storage.runSqlJson(dbPath, 'SELECT * FROM job_next_actions ORDER BY id DESC LIMIT 1;')[0] || null;
     storage.runSql(
         dbPath,
         `
