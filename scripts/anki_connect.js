@@ -13,6 +13,10 @@ class AnkiConnect {
         this.port = port;
         this.fallbackHosts = this.buildFallbackHosts(host);
         this.modelFieldCache = new Map();
+        this.deckAliasMap = new Map([
+            ['toeic_ai', 'TOEIC_AI'],
+            ['toeic-ai', 'TOEIC_AI'],
+        ]);
     }
 
     buildFallbackHosts(primaryHost) {
@@ -150,10 +154,255 @@ class AnkiConnect {
         );
     }
 
+    normalizeDeckName(deckName) {
+        const raw = String(deckName || '').trim();
+        if (!raw) return raw;
+        return this.deckAliasMap.get(raw.toLowerCase()) || raw;
+    }
+
+    async invokeRetry(action, params = {}, options = {}) {
+        const retries = Number.isFinite(Number(options.retries))
+            ? Math.max(0, Number(options.retries))
+            : 3;
+        const delayMs = Number.isFinite(Number(options.delayMs))
+            ? Math.max(0, Number(options.delayMs))
+            : 250;
+        const accept = typeof options.accept === 'function'
+            ? options.accept
+            : () => true;
+        let lastError = null;
+        for (let attempt = 0; attempt <= retries; attempt += 1) {
+            try {
+                const result = await this.invoke(action, params);
+                if (accept(result)) {
+                    return {
+                        ok: true,
+                        result,
+                        attempts: attempt + 1,
+                    };
+                }
+                lastError = new Error(`${action} response is not ready`);
+            } catch (error) {
+                lastError = error;
+            }
+            if (attempt < retries && delayMs > 0) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
+        }
+        return {
+            ok: false,
+            result: null,
+            error: lastError,
+            attempts: retries + 1,
+        };
+    }
+
+    async verifyAddedDeck(noteId, deckName, options = {}) {
+        const requestedDeck = this.normalizeDeckName(deckName);
+        const skipped = (reason) => ({
+            requestedDeck,
+            actualDeck: null,
+            deckMismatchRecovered: false,
+            deckVerificationSkipped: true,
+            deckVerificationSkipReason: reason,
+        });
+        const numericNoteId = Number(noteId);
+        if (!Number.isFinite(numericNoteId) || numericNoteId <= 0) {
+            return skipped('invalid_note_id');
+        }
+
+        const retryOptions = {
+            retries: Number.isFinite(Number(options.deckVerificationRetries))
+                ? Number(options.deckVerificationRetries)
+                : 3,
+            delayMs: Number.isFinite(Number(options.deckVerificationDelayMs))
+                ? Number(options.deckVerificationDelayMs)
+                : 250,
+        };
+        const noteRead = await this.invokeRetry('notesInfo', { notes: [numericNoteId] }, {
+            ...retryOptions,
+            accept: (result) => Array.isArray(result) && result.length > 0 && result[0],
+        });
+        if (!noteRead.ok) {
+            debugLog('Anki deck verification skipped (notesInfo not ready):', noteRead.error && noteRead.error.message);
+            return skipped('notes_info_unavailable');
+        }
+
+        const noteInfo = Array.isArray(noteRead.result) ? noteRead.result[0] : null;
+        const cardIds = noteInfo && Array.isArray(noteInfo.cards)
+            ? noteInfo.cards.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+            : [];
+        let actualDeck = String((noteInfo && (noteInfo.deckName || noteInfo.deck)) || '').trim();
+
+        if (cardIds.length > 0) {
+            const cardsRead = await this.invokeRetry('cardsInfo', { cards: cardIds }, {
+                ...retryOptions,
+                accept: (result) => Array.isArray(result) && result.length > 0,
+            });
+            if (cardsRead.ok) {
+                const cardInfo = cardsRead.result.find((card) => card && (card.deckName || card.deck)) || null;
+                actualDeck = String((cardInfo && (cardInfo.deckName || cardInfo.deck)) || actualDeck || '').trim();
+            }
+        }
+
+        if (!actualDeck) {
+            return skipped('deck_info_unavailable');
+        }
+
+        if (actualDeck === requestedDeck) {
+            return {
+                requestedDeck,
+                actualDeck,
+                deckMismatchRecovered: false,
+                deckVerificationSkipped: false,
+            };
+        }
+
+        let deckMismatchRecovered = false;
+        if (cardIds.length > 0) {
+            try {
+                await this.invoke('changeDeck', {
+                    cards: cardIds,
+                    deck: requestedDeck,
+                });
+                deckMismatchRecovered = true;
+                actualDeck = requestedDeck;
+            } catch (error) {
+                debugLog('Anki deck mismatch recovery failed (non-critical):', error.message);
+            }
+        }
+
+        return {
+            requestedDeck,
+            actualDeck,
+            deckMismatchRecovered,
+            deckVerificationSkipped: false,
+        };
+    }
+
+    async verifyAddedDecks(noteDeckPairs = [], options = {}) {
+        const pairs = Array.isArray(noteDeckPairs)
+            ? noteDeckPairs
+                .map((pair) => ({
+                    noteId: Number(pair && pair.noteId),
+                    requestedDeck: this.normalizeDeckName(pair && pair.deckName),
+                }))
+                .filter((pair) => Number.isFinite(pair.noteId) && pair.noteId > 0 && pair.requestedDeck)
+            : [];
+        const skipped = (pair, reason) => ({
+            noteId: pair.noteId,
+            requestedDeck: pair.requestedDeck,
+            actualDeck: null,
+            deckMismatchRecovered: false,
+            deckVerificationSkipped: true,
+            deckVerificationSkipReason: reason,
+        });
+        if (pairs.length === 0) return [];
+
+        const retryOptions = {
+            retries: Number.isFinite(Number(options.deckVerificationRetries))
+                ? Number(options.deckVerificationRetries)
+                : 3,
+            delayMs: Number.isFinite(Number(options.deckVerificationDelayMs))
+                ? Number(options.deckVerificationDelayMs)
+                : 250,
+        };
+        const noteIds = pairs.map((pair) => pair.noteId);
+        const noteRead = await this.invokeRetry('notesInfo', { notes: noteIds }, {
+            ...retryOptions,
+            accept: (result) => Array.isArray(result) && result.length > 0,
+        });
+        if (!noteRead.ok) {
+            return pairs.map((pair) => skipped(pair, 'notes_info_unavailable'));
+        }
+
+        const notesById = new Map();
+        const allCardIds = [];
+        for (const note of Array.isArray(noteRead.result) ? noteRead.result : []) {
+            const noteId = Number(note && note.noteId);
+            if (!Number.isFinite(noteId)) continue;
+            const cards = Array.isArray(note.cards)
+                ? note.cards.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+                : [];
+            for (const cardId of cards) allCardIds.push(cardId);
+            notesById.set(noteId, {
+                note,
+                cards,
+                deckName: String((note && (note.deckName || note.deck)) || '').trim(),
+            });
+        }
+
+        const cardDeckById = new Map();
+        if (allCardIds.length > 0) {
+            const cardsRead = await this.invokeRetry('cardsInfo', { cards: allCardIds }, {
+                ...retryOptions,
+                accept: (result) => Array.isArray(result) && result.length > 0,
+            });
+            if (cardsRead.ok) {
+                for (const card of cardsRead.result) {
+                    const cardId = Number(card && (card.cardId || card.card_id));
+                    const deck = String((card && (card.deckName || card.deck)) || '').trim();
+                    if (Number.isFinite(cardId) && deck) cardDeckById.set(cardId, deck);
+                }
+            }
+        }
+
+        const results = [];
+        const recoveryByDeck = new Map();
+        const recoveryResultsByDeck = new Map();
+        for (const pair of pairs) {
+            const noteInfo = notesById.get(pair.noteId);
+            if (!noteInfo) {
+                results.push(skipped(pair, 'note_info_unavailable'));
+                continue;
+            }
+            const deckFromCards = noteInfo.cards
+                .map((cardId) => cardDeckById.get(cardId))
+                .find(Boolean);
+            const actualDeck = deckFromCards || noteInfo.deckName;
+            if (!actualDeck) {
+                results.push(skipped(pair, 'deck_info_unavailable'));
+                continue;
+            }
+            const result = {
+                noteId: pair.noteId,
+                requestedDeck: pair.requestedDeck,
+                actualDeck,
+                deckMismatchRecovered: false,
+                deckVerificationSkipped: false,
+            };
+            if (actualDeck !== pair.requestedDeck && noteInfo.cards.length > 0) {
+                if (!recoveryByDeck.has(pair.requestedDeck)) recoveryByDeck.set(pair.requestedDeck, []);
+                if (!recoveryResultsByDeck.has(pair.requestedDeck)) recoveryResultsByDeck.set(pair.requestedDeck, []);
+                recoveryByDeck.get(pair.requestedDeck).push(...noteInfo.cards);
+                recoveryResultsByDeck.get(pair.requestedDeck).push(result);
+            }
+            results.push(result);
+        }
+
+        for (const [deck, cards] of recoveryByDeck.entries()) {
+            try {
+                await this.invoke('changeDeck', { cards, deck });
+                for (const result of recoveryResultsByDeck.get(deck) || []) {
+                    result.actualDeck = deck;
+                    result.deckMismatchRecovered = true;
+                }
+            } catch (error) {
+                debugLog('Anki batch deck mismatch recovery failed (non-critical):', error.message);
+                for (const result of recoveryResultsByDeck.get(deck) || []) {
+                    result.deckRecoveryFailed = true;
+                }
+            }
+        }
+
+        return results;
+    }
+
     async findDuplicateByFront(deckName, front, options = {}) {
+        const normalizedDeckName = this.normalizeDeckName(deckName);
         const modelName = String(options.modelName || 'Basic').trim();
         const mapped = await this.buildNoteFields(front, '', { modelName });
-        const query = `deck:"${this.escapeQueryValue(deckName)}" ${mapped.frontField}:"${this.escapeQueryValue(front)}"`;
+        const query = `deck:"${this.escapeQueryValue(normalizedDeckName)}" ${mapped.frontField}:"${this.escapeQueryValue(front)}"`;
         const notes = await this.invoke('findNotes', { query });
         if (!Array.isArray(notes) || notes.length === 0) {
             return null;
@@ -176,6 +425,7 @@ class AnkiConnect {
 
     async addCard(deckName, front, back, tags = [], options = {}) {
         const shouldSync = options.sync !== false;
+        const normalizedDeckName = this.normalizeDeckName(deckName);
         const modelName = String(options.modelName || 'Basic');
         const dedupeMode = String(options.dedupeMode || 'allow').toLowerCase();
         let effectiveDedupeMode = dedupeMode;
@@ -186,7 +436,7 @@ class AnkiConnect {
         let duplicate = null;
         if (dedupeMode !== 'allow') {
             try {
-                duplicate = await this.findDuplicateByFront(deckName, front, { modelName });
+                duplicate = await this.findDuplicateByFront(normalizedDeckName, front, { modelName });
             } catch (error) {
                 debugLog('Anki duplicate scan failed (fallback safe-add):', error.message);
                 // Keep duplicate protection on even when scan fails.
@@ -232,12 +482,12 @@ class AnkiConnect {
             };
         }
 
-        debugLog(`OpenClaw -> Anki: Adding card to [${deckName}]`);
+        debugLog(`OpenClaw -> Anki: Adding card to [${normalizedDeckName}]`);
         let result;
         try {
             result = await this.invoke('addNote', {
                 note: {
-                    deckName: deckName,
+                    deckName: normalizedDeckName,
                     modelName: mapped.modelName,
                     fields: mapped.fields,
                     options: {
@@ -252,7 +502,7 @@ class AnkiConnect {
             if (duplicateLike && effectiveDedupeMode !== 'allow') {
                 let resolved = null;
                 try {
-                    resolved = await this.findDuplicateByFront(deckName, front, { modelName });
+                    resolved = await this.findDuplicateByFront(normalizedDeckName, front, { modelName });
                 } catch (_) {
                     resolved = null;
                 }
@@ -298,11 +548,133 @@ class AnkiConnect {
             }
         }
 
+        const deckVerification = await this.verifyAddedDeck(result, normalizedDeckName, options);
+
         return {
             noteId: result,
             duplicate: false,
             updated: false,
             action: 'add',
+            ...deckVerification,
+        };
+    }
+
+    async addCards(deckName, cards = [], tags = [], options = {}) {
+        const entries = Array.isArray(cards) ? cards : [];
+        const shouldSync = options.sync !== false;
+        const modelName = String(options.modelName || 'Basic');
+        const dedupeMode = String(options.dedupeMode || 'allow').toLowerCase();
+        const baseTags = Array.isArray(tags)
+            ? tags.map((v) => String(v || '').trim()).filter(Boolean)
+            : [];
+        if (entries.length === 0) {
+            return {
+                action: 'batch_add',
+                count: 0,
+                added: 0,
+                results: [],
+            };
+        }
+
+        if (dedupeMode !== 'allow') {
+            const results = [];
+            for (const entry of entries) {
+                const card = entry && typeof entry === 'object' ? entry : {};
+                const result = await this.addCard(
+                    card.deckName || deckName,
+                    card.front,
+                    card.back,
+                    [...baseTags, ...(Array.isArray(card.tags) ? card.tags : [])],
+                    {
+                        ...options,
+                        sync: false,
+                    },
+                );
+                results.push(result);
+            }
+            if (shouldSync) {
+                try {
+                    await this.syncWithDelay();
+                } catch (error) {
+                    debugLog('Anki batch sync failed (non-critical):', error.message);
+                }
+            }
+            return {
+                action: 'batch_add',
+                count: entries.length,
+                added: results.filter((row) => row && row.action === 'add').length,
+                results,
+                fallbackSequential: true,
+            };
+        }
+
+        const noteDeckPairs = [];
+        const notes = [];
+        for (const entry of entries) {
+            const card = entry && typeof entry === 'object' ? entry : {};
+            const normalizedDeckName = this.normalizeDeckName(card.deckName || deckName);
+            const mapped = await this.buildNoteFields(card.front, card.back, {
+                modelName: String(card.modelName || modelName),
+            });
+            const cardTags = Array.isArray(card.tags)
+                ? card.tags.map((value) => String(value || '').trim()).filter(Boolean)
+                : [];
+            const cleanTags = [...new Set([...baseTags, ...cardTags])];
+            notes.push({
+                deckName: normalizedDeckName,
+                modelName: mapped.modelName,
+                fields: mapped.fields,
+                options: {
+                    allowDuplicate: true,
+                },
+                tags: cleanTags,
+            });
+            noteDeckPairs.push({ deckName: normalizedDeckName });
+        }
+
+        const noteIds = await this.invoke('addNotes', { notes });
+        if (!Array.isArray(noteIds)) {
+            throw new Error('addNotes response must be an array');
+        }
+        const resultRows = noteIds.map((noteId, index) => {
+            const numericNoteId = Number(noteId);
+            const ok = Number.isFinite(numericNoteId) && numericNoteId > 0;
+            if (ok) noteDeckPairs[index].noteId = numericNoteId;
+            return {
+                noteId: ok ? numericNoteId : null,
+                duplicate: false,
+                updated: false,
+                action: ok ? 'add' : 'error',
+                requestedDeck: noteDeckPairs[index].deckName,
+                deckVerificationSkipped: true,
+                deckVerificationSkipReason: ok ? 'pending_batch_verification' : 'add_failed',
+            };
+        });
+
+        if (shouldSync) {
+            try {
+                await this.syncWithDelay();
+            } catch (error) {
+                debugLog('Anki batch sync failed (non-critical):', error.message);
+            }
+        }
+
+        const verificationRows = await this.verifyAddedDecks(
+            noteDeckPairs.filter((pair) => pair.noteId),
+            options,
+        );
+        const verificationByNoteId = new Map(verificationRows.map((row) => [Number(row.noteId), row]));
+        const results = resultRows.map((row) => {
+            const verification = row.noteId ? verificationByNoteId.get(Number(row.noteId)) : null;
+            return verification ? { ...row, ...verification } : row;
+        });
+
+        return {
+            action: 'batch_add',
+            count: entries.length,
+            added: results.filter((row) => row.action === 'add').length,
+            deckVerificationMode: 'batch',
+            results,
         };
     }
 

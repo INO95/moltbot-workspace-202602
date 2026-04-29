@@ -5,7 +5,7 @@ const path = require('path');
 const KNOWN_ROUTES = new Set([
   'auto', 'work', 'inspect', 'deploy', 'project', 'ops',
   'word', 'news', 'prompt', 'finance', 'todo', 'routine',
-  'workout', 'media', 'place', 'status', 'link', 'memo', 'report', 'codex',
+  'workout', 'media', 'place', 'job', 'status', 'link', 'memo', 'report', 'codex',
 ]);
 
 function parseRoutePayload(argv, defaultRoute) {

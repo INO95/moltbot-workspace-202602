@@ -1,6 +1,6 @@
 const { resolveOauthRouteModelPolicy } = require('./oauth_model_policy');
 
-const PERSONAL_ROUTES = new Set(['finance', 'todo', 'routine', 'workout', 'media', 'place']);
+const PERSONAL_ROUTES = new Set(['finance', 'todo', 'routine', 'workout', 'media', 'place', 'job']);
 
 async function buildStructuredRouteResponse(route, payload, options = {}, deps = {}) {
   const parsed = deps.parseStructuredCommand(route, payload);

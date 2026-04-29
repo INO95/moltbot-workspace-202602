@@ -36,6 +36,7 @@ function runWorker() {
         encoding: 'utf8',
         env: {
             ...process.env,
+            MOLTBOT_BOT_ID: 'bot-daily',
             SKILL_FEEDBACK_AUTORUN: '0',
             TELEGRAM_FINALIZER_ECHO_ONLY: 'true',
         },

@@ -7,6 +7,7 @@ const NO_PREFIX_GUIDE_LINES = Object.freeze([
   '- rust wasm 게임 템플릿 만들어줘',
   '- 메모장에 오늘 회고 저장해줘',
   '- 점심 1200엔 가계에 기록해줘',
+  '- 지원처 추가 회사명=Acme 포지션=Backend Engineer',
   '- 데일리 봇 상태 알려줘',
   '- 웹앱 링크 보내줘',
   '',

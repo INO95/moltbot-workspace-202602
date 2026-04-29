@@ -27,7 +27,7 @@ function runAuto(message, env = {}) {
             MOLTBOT_BOT_ID: 'bot-daily',
             BRIDGE_ALLOWLIST_ENABLED: 'true',
             BRIDGE_ALLOWLIST_DIRECT_COMMANDS: 'auto',
-            BRIDGE_ALLOWLIST_AUTO_ROUTES: 'word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place',
+            BRIDGE_ALLOWLIST_AUTO_ROUTES: 'word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place,job',
             ...env,
         },
     });
@@ -76,6 +76,10 @@ function main() {
     const financeOut = runAuto('가계: 점심 1200엔');
     assert.strictEqual(financeOut.route, 'finance');
     assert.ok(!financeOut.delegated, 'finance route must stay local on daily hub');
+
+    const jobOut = runAuto('지원: 도움말');
+    assert.strictEqual(jobOut.route, 'job');
+    assert.ok(!jobOut.delegated, 'job route must stay local on daily hub');
 
     fs.rmSync(queued.queuePath, { force: true });
 

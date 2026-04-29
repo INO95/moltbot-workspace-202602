@@ -64,6 +64,14 @@ function testRouteDefaults() {
     });
     assert.strictEqual(local.apiLane, 'local-only');
     assert.strictEqual(local.authMode, 'none');
+
+    const job = decideApiLane({ route: 'job', commandText: '지원: 목록' }, {
+        policy,
+        env,
+        budgetPolicy: { monthlyApiBudgetYen: 0, paidApiRequiresApproval: true },
+    });
+    assert.strictEqual(job.apiLane, 'local-only');
+    assert.strictEqual(job.authMode, 'none');
 }
 
 function testFeatureOverrideAndManualOverride() {
@@ -185,6 +193,9 @@ function testRouteInference() {
 
     const inferredTodo = inferRouteFromCommand('투두: 추가 장보기');
     assert.strictEqual(inferredTodo.route, 'todo');
+
+    const inferredJob = inferRouteFromCommand('지원처: 추가 회사명=Acme 포지션=Backend Engineer');
+    assert.strictEqual(inferredJob.route, 'job');
 
     const none = inferRouteFromCommand('그냥 대화');
     assert.strictEqual(none.route, 'none');

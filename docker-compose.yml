@@ -421,7 +421,7 @@ services:
       MOLTBOT_BOT_ROLE: supervisor
       BRIDGE_ALLOWLIST_ENABLED: "true"
       BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
-      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place,job"
       BRIDGE_BLOCK_HINT: "데일리 허브에서 처리할 수 없는 명령입니다. 템플릿/프리픽스를 확인해주세요."
     volumes:
       - openclaw_daily_state:/home/node/.openclaw:rw
@@ -850,7 +850,7 @@ services:
       MOLTBOT_BOT_ROLE: supervisor
       BRIDGE_ALLOWLIST_ENABLED: "true"
       BRIDGE_ALLOWLIST_DIRECT_COMMANDS: "auto"
-      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place"
+      BRIDGE_ALLOWLIST_AUTO_ROUTES: "word,memo,news,report,work,inspect,deploy,project,prompt,link,status,ops,finance,todo,routine,workout,media,place,job"
       BRIDGE_BLOCK_HINT: "데일리(백업) 허브에서 처리할 수 없는 명령입니다. 템플릿/프리픽스를 확인해주세요."
     volumes:
       - openclaw_daily_bak_state:/home/node/.openclaw:rw

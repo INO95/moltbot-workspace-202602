@@ -67,7 +67,11 @@
         "workout": "운동:",
         "media": "콘텐츠:",
         "place": "식당:",
-        "restaurant": "맛집:"
+        "restaurant": "맛집:",
+        "job": "지원:",
+        "jobPipeline": "지원처:",
+        "recruiting": "채용:",
+        "jobEn": "job:"
     },
     "commandAllowlist": {
         "enabled": true,
@@ -86,7 +90,8 @@
             "routine",
             "workout",
             "media",
-            "place"
+            "place",
+            "job"
         ],
         "autoRoutes": [
             "word",
@@ -106,7 +111,8 @@
             "routine",
             "workout",
             "media",
-            "place"
+            "place",
+            "job"
         ]
     },
     "hubDelegation": {
@@ -130,7 +136,8 @@
             "routine": "daily",
             "workout": "daily",
             "media": "daily",
-            "place": "daily"
+            "place": "daily",
+            "job": "daily"
         }
     },
     "naturalLanguageRouting": {
@@ -141,6 +148,7 @@
         "inferTodo": true,
         "inferRoutine": true,
         "inferWorkout": true,
+        "inferJob": true,
         "inferPersona": true,
         "inferBrowser": true,
         "inferStatus": true,

@@ -47,6 +47,9 @@ function main() {
     const allowedFinance = runBridge(['auto', '가계: 점심 1200엔']);
     assert.strictEqual(allowedFinance.route, 'finance');
 
+    const allowedJob = runBridge(['auto', '지원: 도움말']);
+    assert.strictEqual(allowedJob.route, 'job');
+
     const blockedAutoRoute = runBridge(
         ['auto', '작업: 요청: x; 대상: y; 완료기준: z'],
         { BRIDGE_ALLOWLIST_AUTO_ROUTES: 'link,status' },

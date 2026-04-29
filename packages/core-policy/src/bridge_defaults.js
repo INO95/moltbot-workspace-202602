@@ -4,11 +4,11 @@ const DEFAULT_COMMAND_ALLOWLIST = Object.freeze({
   enabled: true,
   directCommands: [
     'auto', 'work', 'inspect', 'deploy', 'project', 'ops', 'word',
-    'news', 'prompt', 'finance', 'todo', 'routine', 'workout', 'media', 'place',
+    'news', 'prompt', 'finance', 'todo', 'routine', 'workout', 'media', 'place', 'job',
   ],
   autoRoutes: [
     'word', 'memo', 'news', 'report', 'work', 'inspect', 'deploy', 'project',
-    'prompt', 'link', 'status', 'ops', 'finance', 'todo', 'routine', 'workout', 'media', 'place',
+    'prompt', 'link', 'status', 'ops', 'finance', 'todo', 'routine', 'workout', 'media', 'place', 'job',
   ],
 });
 
@@ -26,6 +26,7 @@ const DEFAULT_NATURAL_LANGUAGE_ROUTING = Object.freeze({
   inferTodo: true,
   inferRoutine: true,
   inferWorkout: true,
+  inferJob: true,
   inferPersona: true,
   inferBrowser: true,
   inferSchedule: true,

@@ -285,6 +285,28 @@ function inferWorkoutIntentPayload(text) {
     .trim() || raw;
 }
 
+function inferJobIntentPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  const hasExplicitJobLead = /^(지원처|지원|채용|job)\s*[:：]?\s*/i.test(raw);
+  const hasJobKeyword = /(지원처|채용|구인|구직|이직|지원\s*파이프라인|job\s*pipeline|application|리크루터|recruiter|hiring\s*manager|면접|코딩\s*테스트|코테|오퍼|탈락|팔로업|follow.?up)/i.test(raw);
+  const hasJobAction = /(추가|등록|저장|메모|단계|변경|업데이트|다음\s*액션|다음액션|마감|목록|리스트|현황|검색|찾아|상세|주간\s*요약|주간요약|보여|알려|필요)/i.test(raw);
+  const hasCompanyField = /(회사명|회사|포지션|직무|링크|기술스택|fit_score|interest_score|pass_probability|priority)\s*[=:]/i.test(raw);
+  const hasStageChange = /\b(wishlist|applied|recruiter_contact|screening|coding_test|interview_1|interview_2|final_interview|offer|rejected|withdrawn|on_hold)\b/i.test(raw)
+    && /(현재\s*)?단계|stage|변경/i.test(raw);
+  const hasFollowupQuery = /(이번\s*주|오늘).*(팔로업|follow.?up|액션|마감).*(회사|지원|채용)?/i.test(raw);
+  const hasNaturalProcessUpdate = /(?:서류\s*(?:통과|합격|대기|검토)|(?:1차|2차|최종|캐주얼)\s*(?:면접|면담)|면접\s*(?:있|대기|예정|일정|일|시간)|면담\s*(?:있|대기|예정|일정|일|시간)|코딩\s*테스트|코테|오퍼|탈락|불합격|보류|철회|비즈리치)/i.test(raw);
+
+  if (!hasExplicitJobLead && !hasCompanyField && !hasStageChange && !hasFollowupQuery && !hasNaturalProcessUpdate && !(hasJobKeyword && hasJobAction)) {
+    return null;
+  }
+
+  return raw
+    .replace(/^(지원처|지원|채용|job)\s*(?:으로|로|에|를|은|는)?\s*[:：]?\s*/i, '')
+    .trim() || raw;
+}
+
 function inferBrowserIntentPayload(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
@@ -637,6 +659,7 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
   const inferTodo = typeof deps.inferTodoIntentPayload === 'function' ? deps.inferTodoIntentPayload : inferTodoIntentPayload;
   const inferRoutine = typeof deps.inferRoutineIntentPayload === 'function' ? deps.inferRoutineIntentPayload : inferRoutineIntentPayload;
   const inferWorkout = typeof deps.inferWorkoutIntentPayload === 'function' ? deps.inferWorkoutIntentPayload : inferWorkoutIntentPayload;
+  const inferJob = typeof deps.inferJobIntentPayload === 'function' ? deps.inferJobIntentPayload : inferJobIntentPayload;
   const inferBrowser = typeof deps.inferBrowserIntentPayload === 'function' ? deps.inferBrowserIntentPayload : inferBrowserIntentPayload;
   const inferSchedule = typeof deps.inferScheduleIntentPayload === 'function' ? deps.inferScheduleIntentPayload : inferScheduleIntentPayload;
   const inferGogLookup = typeof deps.inferGogLookupIntentPayload === 'function' ? deps.inferGogLookupIntentPayload : inferGogLookupIntentPayload;
@@ -657,6 +680,12 @@ function inferNaturalLanguageRoute(text, options = {}, deps = {}) {
     const payload = inferMemo(normalized);
     if (payload != null) {
       return { route: 'memo', payload, inferred: true, inferredBy: 'natural-language:memo' };
+    }
+  }
+  if (routing.inferJob) {
+    const payload = inferJob(normalized);
+    if (payload != null) {
+      return { route: 'job', payload, inferred: true, inferredBy: 'natural-language:job' };
     }
   }
   if (routing.inferFinance) {
@@ -752,6 +781,7 @@ module.exports = {
   inferTodoIntentPayload,
   inferRoutineIntentPayload,
   inferWorkoutIntentPayload,
+  inferJobIntentPayload,
   inferBrowserIntentPayload,
   inferScheduleIntentPayload,
   inferGogLookupIntentPayload,

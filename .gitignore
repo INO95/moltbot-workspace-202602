@@ -38,6 +38,8 @@ backups/
 credentials/
 
 # Ops runtime artifacts
+ops/alerts/sent/*.json
+ops/alerts/summaries/
 ops/commands/outbox/
 ops/commands/results.jsonl
 ops/commands/state/completed/
@@ -46,6 +48,7 @@ ops/commands/state/grants/
 ops/commands/state/pending/
 ops/commands/state/processing/
 ops/state/browser_requests.jsonl
+ops/state/briefing_locks/
 ops/state/cron_backup_*.txt
 ops/state/state.json
 ops/state/issues.json
