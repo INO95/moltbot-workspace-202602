@@ -185,7 +185,7 @@ Last updated: 2026-02-17
 - Verify isolation guard:
   - `npm run -s check:container-isolation-refs`
 - Check GitHub secret scanning alerts:
-  - `gh api -H 'Accept: application/vnd.github+json' 'repos/INO95/moltbot-workspace-202602/secret-scanning/alerts?state=open'`
+  - `gh api -H 'Accept: application/vnd.github+json' 'repos/INO95/moltbot-workspace/secret-scanning/alerts?state=open'`
 - If `telegram_bot_token` leak is detected, rotate token in BotFather first, then update `$HOME/.config/moltbot/runtime.env`.
 
 ## Bridge queue
