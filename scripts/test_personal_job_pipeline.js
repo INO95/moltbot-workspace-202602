@@ -29,6 +29,7 @@ async function main() {
         assert.strictEqual(add.success, true);
         assert.strictEqual(add.action, 'add');
         assert.ok(add.entityId);
+        assert.ok(/단계:\s*관심 목록/.test(add.telegramReply));
 
         const duplicate = await handleJobPipelineCommand(
             '지원처 추가 회사명=Acme 포지션=Backend Engineer 링크=https://jobs.example/acme 스택=Node.js 위치=Tokyo fit_score=4 interest_score=5 priority=2',
@@ -41,6 +42,8 @@ async function main() {
         assert.strictEqual(stage.success, true);
         assert.strictEqual(stage.action, 'stage');
         assert.strictEqual(stage.result.detail.current_stage, 'interview_1');
+        assert.ok(/1차 면접/.test(stage.telegramReply));
+        assert.ok(!stage.telegramReply.includes('interview_1'));
 
         const naturalInterview = await handleJobPipelineCommand('Acme 서류 통과해서 1차 면접 대기중이고 1차 면접일은 5월14일 19시야', {
             dbPath,
@@ -96,6 +99,14 @@ async function main() {
         assert.strictEqual(list.action, 'list');
         assert.ok(Array.isArray(list.rows));
         assert.ok(list.rows.length >= 1);
+        assert.ok(/1차 면접/.test(list.telegramReply));
+        assert.ok(/채용 담당자 연락 중/.test(list.telegramReply));
+        assert.ok(!list.telegramReply.includes('interview_1'));
+
+        const hiringStatus = await handleJobPipelineCommand('구인 현황', { dbPath });
+        assert.strictEqual(hiringStatus.success, true);
+        assert.strictEqual(hiringStatus.action, 'list');
+        assert.ok(/채용 담당자 연락 중/.test(hiringStatus.telegramReply));
 
         const pending = await handleJobPipelineCommand('이번 주 팔로업 필요한 회사 보여줘', {
             dbPath,
@@ -115,6 +126,9 @@ async function main() {
         assert.strictEqual(detail.action, 'detail');
         assert.strictEqual(detail.detail.detail.company_name, 'Acme');
         assert.ok(detail.detail.timeline.length >= 3);
+        assert.ok(/단계:\s*1차 면접/.test(detail.telegramReply));
+        assert.ok(/상태:\s*진행 중/.test(detail.telegramReply));
+        assert.ok(!detail.telegramReply.includes('interview_1'));
 
         const weekly = await handleJobPipelineCommand('주간요약', {
             dbPath,
@@ -123,6 +137,7 @@ async function main() {
         assert.strictEqual(weekly.success, true);
         assert.strictEqual(weekly.action, 'weekly_summary');
         assert.ok(weekly.summary.byStage.length >= 1);
+        assert.ok(!weekly.telegramReply.includes('interview_1'));
 
         console.log('test_personal_job_pipeline: ok');
     } finally {

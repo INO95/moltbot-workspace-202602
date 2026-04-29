@@ -1,8 +1,46 @@
 const personalStorage = require('./personal_storage');
 const jobs = require('./personal_job_pipeline_storage');
 
+const STAGE_LABELS = Object.freeze({
+    wishlist: '관심 목록',
+    applied: '지원 완료',
+    recruiter_contact: '채용 담당자 연락 중',
+    screening: '서류 전형',
+    coding_test: '코딩 테스트',
+    interview_1: '1차 면접',
+    interview_2: '2차 면접',
+    final_interview: '최종 면접',
+    offer: '오퍼',
+    rejected: '탈락',
+    withdrawn: '지원 철회',
+    on_hold: '보류',
+});
+
+const STATUS_LABELS = Object.freeze({
+    active: '진행 중',
+    closed: '종료',
+    on_hold: '보류',
+});
+
 function normalize(text) {
     return personalStorage.normalizeSpace(text);
+}
+
+function stageLabel(stage) {
+    const key = String(stage || 'wishlist').trim() || 'wishlist';
+    return STAGE_LABELS[key] || key;
+}
+
+function statusLabel(status) {
+    const key = String(status || 'active').trim() || 'active';
+    return STATUS_LABELS[key] || key;
+}
+
+function formatTimelineSummary(summary) {
+    return String(summary || '').replace(
+        /단계 변경:\s*([a-z0-9_가-힣-]+)\s*->\s*([a-z0-9_가-힣-]+)/i,
+        (_, from, to) => `단계 변경: ${from === '-' ? '없음' : stageLabel(from)} -> ${stageLabel(to)}`,
+    );
 }
 
 function tokyoDate(now = null) {
@@ -255,7 +293,7 @@ function inferNaturalStage(raw) {
 
 function actionTitleForStage(stage) {
     const titles = {
-        recruiter_contact: '리크루터 연락',
+        recruiter_contact: '채용 담당자 연락',
         screening: '서류 진행 확인',
         coding_test: '코딩 테스트',
         interview_1: '1차 면접',
@@ -403,7 +441,7 @@ function parseCommand(payload, options = {}) {
     if (/(이번\s*주|this\s*week|오늘).*(팔로업|follow.?up|액션|할\s*일|마감)|^(팔로업|액션)\s*(오늘|이번\s*주|목록)?/i.test(raw)) {
         return { action: 'pending', range: /오늘/.test(raw) ? 'today' : 'week' };
     }
-    if (/^(목록|리스트|파이프라인|현황|list|status)(?:\s|$)/i.test(raw)) return { action: 'list' };
+    if (/^(목록|리스트|파이프라인|현황|구인\s*현황|채용\s*현황|지원\s*현황|list|status)(?:\s|$)/i.test(raw)) return { action: 'list' };
 
     const search = raw.match(/^(검색|찾아|search)\s+(.+)$/i);
     if (search) return { action: 'search', query: normalize(search[2]) };
@@ -432,7 +470,7 @@ function formatOpportunityLine(row) {
     const next = row.next_action_title || row.next_action_at
         ? ` / 다음: ${row.next_action_title || '-'}${row.next_action_at ? ` (${row.next_action_at})` : ''}`
         : '';
-    return `- #${row.opportunity_id} ${row.company_name} / ${row.title} [${stage}]${next}`;
+    return `- #${row.opportunity_id} ${row.company_name} / ${row.title} [${stageLabel(stage)}]${next}`;
 }
 
 function buildListReply(rows) {
@@ -446,7 +484,7 @@ function buildListReply(rows) {
         const stage = row.current_stage || 'wishlist';
         if (stage !== currentStage) {
             currentStage = stage;
-            lines.push(`[${stage}]`);
+            lines.push(`[${stageLabel(stage)}]`);
         }
         lines.push(formatOpportunityLine(row));
     }
@@ -466,8 +504,8 @@ function buildDetailReply(payload) {
     const d = payload.detail;
     const lines = [
         `${d.company_name} / ${d.title}`,
-        `- 단계: ${d.current_stage || 'wishlist'}`,
-        `- 상태: ${d.status || 'active'}`,
+        `- 단계: ${stageLabel(d.current_stage)}`,
+        `- 상태: ${statusLabel(d.status)}`,
         `- 기술/위치: ${d.tech_stack || '-'} / ${d.opportunity_location || d.company_location || '-'}`,
         `- 링크: ${d.jd_url || d.company_website || '-'}`,
     ];
@@ -478,14 +516,14 @@ function buildDetailReply(payload) {
     }
     if (payload.timeline && payload.timeline.length) {
         lines.push('- 최근 타임라인:');
-        lines.push(...payload.timeline.slice(0, 5).map((row) => `  - ${String(row.event_at || '').slice(0, 10)} ${row.summary}`));
+        lines.push(...payload.timeline.slice(0, 5).map((row) => `  - ${String(row.event_at || '').slice(0, 10)} ${formatTimelineSummary(row.summary)}`));
     }
     return lines.join('\n');
 }
 
 function buildWeeklySummaryReply(summary) {
     const stageText = summary.byStage.length
-        ? summary.byStage.map((row) => `${row.current_stage}:${row.count}`).join(', ')
+        ? summary.byStage.map((row) => `${stageLabel(row.current_stage)}:${row.count}`).join(', ')
         : '-';
     const lines = [
         `지원 주간 요약 (${summary.since} ~ ${summary.today})`,
@@ -498,7 +536,7 @@ function buildWeeklySummaryReply(summary) {
     }
     if (summary.stageChanges.length) {
         lines.push('- 단계 변경:');
-        lines.push(...summary.stageChanges.map((row) => `  - ${row.company_name} / ${row.title}: ${row.summary}`));
+        lines.push(...summary.stageChanges.map((row) => `  - ${row.company_name} / ${row.title}: ${formatTimelineSummary(row.summary)}`));
     }
     return lines.join('\n');
 }
@@ -674,7 +712,7 @@ async function handleJobPipelineCommand(payload, options = {}) {
                     '지원처 추가 완료',
                     `- 회사: ${result.company.name}`,
                     `- 포지션: ${result.opportunity.title}`,
-                    `- 단계: ${result.process.current_stage}`,
+                    `- 단계: ${stageLabel(result.process.current_stage)}`,
                 ].join('\n'),
             };
         }
@@ -716,7 +754,7 @@ async function handleJobPipelineCommand(payload, options = {}) {
                 eventId: event.eventId,
                 entityId: result.detail && result.detail.opportunity_id,
                 result,
-                telegramReply: `${result.detail.company_name} 단계 변경 완료: ${result.detail.current_stage}`,
+                telegramReply: `${result.detail.company_name} 단계 변경 완료: ${stageLabel(result.detail.current_stage)}`,
             };
         }
         if (parsed.action === 'note') {
@@ -786,7 +824,7 @@ async function handleJobPipelineCommand(payload, options = {}) {
             if (!result) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
             const detail = result.detail;
             const lines = [`${detail.company_name} 반영 완료`];
-            if (parsed.stage) lines.push(`- 단계: ${parsed.stage}`);
+            if (parsed.stage) lines.push(`- 단계: ${stageLabel(parsed.stage)}`);
             if (parsed.nextActionTitle && parsed.dueAt) lines.push(`- 다음 액션: ${parsed.nextActionTitle} / ${parsed.dueAt}`);
             if (parsed.note) lines.push(`- 메모: ${parsed.note}`);
             return {

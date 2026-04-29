@@ -290,7 +290,7 @@ function inferJobIntentPayload(text) {
   if (!raw) return null;
 
   const hasExplicitJobLead = /^(지원처|지원|채용|job)\s*[:：]?\s*/i.test(raw);
-  const hasJobKeyword = /(지원처|채용|구직|이직|지원\s*파이프라인|job\s*pipeline|application|리크루터|recruiter|hiring\s*manager|면접|코딩\s*테스트|코테|오퍼|탈락|팔로업|follow.?up)/i.test(raw);
+  const hasJobKeyword = /(지원처|채용|구인|구직|이직|지원\s*파이프라인|job\s*pipeline|application|리크루터|recruiter|hiring\s*manager|면접|코딩\s*테스트|코테|오퍼|탈락|팔로업|follow.?up)/i.test(raw);
   const hasJobAction = /(추가|등록|저장|메모|단계|변경|업데이트|다음\s*액션|다음액션|마감|목록|리스트|현황|검색|찾아|상세|주간\s*요약|주간요약|보여|알려|필요)/i.test(raw);
   const hasCompanyField = /(회사명|회사|포지션|직무|링크|기술스택|fit_score|interest_score|pass_probability|priority)\s*[=:]/i.test(raw);
   const hasStageChange = /\b(wishlist|applied|recruiter_contact|screening|coding_test|interview_1|interview_2|final_interview|offer|rejected|withdrawn|on_hold)\b/i.test(raw)
