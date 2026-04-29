@@ -47,6 +47,7 @@ function normalizeOpsAction(value) {
   if (/(일정|스케줄|schedule|calendar)/.test(v)) return 'schedule';
   if (/(브라우저|browser|웹자동화)/.test(v)) return 'browser';
   if (/(토큰조회|승인조회|토큰|token)/.test(v)) return 'token';
+  if (/(페르소나|캐릭터|persona|character)/.test(v)) return 'persona';
   if (/(승인|approve)/.test(v)) return 'approve';
   if (/(거부|deny)/.test(v)) return 'deny';
   return null;

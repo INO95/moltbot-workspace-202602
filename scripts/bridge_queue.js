@@ -23,15 +23,17 @@ function appendInboxLog(payload) {
     fs.appendFileSync(INBOX_LOG_PATH, `${JSON.stringify(payload)}\n`, 'utf8');
 }
 
-function enqueueBridgePayload(payload) {
+function enqueueBridgePayload(payload, options = {}) {
     ensureBridgeDir();
     const normalized = {
         ...payload,
         ackId: payload.ackId || makeAckId(payload.taskId),
     };
     appendInboxLog(normalized);
-    // Keep legacy single-file consumer compatibility.
-    writeLatestInbox(normalized);
+    if (options.writeLatest !== false) {
+        // Keep legacy single-file consumer compatibility.
+        writeLatestInbox(normalized);
+    }
     return normalized;
 }
 
