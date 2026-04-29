@@ -1,8 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..');
-const OPS_COMMANDS_ROOT = path.join(ROOT, 'ops', 'commands');
+const ROOT = process.env.OPS_WORKSPACE_ROOT
+    ? path.resolve(String(process.env.OPS_WORKSPACE_ROOT))
+    : path.join(__dirname, '..');
+const OPS_COMMANDS_ROOT = process.env.OPS_COMMANDS_ROOT
+    ? path.resolve(String(process.env.OPS_COMMANDS_ROOT))
+    : path.join(ROOT, 'ops', 'commands');
 const OUTBOX_DIR = path.join(OPS_COMMANDS_ROOT, 'outbox');
 const STATE_DIR = path.join(OPS_COMMANDS_ROOT, 'state');
 const PROCESSING_DIR = path.join(STATE_DIR, 'processing');

@@ -5,9 +5,11 @@ const { spawnSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 
 const RUNTIME_ARTIFACT_PATTERNS = [
+  /^ops\/alerts\/sent\/.*\.json$/,
   /^ops\/commands\/outbox\//,
   /^ops\/commands\/results\.jsonl$/,
   /^ops\/commands\/state\/(?:completed|consumed|grants|pending|processing)\//,
+  /^ops\/state\/briefing_locks\//,
   /^ops\/state\/(?:state\.json|issues\.json|leader_snapshot_latest\.json|browser_requests\.jsonl)$/,
   /^ops\/state\/cron_backup_.*\.txt$/,
   /^data\/state\/pending_approvals\.json$/,
