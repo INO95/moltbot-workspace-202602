@@ -107,6 +107,14 @@ function main() {
     assert.strictEqual(jobNaturalInterview.route, 'job');
     assert.strictEqual(jobNaturalInterview.inferredBy, 'natural-language:job');
 
+    const jobBulkInterviews = runRouteWithEnv('그리고 5월14일 16시에 eba테크 1차면접 있고 5월 1일 15:30에 datum studio 캐주얼면접 있어', inferEnv);
+    assert.strictEqual(jobBulkInterviews.route, 'job');
+    assert.strictEqual(jobBulkInterviews.inferredBy, 'natural-language:job');
+
+    const jobCasualBizreach = runRouteWithEnv('5월 1일 17:30에 멤버스 캐주얼면담 있고 여기는 비즈리치로 연락중', inferEnv);
+    assert.strictEqual(jobCasualBizreach.route, 'job');
+    assert.strictEqual(jobCasualBizreach.inferredBy, 'natural-language:job');
+
     const work = runRouteWithEnv('브릿지 라우터 리팩터링해줘', inferEnv);
     assert.strictEqual(work.route, 'work');
     assert.strictEqual(work.inferredBy, 'natural-language:work');

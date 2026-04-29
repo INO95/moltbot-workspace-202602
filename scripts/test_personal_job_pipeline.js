@@ -52,6 +52,30 @@ async function main() {
         assert.strictEqual(naturalInterview.result.nextAction.action.due_at, '2026-05-14 19:00');
         assert.ok(/서류 통과/.test(naturalInterview.result.note.note.content));
 
+        const bulk = await handleJobPipelineCommand('그리고 5월14일 16시에 eba테크 1차면접 있고 5월 1일 15:30에 datum studio 캐주얼면접 있어', {
+            dbPath,
+            now: '2026-04-29T00:00:00+09:00',
+        });
+        assert.strictEqual(bulk.success, true);
+        assert.strictEqual(bulk.action, 'bulk_process_update');
+        assert.strictEqual(bulk.result.length, 2);
+        assert.strictEqual(bulk.result[0].item.token, 'eba테크');
+        assert.strictEqual(bulk.result[0].item.dueAt, '2026-05-14 16:00');
+        assert.strictEqual(bulk.result[1].item.token, 'datum studio');
+        assert.strictEqual(bulk.result[1].item.nextActionTitle, '캐주얼 면접');
+        assert.strictEqual(bulk.result[1].item.dueAt, '2026-05-01 15:30');
+
+        const members = await handleJobPipelineCommand('5월 1일 17:30에 멤버스 캐주얼면담 있고 여기는 비즈리치로 연락중', {
+            dbPath,
+            now: '2026-04-29T00:00:00+09:00',
+        });
+        assert.strictEqual(members.success, true);
+        assert.strictEqual(members.action, 'process_update');
+        assert.strictEqual(members.result.detail.company_name, '멤버스');
+        assert.strictEqual(members.result.detail.current_stage, 'recruiter_contact');
+        assert.strictEqual(members.result.nextAction.action.due_at, '2026-05-01 17:30');
+        assert.ok(/비즈리치로 연락중/.test(members.result.note.note.content));
+
         const note = await handleJobPipelineCommand('리크루터 메모 저장 Acme 다음 주에 답장 필요 #followup', { dbPath });
         assert.strictEqual(note.success, true);
         assert.strictEqual(note.action, 'note');

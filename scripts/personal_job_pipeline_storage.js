@@ -44,6 +44,7 @@ function normalizeNullable(value) {
 
 function normalizeStage(value) {
     const raw = String(value || '').trim().toLowerCase();
+    const compact = raw.replace(/\s+/g, '');
     const alias = {
         wish: 'wishlist',
         관심: 'wishlist',
@@ -57,21 +58,29 @@ function normalizeStage(value) {
         연락: 'recruiter_contact',
         서류: 'screening',
         스크리닝: 'screening',
+        '서류통과': 'screening',
+        '서류합격': 'screening',
         과제: 'coding_test',
         코딩테스트: 'coding_test',
         코테: 'coding_test',
         면접1: 'interview_1',
         '1차': 'interview_1',
+        '1차면접': 'interview_1',
         면접2: 'interview_2',
         '2차': 'interview_2',
+        '2차면접': 'interview_2',
         최종: 'final_interview',
+        최종면접: 'final_interview',
+        캐주얼면접: 'recruiter_contact',
+        캐주얼면담: 'recruiter_contact',
+        면담: 'recruiter_contact',
         오퍼: 'offer',
         합격: 'offer',
         탈락: 'rejected',
         거절: 'withdrawn',
         보류: 'on_hold',
     };
-    const normalized = alias[raw] || raw;
+    const normalized = alias[raw] || alias[compact] || raw;
     return JOB_STAGES.includes(normalized) ? normalized : '';
 }
 
@@ -122,7 +131,21 @@ VALUES (
 );
 `,
     );
-    return storage.runSqlJson(dbPath, 'SELECT * FROM job_timeline_events ORDER BY id DESC LIMIT 1;')[0] || null;
+    return storage.runSqlJson(
+        dbPath,
+        `
+SELECT *
+FROM job_timeline_events
+WHERE event_id = ${sqlQuote(String(input.eventId || ''))}
+  AND opportunity_id = ${sqlQuote(Number(input.opportunityId))}
+  AND company_id = ${sqlQuote(Number(input.companyId))}
+  AND event_type = ${sqlQuote(String(input.eventType || 'note').trim() || 'note')}
+  AND event_at = ${sqlQuote(eventAt)}
+  AND summary = ${sqlQuote(normalizeText(input.summary) || '기록')}
+ORDER BY id DESC
+LIMIT 1;
+`,
+    )[0] || null;
 }
 
 function upsertCompany(input = {}, options = {}) {
@@ -250,7 +273,7 @@ VALUES (
 );
 `,
     );
-    return storage.runSqlJson(dbPath, 'SELECT * FROM job_opportunities ORDER BY id DESC LIMIT 1;')[0] || null;
+    return findOpportunityByCompanyAndTitle(dbPath, companyId, title);
 }
 
 function ensureApplicationProcess(input = {}, options = {}) {
@@ -483,7 +506,19 @@ VALUES (
 );
 `,
     );
-    const contact = storage.runSqlJson(dbPath, 'SELECT * FROM job_contacts ORDER BY id DESC LIMIT 1;')[0] || null;
+    const contact = storage.runSqlJson(
+        dbPath,
+        `
+SELECT *
+FROM job_contacts
+WHERE event_id = ${sqlQuote(String(input.eventId || ''))}
+  AND company_id = ${sqlQuote(Number(target.company_id))}
+  AND opportunity_id = ${sqlQuote(Number(target.opportunity_id))}
+  AND created_at = ${sqlQuote(now)}
+ORDER BY id DESC
+LIMIT 1;
+`,
+    )[0] || null;
     insertTimelineEvent({
         eventId: input.eventId,
         companyId: target.company_id,
@@ -521,7 +556,20 @@ VALUES (
 );
 `,
     );
-    const note = storage.runSqlJson(dbPath, 'SELECT * FROM job_notes ORDER BY id DESC LIMIT 1;')[0] || null;
+    const note = storage.runSqlJson(
+        dbPath,
+        `
+SELECT *
+FROM job_notes
+WHERE event_id = ${sqlQuote(String(input.eventId || ''))}
+  AND company_id = ${sqlQuote(Number(target.company_id))}
+  AND opportunity_id = ${sqlQuote(Number(target.opportunity_id))}
+  AND content = ${sqlQuote(content)}
+  AND created_at = ${sqlQuote(createdAt)}
+ORDER BY id DESC
+LIMIT 1;
+`,
+    )[0] || null;
     insertTimelineEvent({
         eventId: input.eventId,
         companyId: target.company_id,
@@ -594,7 +642,20 @@ VALUES (
     }
     const action = existing
         ? storage.runSqlJson(dbPath, `SELECT * FROM job_next_actions WHERE id = ${sqlQuote(Number(existing.id))} LIMIT 1;`)[0] || null
-        : storage.runSqlJson(dbPath, 'SELECT * FROM job_next_actions ORDER BY id DESC LIMIT 1;')[0] || null;
+        : storage.runSqlJson(
+            dbPath,
+            `
+SELECT *
+FROM job_next_actions
+WHERE event_id = ${sqlQuote(String(input.eventId || ''))}
+  AND opportunity_id = ${sqlQuote(Number(target.opportunity_id))}
+  AND title = ${sqlQuote(title)}
+  AND due_at IS ${normalizeNullable(input.dueAt) == null ? 'NULL' : sqlQuote(normalizeNullable(input.dueAt))}
+  AND created_at = ${sqlQuote(now)}
+ORDER BY id DESC
+LIMIT 1;
+`,
+        )[0] || null;
     storage.runSql(
         dbPath,
         `

@@ -30,7 +30,7 @@ function stripLead(text) {
 
 function parseKeyValueFields(text) {
     const raw = String(text || '');
-    const keyRe = /(회사명|회사|company|포지션|직무|role|position|title|링크|url|jd_url|스택|기술스택|tech_stack|위치|지역|location|근무형태|work_mode|단계|stage|fit_score|fit|interest_score|interest|pass_probability|확률|priority|우선순위|다음액션|next_action|액션|마감|due|source|출처|담당자|리크루터|recruiter)\s*[=:]\s*/gi;
+    const keyRe = /(회사명|회사|company|포지션|직무|role|position|title|링크|url|jd_url|스택|기술스택|tech_stack|위치|지역|location|근무형태|work_mode|단계|stage|면접일|interview_at|fit_score|fit|interest_score|interest|pass_probability|확률|priority|우선순위|다음액션|next_action|액션|마감|due|source|출처|담당자|리크루터|recruiter)\s*[=:]\s*/gi;
     const matches = [];
     let match;
     while ((match = keyRe.exec(raw)) != null) {
@@ -66,6 +66,8 @@ function parseScore(value) {
 
 function formatTimeFromRaw(text) {
     const raw = String(text || '');
+    const colon = raw.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+    if (colon) return `${String(Number(colon[1])).padStart(2, '0')}:${colon[2]}`;
     const match = raw.match(/(오전|오후)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분?)?/);
     if (!match) return '';
     const meridiem = String(match[1] || '').trim();
@@ -143,6 +145,10 @@ function parseAddCommand(raw) {
             priority: parseScore(firstField(fields, ['priority', '우선순위'])),
         },
         stage: jobs.normalizeStage(firstField(fields, ['단계', 'stage'])) || 'wishlist',
+        nextActionTitle: firstField(fields, ['면접일', 'interview_at'])
+            ? actionTitleForStage(jobs.normalizeStage(firstField(fields, ['단계', 'stage'])) || 'interview_1')
+            : '',
+        dueAt: parseDateToken(firstField(fields, ['면접일', 'interview_at']), {}),
     };
 }
 
@@ -236,6 +242,7 @@ function inferNaturalStage(raw) {
     if (/(철회|withdrawn)/i.test(raw)) return 'withdrawn';
     if (/(보류|on_hold)/i.test(raw)) return 'on_hold';
     if (/(오퍼|offer|합격)/i.test(raw) && !/서류\s*합격/i.test(raw)) return 'offer';
+    if (/(캐주얼\s*(면접|면담)|면담)/i.test(raw)) return 'recruiter_contact';
     if (/(최종|final)\s*면접/i.test(raw)) return 'final_interview';
     if (/(2차|second)\s*면접/i.test(raw)) return 'interview_2';
     if (/(1차|first)\s*면접/i.test(raw)) return 'interview_1';
@@ -248,6 +255,7 @@ function inferNaturalStage(raw) {
 
 function actionTitleForStage(stage) {
     const titles = {
+        recruiter_contact: '리크루터 연락',
         screening: '서류 진행 확인',
         coding_test: '코딩 테스트',
         interview_1: '1차 면접',
@@ -261,18 +269,34 @@ function actionTitleForStage(stage) {
     return titles[stage] || '지원 상태 확인';
 }
 
+function actionTitleFromText(raw, stage) {
+    if (/캐주얼\s*면담/i.test(raw)) return '캐주얼 면담';
+    if (/캐주얼\s*면접/i.test(raw)) return '캐주얼 면접';
+    return actionTitleForStage(stage);
+}
+
 function buildNaturalProcessNote(raw, stage, dueAt) {
     const parts = [];
     if (/서류\s*(통과|합격)/i.test(raw)) parts.push('서류 통과');
-    if (dueAt && /면접/i.test(raw)) parts.push(`${actionTitleForStage(stage)} 일정은 ${dueAt}`);
+    if (dueAt && /(면접|면담)/i.test(raw)) parts.push(`${actionTitleFromText(raw, stage)} 일정은 ${dueAt}`);
     if (/(대기중|대기\s*중|대기)/i.test(raw) && !parts.some((part) => /대기/.test(part))) {
-        parts.push(`${actionTitleForStage(stage)} 대기중`);
+        parts.push(`${actionTitleFromText(raw, stage)} 대기중`);
     }
+    const source = extractContactSource(raw);
+    if (source) parts.push(`${source}로 연락중`);
     return parts.length ? parts.join(', ') : normalize(raw);
 }
 
+function extractContactSource(raw) {
+    const text = String(raw || '');
+    const scoped = text.match(/여기는\s*([^\s,，]+)\s*(?:로|으로)\s*연락\s*중/i);
+    if (scoped) return normalize(scoped[1]);
+    const match = text.match(/([^\s,，]+)\s*(?:로|으로)\s*연락\s*중/i);
+    return match ? normalize(match[1]) : '';
+}
+
 function parseNaturalProcessUpdate(raw, options = {}) {
-    if (!/(서류|면접|코딩\s*테스트|코테|오퍼|탈락|불합격|보류|철회|지원\s*완료|지원했)/i.test(raw)) return null;
+    if (!/(서류|면접|면담|코딩\s*테스트|코테|오퍼|탈락|불합격|보류|철회|지원\s*완료|지원했)/i.test(raw)) return null;
     const lead = raw.match(/^([^\s,，]+)\s+(.+)$/);
     if (!lead) return null;
     const token = stripCompanyParticle(lead[1]);
@@ -288,10 +312,86 @@ function parseNaturalProcessUpdate(raw, options = {}) {
         action: 'process_update',
         token,
         stage,
-        nextActionTitle: dueAt ? actionTitleForStage(stage) : '',
+        nextActionTitle: dueAt ? actionTitleFromText(raw, stage) : '',
         dueAt,
         note: buildNaturalProcessNote(raw, stage, dueAt),
+        autoCreate: true,
+        source: extractContactSource(raw),
     };
+}
+
+function cleanupDatedProcessBody(body) {
+    return normalize(body)
+        .replace(/^(그리고|또|,|，)\s*/i, '')
+        .replace(/\s*(그리고|또)\s*$/i, '')
+        .replace(/\s*(있고|있어|있음|예정이야|예정|이야|야|입니다|임)\s*$/i, '')
+        .trim();
+}
+
+function dueAtFromDateMatch(match, options = {}) {
+    const year = match[1] || tokyoDate(options.now).slice(0, 4);
+    const date = `${year}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`;
+    const meridiem = String(match[4] || '').trim();
+    let hour = match[5] == null || match[5] === '' ? null : Number(match[5]);
+    const minuteRaw = match[6] || match[7] || '';
+    const minute = minuteRaw === '' ? 0 : Number(minuteRaw);
+    if (hour == null || !Number.isFinite(hour)) return date;
+    if (meridiem === '오후' && hour < 12) hour += 12;
+    if (meridiem === '오전' && hour === 12) hour = 0;
+    return `${date} ${String(hour).padStart(2, '0')}:${String(Number.isFinite(minute) ? minute : 0).padStart(2, '0')}`;
+}
+
+function parseDatedProcessBody(body, dueAt) {
+    const cleaned = cleanupDatedProcessBody(body);
+    if (!cleaned) return null;
+    const stageMatch = cleaned.match(/(캐주얼\s*(?:면접|면담)|1차\s*면접|2차\s*면접|최종\s*면접|코딩\s*테스트|코테|면접|면담|오퍼|탈락|불합격|보류|철회)/i);
+    if (!stageMatch) return null;
+
+    const token = stripCompanyParticle(cleaned.slice(0, stageMatch.index).trim());
+    if (!token) return null;
+    const stageText = stageMatch[0];
+    const stage = inferNaturalStage(stageText) || 'recruiter_contact';
+    const title = actionTitleFromText(stageText, stage);
+    const source = extractContactSource(cleaned);
+    const noteParts = [`${title} 일정은 ${dueAt}`];
+    if (source) noteParts.push(`${source}로 연락중`);
+    return {
+        action: 'process_update',
+        token,
+        stage,
+        nextActionTitle: title,
+        dueAt,
+        note: noteParts.join(', '),
+        autoCreate: true,
+        source,
+    };
+}
+
+function parseDatedProcessUpdates(raw, options = {}) {
+    if (!/(면접|면담|코딩\s*테스트|코테|오퍼|탈락|불합격|보류|철회)/i.test(raw)) return null;
+    const dateRe = /(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*(?:(오전|오후)?\s*(\d{1,2})(?::(\d{2})|\s*시(?:\s*(\d{1,2})\s*분?)?)?)?\s*(?:에|에는|까지|로)?/gi;
+    const matches = [];
+    let match;
+    while ((match = dateRe.exec(raw)) != null) {
+        matches.push({
+            match,
+            start: match.index,
+            end: dateRe.lastIndex,
+            dueAt: dueAtFromDateMatch(match, options),
+        });
+    }
+    if (!matches.length) return null;
+
+    const items = [];
+    for (let i = 0; i < matches.length; i += 1) {
+        const cur = matches[i];
+        const next = matches[i + 1];
+        const body = raw.slice(cur.end, next ? next.start : raw.length);
+        const item = parseDatedProcessBody(body, cur.dueAt);
+        if (item) items.push(item);
+    }
+    if (items.length === 0) return null;
+    return items.length === 1 ? items[0] : { action: 'bulk_process_update', items };
 }
 
 function parseCommand(payload, options = {}) {
@@ -310,6 +410,9 @@ function parseCommand(payload, options = {}) {
 
     const detail = raw.match(/^(상세|보기|summary|detail)\s+(.+)$/i);
     if (detail) return { action: 'detail', token: normalize(detail[2]) };
+
+    const datedUpdates = parseDatedProcessUpdates(raw, options);
+    if (datedUpdates) return datedUpdates;
 
     const add = /^(추가|등록|add)\b/i.test(raw) || /회사(?:명)?\s*[=:]/i.test(raw)
         ? parseAddCommand(raw)
@@ -412,7 +515,73 @@ function buildHelpReply() {
 }
 
 function mutationDedupeMaterial(parsed) {
+    if (parsed.action === 'bulk_process_update') {
+        return `job:${parsed.action}:${JSON.stringify(parsed.items || [])}`;
+    }
     return `job:${parsed.action}:${parsed.token || ''}:${parsed.query || ''}:${parsed.stage || ''}:${parsed.company && parsed.company.name || ''}:${parsed.opportunity && parsed.opportunity.title || ''}:${parsed.title || parsed.nextActionTitle || ''}:${parsed.dueAt || ''}:${parsed.content || parsed.note || ''}`;
+}
+
+function applyProcessUpdate(parsed, event, payload, options = {}) {
+    let target = jobs.resolveOpportunity(parsed.token, options);
+    let stageResult = null;
+    if (!target && parsed.autoCreate) {
+        const created = jobs.createApplication({
+            eventId: event.eventId,
+            rawText: payload,
+            company: { name: parsed.token },
+            opportunity: {
+                title: '미정 포지션',
+                source: parsed.source,
+            },
+            stage: parsed.stage || 'wishlist',
+            ownerNote: parsed.note,
+        }, options);
+        target = created.detail;
+        stageResult = { process: created.process, detail: created.detail, created: true };
+    }
+    if (!target) return null;
+
+    if (parsed.stage && !stageResult) {
+        stageResult = jobs.updateStage({
+            eventId: event.eventId,
+            rawText: payload,
+            token: parsed.token,
+            stage: parsed.stage,
+            note: parsed.note,
+        }, options);
+        if (!stageResult) return null;
+    }
+
+    let actionResult = null;
+    if (parsed.nextActionTitle && parsed.dueAt) {
+        actionResult = jobs.setNextAction({
+            eventId: event.eventId,
+            rawText: payload,
+            token: parsed.token,
+            title: parsed.nextActionTitle,
+            dueAt: parsed.dueAt,
+        }, options);
+        if (!actionResult) return null;
+    }
+
+    let noteResult = null;
+    if (parsed.note) {
+        noteResult = jobs.recordNote({
+            eventId: event.eventId,
+            rawText: payload,
+            token: parsed.token,
+            content: parsed.note,
+            eventType: 'process_note',
+            tags: parseTags(parsed.note),
+        }, options);
+        if (!noteResult) return null;
+    }
+
+    const detail = (actionResult && actionResult.detail)
+        || (stageResult && stageResult.detail)
+        || (noteResult && noteResult.detail)
+        || target;
+    return { stage: stageResult, nextAction: actionResult, note: noteResult, detail };
 }
 
 async function handleJobPipelineCommand(payload, options = {}) {
@@ -456,7 +625,7 @@ async function handleJobPipelineCommand(payload, options = {}) {
         const summary = jobs.buildWeeklySummary(options);
         return { route: 'job', success: true, action: 'weekly_summary', summary, telegramReply: buildWeeklySummaryReply(summary) };
     }
-    if (!['add', 'stage', 'note', 'next_action', 'contact', 'process_update'].includes(parsed.action)) {
+    if (!['add', 'stage', 'note', 'next_action', 'contact', 'process_update', 'bulk_process_update'].includes(parsed.action)) {
         return {
             route: 'job',
             success: false,
@@ -506,6 +675,27 @@ async function handleJobPipelineCommand(payload, options = {}) {
                     `- 회사: ${result.company.name}`,
                     `- 포지션: ${result.opportunity.title}`,
                     `- 단계: ${result.process.current_stage}`,
+                ].join('\n'),
+            };
+        }
+        if (parsed.action === 'bulk_process_update') {
+            const results = [];
+            for (const item of parsed.items || []) {
+                const result = applyProcessUpdate(item, event, payload, options);
+                if (!result) {
+                    return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${item.token}` };
+                }
+                results.push({ item, result });
+            }
+            return {
+                route: 'job',
+                success: true,
+                action: 'bulk_process_update',
+                eventId: event.eventId,
+                result: results,
+                telegramReply: [
+                    `지원 일정 ${results.length}건 반영 완료`,
+                    ...results.map(({ item }) => `- ${item.token}: ${item.nextActionTitle || actionTitleForStage(item.stage)}${item.dueAt ? ` / ${item.dueAt}` : ''}`),
                 ].join('\n'),
             };
         }
@@ -592,43 +782,9 @@ async function handleJobPipelineCommand(payload, options = {}) {
             };
         }
         if (parsed.action === 'process_update') {
-            let stageResult = null;
-            let actionResult = null;
-            let noteResult = null;
-            if (parsed.stage) {
-                stageResult = jobs.updateStage({
-                    eventId: event.eventId,
-                    rawText: payload,
-                    token: parsed.token,
-                    stage: parsed.stage,
-                    note: parsed.note,
-                }, options);
-                if (!stageResult) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
-            }
-            if (parsed.nextActionTitle && parsed.dueAt) {
-                actionResult = jobs.setNextAction({
-                    eventId: event.eventId,
-                    rawText: payload,
-                    token: parsed.token,
-                    title: parsed.nextActionTitle,
-                    dueAt: parsed.dueAt,
-                }, options);
-                if (!actionResult) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
-            }
-            if (parsed.note) {
-                noteResult = jobs.recordNote({
-                    eventId: event.eventId,
-                    rawText: payload,
-                    token: parsed.token,
-                    content: parsed.note,
-                    eventType: 'process_note',
-                    tags: parseTags(parsed.note),
-                }, options);
-                if (!noteResult) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
-            }
-            const detail = (actionResult && actionResult.detail)
-                || (stageResult && stageResult.detail)
-                || (noteResult && noteResult.detail);
+            const result = applyProcessUpdate(parsed, event, payload, options);
+            if (!result) return { route: 'job', success: false, action: 'not_found', telegramReply: `지원 기록을 찾지 못했어: ${parsed.token}` };
+            const detail = result.detail;
             const lines = [`${detail.company_name} 반영 완료`];
             if (parsed.stage) lines.push(`- 단계: ${parsed.stage}`);
             if (parsed.nextActionTitle && parsed.dueAt) lines.push(`- 다음 액션: ${parsed.nextActionTitle} / ${parsed.dueAt}`);
@@ -639,7 +795,7 @@ async function handleJobPipelineCommand(payload, options = {}) {
                 action: 'process_update',
                 eventId: event.eventId,
                 entityId: detail && detail.opportunity_id,
-                result: { stage: stageResult, nextAction: actionResult, note: noteResult, detail },
+                result,
                 telegramReply: lines.join('\n'),
             };
         }
